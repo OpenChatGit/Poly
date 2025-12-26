@@ -1,0 +1,680 @@
+# Poly API Documentation
+
+Complete reference for all Poly JavaScript APIs.
+
+## Table of Contents
+
+- [Window Control](#window-control)
+- [Multi-Window](#multi-window)
+- [Clipboard](#clipboard)
+- [Dialogs](#dialogs)
+- [File System](#file-system)
+- [Auto-Updater](#auto-updater)
+- [AI/LLM Integration](#aillm-integration)
+- [IPC (Backend Functions)](#ipc-backend-functions)
+
+---
+
+## Window Control
+
+Control the current window. Use these for custom titlebar implementation.
+
+### `poly.window.minimize()`
+
+Minimize the window (or hide to tray if configured).
+
+```javascript
+poly.window.minimize();
+```
+
+### `poly.window.maximize()`
+
+Toggle maximize/restore.
+
+```javascript
+poly.window.maximize();
+```
+
+### `poly.window.close()`
+
+Close the window (or hide to tray if configured).
+
+```javascript
+poly.window.close();
+```
+
+### `poly.window.hide()`
+
+Hide window to system tray.
+
+```javascript
+poly.window.hide();
+```
+
+### `poly.window.show()`
+
+Show and focus the window.
+
+```javascript
+poly.window.show();
+```
+
+### `poly.window.drag()`
+
+Start window drag. Call this on mousedown for custom titlebar.
+
+```javascript
+// Example: Custom titlebar
+<div class="titlebar" onmousedown="poly.window.drag()">
+  <span>My App</span>
+  <button onclick="poly.window.minimize()">─</button>
+  <button onclick="poly.window.maximize()">□</button>
+  <button onclick="poly.window.close()">✕</button>
+</div>
+```
+
+---
+
+## Multi-Window
+
+Create and manage multiple windows.
+
+### `poly.windows.create(options)`
+
+Create a new window.
+
+**Parameters:**
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `title` | string | "Poly Window" | Window title |
+| `width` | number | 800 | Window width |
+| `height` | number | 600 | Window height |
+| `url` | string | - | URL to load |
+| `html` | string | - | HTML content |
+| `resizable` | boolean | true | Allow resize |
+| `decorations` | boolean | false | Show native titlebar |
+
+**Returns:** `{ id: number }` - Window handle
+
+```javascript
+// Create window with URL
+const win = await poly.windows.create({
+  title: 'Settings',
+  width: 600,
+  height: 400,
+  url: 'http://localhost:3000/settings.html'
+});
+
+// Create window with inline HTML
+const win2 = await poly.windows.create({
+  title: 'About',
+  width: 400,
+  height: 300,
+  html: `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { margin: 0; background: #1a1a1f; color: #fff; font-family: system-ui; }
+        .titlebar { 
+          height: 32px; background: #0f0f1a; display: flex;
+          justify-content: space-between; align-items: center; padding: 0 12px;
+        }
+        .titlebar-btn { 
+          background: none; border: none; color: #888; 
+          width: 28px; height: 24px; cursor: pointer; 
+        }
+        .titlebar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .titlebar-btn.close:hover { background: #e81123; }
+        .content { padding: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="titlebar" onmousedown="poly.window.drag()">
+        <span>About</span>
+        <div>
+          <button class="titlebar-btn" onclick="poly.window.minimize()">─</button>
+          <button class="titlebar-btn" onclick="poly.window.maximize()">□</button>
+          <button class="titlebar-btn close" onclick="poly.window.close()">✕</button>
+        </div>
+      </div>
+      <div class="content">
+        <h1>My App v1.0.0</h1>
+        <p>Built with Poly</p>
+      </div>
+    </body>
+    </html>
+  `
+});
+```
+
+### `poly.windows.close(id)`
+
+Close a window by ID.
+
+```javascript
+await poly.windows.close(win.id);
+```
+
+### `poly.windows.closeAll()`
+
+Close all created windows.
+
+```javascript
+await poly.windows.closeAll();
+```
+
+### `poly.windows.list()`
+
+Get array of all window IDs.
+
+```javascript
+const ids = await poly.windows.list();
+// [1, 2, 3]
+```
+
+### `poly.windows.count()`
+
+Get number of open windows.
+
+```javascript
+const count = await poly.windows.count();
+```
+
+---
+
+## Clipboard
+
+Read and write system clipboard.
+
+### `poly.clipboard.read()`
+
+Read text from clipboard.
+
+```javascript
+const text = await poly.clipboard.read();
+console.log(text);
+```
+
+### `poly.clipboard.write(text)`
+
+Write text to clipboard.
+
+```javascript
+await poly.clipboard.write('Hello World');
+```
+
+### `poly.clipboard.clear()`
+
+Clear clipboard contents.
+
+```javascript
+await poly.clipboard.clear();
+```
+
+---
+
+## Dialogs
+
+Native file dialogs and custom in-app dialogs.
+
+### `poly.dialog.open(options?)`
+
+Open file picker dialog.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `title` | string | Dialog title |
+| `filters` | array | File type filters |
+
+**Returns:** `string | null` - Selected file path or null if cancelled
+
+```javascript
+const file = await poly.dialog.open({
+  title: 'Select Image',
+  filters: [['Images', ['png', 'jpg', 'gif']]]
+});
+
+if (file) {
+  console.log('Selected:', file);
+}
+```
+
+### `poly.dialog.openMultiple(options?)`
+
+Open file picker for multiple files.
+
+**Returns:** `string[]` - Array of selected file paths
+
+```javascript
+const files = await poly.dialog.openMultiple({
+  title: 'Select Files'
+});
+```
+
+### `poly.dialog.save(options?)`
+
+Open save file dialog.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `title` | string | Dialog title |
+| `defaultName` | string | Default filename |
+| `filters` | array | File type filters |
+
+**Returns:** `string | null` - Selected save path or null
+
+```javascript
+const path = await poly.dialog.save({
+  title: 'Save Document',
+  defaultName: 'document.txt'
+});
+```
+
+### `poly.dialog.folder(options?)`
+
+Open folder picker dialog.
+
+**Returns:** `string | null` - Selected folder path or null
+
+```javascript
+const folder = await poly.dialog.folder({
+  title: 'Select Output Folder'
+});
+```
+
+### `poly.dialog.message(title, message, level?)`
+
+Show a message dialog.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `title` | string | Dialog title |
+| `message` | string | Message content |
+| `level` | string | 'info', 'warning', or 'error' |
+
+```javascript
+await poly.dialog.message('Success', 'File saved successfully!', 'info');
+await poly.dialog.message('Warning', 'This action cannot be undone', 'warning');
+await poly.dialog.message('Error', 'Failed to save file', 'error');
+```
+
+### `poly.dialog.confirm(title, message)`
+
+Show a confirmation dialog.
+
+**Returns:** `boolean` - true if confirmed, false if cancelled
+
+```javascript
+const confirmed = await poly.dialog.confirm(
+  'Delete File?',
+  'Are you sure you want to delete this file?'
+);
+
+if (confirmed) {
+  // Delete the file
+}
+```
+
+### `poly.dialog.custom(options)`
+
+Show a fully custom dialog.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `type` | string | 'info', 'warning', 'error', 'confirm' |
+| `title` | string | Dialog title |
+| `message` | string | Message content |
+| `buttons` | array | Button definitions |
+
+**Button definition:**
+| Property | Type | Description |
+|----------|------|-------------|
+| `text` | string | Button label |
+| `value` | any | Return value when clicked |
+| `primary` | boolean | Primary button styling |
+
+**Returns:** Button value or null if dismissed
+
+```javascript
+const result = await poly.dialog.custom({
+  type: 'warning',
+  title: 'Unsaved Changes',
+  message: 'Do you want to save before closing?',
+  buttons: [
+    { text: 'Discard', value: 'discard' },
+    { text: 'Cancel', value: 'cancel' },
+    { text: 'Save', value: 'save', primary: true }
+  ]
+});
+
+switch (result) {
+  case 'save': await saveFile(); break;
+  case 'discard': closeWithoutSaving(); break;
+  case 'cancel': /* do nothing */ break;
+}
+```
+
+---
+
+## File System
+
+Read and write files.
+
+### `poly.fs.read(path)`
+
+Read file contents as string.
+
+```javascript
+const content = await poly.fs.read('config.json');
+const config = JSON.parse(content);
+```
+
+### `poly.fs.write(path, content)`
+
+Write string content to file.
+
+```javascript
+await poly.fs.write('config.json', JSON.stringify(config, null, 2));
+```
+
+### `poly.fs.exists(path)`
+
+Check if file or directory exists.
+
+**Returns:** `boolean`
+
+```javascript
+if (await poly.fs.exists('config.json')) {
+  // Load config
+}
+```
+
+### `poly.fs.readDir(path)`
+
+List directory contents.
+
+**Returns:** `string[]` - Array of filenames
+
+```javascript
+const files = await poly.fs.readDir('./documents');
+```
+
+---
+
+## Auto-Updater
+
+Check for and install updates from GitHub Releases.
+
+### `poly.updater.checkGithub(repo, currentVersion)`
+
+Check GitHub for updates.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `repo` | string | GitHub repo (e.g., 'user/repo') |
+| `currentVersion` | string | Current app version |
+
+**Returns:**
+```javascript
+{
+  update_available: boolean,
+  latest_version: string,
+  current_version: string,
+  download_url: string | null,
+  release_notes: string | null
+}
+```
+
+```javascript
+const info = await poly.updater.checkGithub('myuser/myapp', '1.0.0');
+
+if (info.update_available) {
+  console.log('New version:', info.latest_version);
+}
+```
+
+### `poly.updater.download(url)`
+
+Download update file.
+
+**Returns:** `string` - Path to downloaded file
+
+```javascript
+const path = await poly.updater.download(info.download_url);
+```
+
+### `poly.updater.install(path)`
+
+Install downloaded update.
+
+```javascript
+await poly.updater.install(path);
+```
+
+### `poly.updater.checkAndPrompt(options)`
+
+Convenience method: check, prompt user, download, and install.
+
+```javascript
+await poly.updater.checkAndPrompt({
+  repo: 'myuser/myapp',
+  currentVersion: '1.0.0'
+});
+```
+
+---
+
+## AI/LLM Integration
+
+Built-in support for AI chat APIs.
+
+### `poly.ai.ollama(model, messages)`
+
+Chat with local Ollama.
+
+```javascript
+const response = await poly.ai.ollama('llama3', [
+  { role: 'user', content: 'Hello!' }
+]);
+
+console.log(response.content);
+```
+
+### `poly.ai.openai(model, messages, apiKey)`
+
+Chat with OpenAI.
+
+```javascript
+const response = await poly.ai.openai('gpt-4', [
+  { role: 'system', content: 'You are helpful.' },
+  { role: 'user', content: 'Hello!' }
+], 'sk-your-api-key');
+```
+
+### `poly.ai.anthropic(model, messages, apiKey, options?)`
+
+Chat with Anthropic Claude.
+
+```javascript
+const response = await poly.ai.anthropic(
+  'claude-3-5-sonnet-20241022',
+  [{ role: 'user', content: 'Explain quantum computing' }],
+  'your-api-key',
+  { enableThinking: true, thinkingBudget: 10000 }
+);
+
+console.log(response.thinking); // Reasoning process
+console.log(response.content);  // Final answer
+```
+
+### `poly.ai.custom(baseUrl, model, messages)`
+
+Chat with OpenAI-compatible APIs (LM Studio, LocalAI, etc).
+
+```javascript
+const response = await poly.ai.custom(
+  'http://localhost:1234/v1',
+  'local-model',
+  [{ role: 'user', content: 'Hello!' }]
+);
+```
+
+### `poly.ai.checkOllama()`
+
+Check if Ollama is running.
+
+**Returns:** `boolean`
+
+```javascript
+if (await poly.ai.checkOllama()) {
+  // Ollama is available
+}
+```
+
+### `poly.ai.listModels()`
+
+List available Ollama models.
+
+**Returns:** `string[]`
+
+```javascript
+const models = await poly.ai.listModels();
+// ['llama3', 'codellama', 'mistral']
+```
+
+---
+
+## IPC (Backend Functions)
+
+Call functions defined in `main.poly`.
+
+### `poly.invoke(functionName, args?)`
+
+Call a backend function.
+
+```javascript
+// In main.poly:
+// fn greet(name) { return "Hello, " + name }
+
+const result = await poly.invoke('greet', { name: 'World' });
+// "Hello, World"
+```
+
+---
+
+## Custom Titlebar Example
+
+Complete example of a custom frameless titlebar:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a1f; color: #fff; font-family: system-ui; }
+    
+    .titlebar {
+      height: 32px;
+      background: #0f0f1a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 12px;
+      -webkit-app-region: drag; /* Makes titlebar draggable */
+      user-select: none;
+    }
+    
+    .titlebar-title {
+      font-size: 12px;
+      color: #888;
+    }
+    
+    .titlebar-buttons {
+      display: flex;
+      gap: 4px;
+      -webkit-app-region: no-drag; /* Buttons are clickable */
+    }
+    
+    .titlebar-btn {
+      width: 28px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+      font-size: 12px;
+      border-radius: 4px;
+    }
+    
+    .titlebar-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+    }
+    
+    .titlebar-btn.close:hover {
+      background: #e81123;
+    }
+    
+    .content {
+      padding: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="titlebar" onmousedown="poly.window.drag()">
+    <div class="titlebar-title">My App</div>
+    <div class="titlebar-buttons">
+      <button class="titlebar-btn" onclick="poly.window.minimize()">─</button>
+      <button class="titlebar-btn" onclick="poly.window.maximize()">□</button>
+      <button class="titlebar-btn close" onclick="poly.window.close()">✕</button>
+    </div>
+  </div>
+  
+  <div class="content">
+    <h1>Welcome</h1>
+    <p>Your app content here</p>
+  </div>
+</body>
+</html>
+```
+
+---
+
+## System Tray Configuration
+
+Configure in `poly.toml`:
+
+```toml
+[tray]
+enabled = true
+tooltip = "My App"
+minimize_to_tray = false
+close_to_tray = true
+
+[[tray.menu]]
+id = "show"
+label = "Show Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "settings"
+label = "Settings"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
+```
+
+**Special menu IDs:**
+- `show` — Shows and focuses the window
+- `quit` or `exit` — Exits the application
+- `separator` — Adds a separator line
