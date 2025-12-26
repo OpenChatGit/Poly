@@ -1,6 +1,6 @@
 [package]
 name = "poly"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
 authors = ["Poly Team"]
@@ -46,11 +46,13 @@ sha2 = { version = "0.10", optional = true }
 # Tarball extraction for npm packages
 flate2 = { version = "1.0", optional = true }
 tar = { version = "0.4", optional = true }
+# Clipboard
+arboard = { version = "3.4", optional = true }
 
 [features]
 default = []
 wasm = ["wasm-bindgen"]
-native = ["wry", "tao", "image", "rfd", "reqwest", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar"]
+native = ["wry", "tao", "image", "rfd", "reqwest", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar", "arboard"]
 
 [lib]
 name = "poly"

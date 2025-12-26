@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.4";
+const VERSION: &str = "0.2.5";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -384,7 +384,7 @@ fn run_file_result(file: &str) -> Result<(), String> {
 
 fn run_repl() {
     println!();
-    println!("  {}POLY{} v0.2.4", CYAN, RESET);
+    println!("  {}POLY{} v0.2.5", CYAN, RESET);
     println!("  {}Type 'exit' to quit{}", DIM, RESET);
     println!();
     
@@ -435,7 +435,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry = entry.unwrap();
     
     println!();
-    println!("  {}POLY{} v0.2.4  {}dev server{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.5  {}dev server{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local:   {}http://localhost:{}{}", GREEN, RESET, CYAN, port, RESET);
     println!("  {}>{} Entry:   {}{}{}", DIM, RESET, DIM, entry.display(), RESET);
@@ -640,6 +640,15 @@ window.poly = {{
     close() {{ if (window.ipc) window.ipc.postMessage('close'); }},
     hide() {{ if (window.ipc) window.ipc.postMessage('hide'); }},
     show() {{ if (window.ipc) window.ipc.postMessage('show'); }}
+  }},
+  clipboard: {{
+    async read() {{ return poly.invoke('__poly_clipboard_read', {{}}); }},
+    async write(text) {{ return poly.invoke('__poly_clipboard_write', {{ text }}); }},
+    async clear() {{ return poly.invoke('__poly_clipboard_clear', {{}}); }}
+  }},
+  windows: {{
+    async create(options = {{}}) {{ return poly.invoke('__poly_window_create', options); }},
+    async count() {{ return poly.invoke('__poly_window_count', {{}}); }}
   }}
 }};
 // Initialize Lucide Icons
@@ -1112,6 +1121,89 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
                 serde_json::json!({"error": "Native feature not enabled"}).to_string()
             }
         }
+        // Clipboard APIs
+        "__poly_clipboard_read" => {
+            #[cfg(feature = "native")]
+            {
+                match poly::clipboard::read_text() {
+                    Ok(text) => serde_json::json!({"result": text}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_clipboard_write" => {
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::clipboard::write_text(text) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_clipboard_clear" => {
+            #[cfg(feature = "native")]
+            {
+                match poly::clipboard::clear() {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        // Multi-Window APIs
+        "__poly_window_create" => {
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("New Window");
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+            let url = args.get("url").and_then(|v| v.as_str());
+            let html = args.get("html").and_then(|v| v.as_str());
+            
+            #[cfg(feature = "native")]
+            {
+                let mut config = poly::window::WindowConfig::new(title)
+                    .with_size(width, height);
+                
+                if let Some(u) = url {
+                    config = config.with_url(u);
+                }
+                if let Some(h) = html {
+                    config = config.with_html(h);
+                }
+                
+                match poly::window::create_window(config) {
+                    Ok(handle) => serde_json::json!({"result": {"id": handle.id}}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_count" => {
+            #[cfg(feature = "native")]
+            {
+                let count = poly::window::window_count();
+                serde_json::json!({"result": count}).to_string()
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"result": 0}).to_string()
+            }
+        }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
     }
 }
@@ -1324,7 +1416,7 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
         .ok_or_else(|| "No entry point found".to_string())?;
     
     println!();
-    println!("  {}POLY{} v0.2.4  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
+    println!("  {}POLY{} v0.2.5  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
     println!();
     
     let start = std::time::Instant::now();
@@ -1435,7 +1527,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let port = 9473u16;
     
     println!();
-    println!("  {}POLY{} v0.2.4  {}native{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.5  {}native{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
@@ -1945,6 +2037,15 @@ window.poly = {
     close() { if (window.ipc) window.ipc.postMessage('close'); },
     hide() { if (window.ipc) window.ipc.postMessage('hide'); },
     show() { if (window.ipc) window.ipc.postMessage('show'); }
+  },
+  clipboard: {
+    async read() { return poly.invoke('__poly_clipboard_read', {}); },
+    async write(text) { return poly.invoke('__poly_clipboard_write', { text }); },
+    async clear() { return poly.invoke('__poly_clipboard_clear', {}); }
+  },
+  windows: {
+    async create(options = {}) { return poly.invoke('__poly_window_create', options); },
+    async count() { return poly.invoke('__poly_window_count', {}); }
   }
 };
 // Initialize Lucide Icons
@@ -2147,7 +2248,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
 fn create_project(name: &str, template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.4", CYAN, RESET);
+    println!("  {}POLY{} v0.2.5", CYAN, RESET);
     println!();
     
     let project_path = Path::new(name);
@@ -2614,7 +2715,7 @@ fn add(a, b):
 
 fn init_project(_template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.4", CYAN, RESET);
+    println!("  {}POLY{} v0.2.5", CYAN, RESET);
     println!();
     
     let cwd = std::env::current_dir().expect("Failed to get current directory");

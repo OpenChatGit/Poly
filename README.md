@@ -8,8 +8,10 @@ Poly is a modern framework for building cross-platform desktop applications usin
 
 ## Features
 
-- **Lightweight** — Small binary size (~10MB), fast startup
+- **Lightweight** — Small binary size (~7MB), fast startup
 - **Custom Titlebar** — Beautiful frameless windows by default
+- **Multi-Window** — Create multiple windows from JavaScript
+- **Clipboard API** — Read/write text to system clipboard
 - **System Tray** — Run apps in background with customizable tray menu
 - **Native Dialogs** — File open/save, folder picker, message boxes
 - **Auto-Updater** — Built-in update system with GitHub Releases support
@@ -257,6 +259,42 @@ poly.window.hide();      // Hide to tray
 poly.window.show();      // Show and focus window
 ```
 
+### Multi-Window
+
+```javascript
+// Create a new window
+const win = await poly.windows.create({
+  title: 'Settings',
+  width: 600,
+  height: 400,
+  url: 'http://localhost:3000/settings.html'
+});
+
+// Or with inline HTML
+const win2 = await poly.windows.create({
+  title: 'About',
+  width: 400,
+  height: 300,
+  html: '<html><body><h1>About</h1></body></html>'
+});
+
+// Get window count
+const count = await poly.windows.count();
+```
+
+### Clipboard
+
+```javascript
+// Read text from clipboard
+const text = await poly.clipboard.read();
+
+// Write text to clipboard
+await poly.clipboard.write('Hello World');
+
+// Clear clipboard
+await poly.clipboard.clear();
+```
+
 ### Auto-Updater
 
 ```javascript
@@ -468,6 +506,8 @@ dist/
 | Memory Usage | Low | High | Low |
 | Package Manager | UV-style fast | npm | npm/cargo |
 | Cross-Platform Build | Built-in + CI | electron-builder | tauri-action |
+| Multi-Window | Built-in | Built-in | Built-in |
+| Clipboard API | Built-in | Built-in | Plugin |
 | Custom Titlebar | Built-in | Manual | Manual |
 | System Tray | Built-in | Plugin | Plugin |
 | Auto-Updater | Built-in | Plugin | Plugin |

@@ -7,6 +7,8 @@ pub mod native;
 pub mod updater;
 pub mod tray;
 pub mod ai;
+pub mod clipboard;
+pub mod window;
 
 use lexer::Lexer;
 use parser::Parser;
