@@ -56,66 +56,57 @@ cargo install --path poly --features native
 | `poly dev` | Start dev server with hot reload |
 | `poly run --native` | Run as native desktop app |
 | `poly build` | Build for production |
-| `poly add <package>` | Add a JavaScript package |
+| `poly add <package>` | Add a JavaScript package (from npm) |
 | `poly remove <package>` | Remove a package |
+| `poly install` | Install packages from poly.lock |
 | `poly update` | Check for updates |
 | `poly --version` | Show version and check for updates |
 
 ## Package Management
 
-Poly has a built-in package manager for JavaScript libraries. No npm or node_modules needed!
+Poly has a UV-style fast package manager that uses the npm registry directly. No npm or Node.js installation required!
 
 ```bash
-# Add packages from npm/CDN
+# Add any npm package
 poly add alpinejs
-poly add chart.js
-poly add three
+poly add express
 poly add lodash
 
 # Add specific version
 poly add alpinejs -v 3.14.0
 
 # Remove packages
-poly remove chart.js
+poly remove express
+
+# Install from lockfile (like npm ci)
+poly install
 ```
+
+### Features
+
+- **UV-Style Speed** — Parallel downloads with thread pool (~4s for 65 packages)
+- **Full Dependency Resolution** — Automatically resolves and installs all sub-dependencies
+- **npm Registry** — Works with any package from npmjs.org
+- **Lockfile** — `poly.lock` with SHA256 integrity hashes for reproducible builds
+- **Zero Config** — No npm, yarn, or Node.js needed
 
 ### How It Works
 
-- Packages are downloaded to `packages/<name>/` folder
-- Dependencies are tracked in `poly.toml` under `[dependencies]`
-- `packages/` is automatically added to `.gitignore`
-- Server automatically serves `/packages/` route
+1. Fetches package metadata from npm registry
+2. Resolves full dependency tree recursively
+3. Downloads all packages in parallel (UV-style)
+4. Extracts to `packages/<name>/` folder
+5. Creates `poly.lock` with integrity hashes
+6. Updates `poly.toml` dependencies
 
 ### Using Packages in HTML
 
 ```html
 <!-- In your web/index.html -->
-<script src="/packages/alpinejs/alpine.min.js" defer></script>
-<script src="/packages/chart.js/chart.min.js"></script>
+<script src="/packages/alpinejs/dist/cdn.min.js" defer></script>
+<script src="/packages/chart.js/dist/chart.umd.js"></script>
 <script src="/packages/lodash/lodash.min.js"></script>
 ```
-
-### Supported Packages
-
-| Package | Command |
-|---------|---------|
-| Alpine.js | `poly add alpinejs` |
-| Chart.js | `poly add chart.js` |
-| Three.js | `poly add three` |
-| Lodash | `poly add lodash` |
-| Axios | `poly add axios` |
-| Day.js | `poly add dayjs` |
-| Marked | `poly add marked` |
-| Highlight.js | `poly add highlight.js` |
-| GSAP | `poly add gsap` |
-| Anime.js | `poly add anime` |
-| D3.js | `poly add d3` |
-| Vue | `poly add vue` |
-| Preact | `poly add preact` |
-| HTMX | `poly add htmx` |
-| Tailwind CSS | `poly add tailwind` |
-| Lucide Icons | `poly add lucide` |
-| Leaflet | `poly add leaflet` |
 
 ### poly.toml Dependencies
 
@@ -126,8 +117,27 @@ version = "1.0.0"
 
 [dependencies]
 alpinejs = "3.14.3"
-"chart.js" = "4.5.1"
+express = "4.18.2"
 lodash = "4.17.21"
+```
+
+### poly.lock
+
+The lockfile ensures reproducible builds across machines:
+
+```json
+{
+  "alpinejs": {
+    "version": "3.14.3",
+    "integrity": "sha256-...",
+    "dependencies": []
+  },
+  "express": {
+    "version": "4.18.2",
+    "integrity": "sha256-...",
+    "dependencies": ["body-parser", "cookie", ...]
+  }
+}
 ```
 
 ## Project Structure
@@ -135,9 +145,11 @@ lodash = "4.17.21"
 ```
 my-app/
 ├── poly.toml           # Project configuration
+├── poly.lock           # Lockfile with integrity hashes
 ├── packages/           # JavaScript dependencies (auto-managed)
 │   ├── alpinejs/
-│   └── chart.js/
+│   ├── lodash/
+│   └── ...             # + all sub-dependencies
 ├── src/
 │   └── main.poly       # Backend logic (optional)
 ├── web/
@@ -397,8 +409,9 @@ Poly has built-in auto-update support:
 
 | Feature | Poly | Electron | Tauri |
 |---------|------|----------|-------|
-| Binary Size | ~10MB | ~150MB | ~5MB |
+| Binary Size | ~7MB | ~150MB | ~5MB |
 | Memory Usage | Low | High | Low |
+| Package Manager | UV-style fast | npm | npm/cargo |
 | Custom Titlebar | Built-in | Manual | Manual |
 | System Tray | Built-in | Plugin | Plugin |
 | Auto-Updater | Built-in | Plugin | Plugin |
