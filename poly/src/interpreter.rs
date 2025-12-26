@@ -1,6 +1,24 @@
 use std::collections::HashMap;
 use crate::ast::*;
 
+// Global stream sessions for HTTP streaming
+#[cfg(feature = "native")]
+use std::sync::Mutex;
+#[cfg(feature = "native")]
+use once_cell::sync::Lazy;
+
+#[cfg(feature = "native")]
+struct StreamSession {
+    buffer: Vec<String>,
+    done: bool,
+    error: Option<String>,
+}
+
+#[cfg(feature = "native")]
+static STREAM_SESSIONS: Lazy<Mutex<HashMap<u64, StreamSession>>> = Lazy::new(|| {
+    Mutex::new(HashMap::new())
+});
+
 /// Process escape sequences in a string
 fn process_escapes(s: &str) -> String {
     // Order matters: process \\ last to avoid double-processing
@@ -97,6 +115,12 @@ impl Interpreter {
             "push", "pop", "insert", "remove", "index", "clear", "copy", "extend",
             // File I/O
             "read_file", "write_file", "file_exists",
+            // HTTP (low-level primitives - user implements their own logic)
+            "http_get", "http_post", "http_post_json",
+            // HTTP Streaming (for SSE/chunked responses)
+            "http_stream_start", "http_stream_poll", "http_stream_close",
+            // JSON
+            "json_parse", "json_stringify",
         ];
         for name in builtins {
             self.globals.insert(name.to_string(), Value::NativeFunction(name.to_string()));
@@ -1111,6 +1135,434 @@ impl Interpreter {
             "file_exists" => match args.get(0) {
                 Some(Value::String(path)) => Ok(Value::Bool(std::path::Path::new(path).exists())),
                 _ => Err(self.error("file_exists() requires a path string")),
+            }
+            // HTTP Functions
+            "http_get" => {
+                // http_get(url) -> string or dict with response
+                #[cfg(feature = "native")]
+                {
+                    let url = match args.get(0) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("http_get() requires a URL string")),
+                    };
+                    
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .map_err(|e| self.error(format!("HTTP client error: {}", e)))?;
+                    
+                    match client.get(&url).send() {
+                        Ok(resp) => {
+                            let status = resp.status().as_u16() as i64;
+                            let body = resp.text().unwrap_or_default();
+                            
+                            // Return a dict with status and body
+                            Ok(Value::Dict(vec![
+                                (Value::String("status".to_string()), Value::Int(status)),
+                                (Value::String("body".to_string()), Value::String(body)),
+                            ]))
+                        }
+                        Err(e) => Err(self.error(format!("HTTP request failed: {}", e))),
+                    }
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_get() requires native feature"))
+                }
+            }
+            "http_post" => {
+                // http_post(url, body, content_type?) -> dict with response
+                #[cfg(feature = "native")]
+                {
+                    let url = match args.get(0) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("http_post() requires a URL string")),
+                    };
+                    let body = match args.get(1) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("http_post() requires a body string")),
+                    };
+                    let content_type = match args.get(2) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => "application/json".to_string(),
+                    };
+                    
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(300))
+                        .build()
+                        .map_err(|e| self.error(format!("HTTP client error: {}", e)))?;
+                    
+                    match client.post(&url)
+                        .header("Content-Type", &content_type)
+                        .body(body)
+                        .send() 
+                    {
+                        Ok(resp) => {
+                            let status = resp.status().as_u16() as i64;
+                            let body = resp.text().unwrap_or_default();
+                            
+                            Ok(Value::Dict(vec![
+                                (Value::String("status".to_string()), Value::Int(status)),
+                                (Value::String("body".to_string()), Value::String(body)),
+                            ]))
+                        }
+                        Err(e) => Err(self.error(format!("HTTP request failed: {}", e))),
+                    }
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_post() requires native feature"))
+                }
+            }
+            "http_post_json" => {
+                // http_post_json(url, data_dict) -> dict with parsed JSON response
+                #[cfg(feature = "native")]
+                {
+                    let url = match args.get(0) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("http_post_json() requires a URL string")),
+                    };
+                    
+                    // Convert Value to JSON
+                    fn value_to_json(v: &Value) -> serde_json::Value {
+                        match v {
+                            Value::None => serde_json::Value::Null,
+                            Value::Bool(b) => serde_json::Value::Bool(*b),
+                            Value::Int(i) => serde_json::Value::Number((*i).into()),
+                            Value::Float(f) => serde_json::json!(*f),
+                            Value::String(s) => serde_json::Value::String(s.clone()),
+                            Value::List(items) => serde_json::Value::Array(
+                                items.iter().map(value_to_json).collect()
+                            ),
+                            Value::Dict(pairs) => {
+                                let mut map = serde_json::Map::new();
+                                for (k, v) in pairs {
+                                    if let Value::String(key) = k {
+                                        map.insert(key.clone(), value_to_json(v));
+                                    }
+                                }
+                                serde_json::Value::Object(map)
+                            }
+                            _ => serde_json::Value::Null,
+                        }
+                    }
+                    
+                    fn json_to_value(j: &serde_json::Value) -> Value {
+                        match j {
+                            serde_json::Value::Null => Value::None,
+                            serde_json::Value::Bool(b) => Value::Bool(*b),
+                            serde_json::Value::Number(n) => {
+                                if let Some(i) = n.as_i64() {
+                                    Value::Int(i)
+                                } else if let Some(f) = n.as_f64() {
+                                    Value::Float(f)
+                                } else {
+                                    Value::None
+                                }
+                            }
+                            serde_json::Value::String(s) => Value::String(s.clone()),
+                            serde_json::Value::Array(arr) => Value::List(
+                                arr.iter().map(json_to_value).collect()
+                            ),
+                            serde_json::Value::Object(obj) => Value::Dict(
+                                obj.iter().map(|(k, v)| (Value::String(k.clone()), json_to_value(v))).collect()
+                            ),
+                        }
+                    }
+                    
+                    let json_body = match args.get(1) {
+                        Some(v) => value_to_json(v),
+                        _ => return Err(self.error("http_post_json() requires data")),
+                    };
+                    
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(300))
+                        .build()
+                        .map_err(|e| self.error(format!("HTTP client error: {}", e)))?;
+                    
+                    match client.post(&url)
+                        .header("Content-Type", "application/json")
+                        .json(&json_body)
+                        .send() 
+                    {
+                        Ok(resp) => {
+                            let status = resp.status().as_u16() as i64;
+                            let body_text = resp.text().unwrap_or_default();
+                            
+                            // Try to parse as JSON
+                            let body_value = match serde_json::from_str::<serde_json::Value>(&body_text) {
+                                Ok(json) => json_to_value(&json),
+                                Err(_) => Value::String(body_text),
+                            };
+                            
+                            Ok(Value::Dict(vec![
+                                (Value::String("status".to_string()), Value::Int(status)),
+                                (Value::String("body".to_string()), body_value),
+                            ]))
+                        }
+                        Err(e) => Err(self.error(format!("HTTP request failed: {}", e))),
+                    }
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_post_json() requires native feature"))
+                }
+            }
+            // JSON functions
+            "json_parse" => {
+                // json_parse(string) -> value
+                let json_str = match args.get(0) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err(self.error("json_parse() requires a string")),
+                };
+                
+                fn json_to_value(j: &serde_json::Value) -> Value {
+                    match j {
+                        serde_json::Value::Null => Value::None,
+                        serde_json::Value::Bool(b) => Value::Bool(*b),
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                Value::Int(i)
+                            } else if let Some(f) = n.as_f64() {
+                                Value::Float(f)
+                            } else {
+                                Value::None
+                            }
+                        }
+                        serde_json::Value::String(s) => Value::String(s.clone()),
+                        serde_json::Value::Array(arr) => Value::List(
+                            arr.iter().map(json_to_value).collect()
+                        ),
+                        serde_json::Value::Object(obj) => Value::Dict(
+                            obj.iter().map(|(k, v)| (Value::String(k.clone()), json_to_value(v))).collect()
+                        ),
+                    }
+                }
+                
+                match serde_json::from_str::<serde_json::Value>(&json_str) {
+                    Ok(json) => Ok(json_to_value(&json)),
+                    Err(e) => Err(self.error(format!("JSON parse error: {}", e))),
+                }
+            }
+            "json_stringify" => {
+                // json_stringify(value) -> string
+                fn value_to_json(v: &Value) -> serde_json::Value {
+                    match v {
+                        Value::None => serde_json::Value::Null,
+                        Value::Bool(b) => serde_json::Value::Bool(*b),
+                        Value::Int(i) => serde_json::Value::Number((*i).into()),
+                        Value::Float(f) => serde_json::json!(*f),
+                        Value::String(s) => serde_json::Value::String(s.clone()),
+                        Value::List(items) => serde_json::Value::Array(
+                            items.iter().map(value_to_json).collect()
+                        ),
+                        Value::Dict(pairs) => {
+                            let mut map = serde_json::Map::new();
+                            for (k, v) in pairs {
+                                if let Value::String(key) = k {
+                                    map.insert(key.clone(), value_to_json(v));
+                                }
+                            }
+                            serde_json::Value::Object(map)
+                        }
+                        _ => serde_json::Value::Null,
+                    }
+                }
+                
+                match args.get(0) {
+                    Some(v) => Ok(Value::String(value_to_json(v).to_string())),
+                    None => Err(self.error("json_stringify() requires a value")),
+                }
+            }
+            // HTTP Streaming functions
+            "http_stream_start" => {
+                // http_stream_start(url, body_json) -> session_id
+                // Starts a streaming POST request in background, returns session ID
+                #[cfg(feature = "native")]
+                {
+                    let url = match args.get(0) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("http_stream_start() requires a URL string")),
+                    };
+                    
+                    // Convert Value to JSON for request body
+                    fn value_to_json(v: &Value) -> serde_json::Value {
+                        match v {
+                            Value::None => serde_json::Value::Null,
+                            Value::Bool(b) => serde_json::Value::Bool(*b),
+                            Value::Int(i) => serde_json::Value::Number((*i).into()),
+                            Value::Float(f) => serde_json::json!(*f),
+                            Value::String(s) => serde_json::Value::String(s.clone()),
+                            Value::List(items) => serde_json::Value::Array(
+                                items.iter().map(value_to_json).collect()
+                            ),
+                            Value::Dict(pairs) => {
+                                let mut map = serde_json::Map::new();
+                                for (k, v) in pairs {
+                                    if let Value::String(key) = k {
+                                        map.insert(key.clone(), value_to_json(v));
+                                    }
+                                }
+                                serde_json::Value::Object(map)
+                            }
+                            _ => serde_json::Value::Null,
+                        }
+                    }
+                    
+                    let json_body = match args.get(1) {
+                        Some(v) => value_to_json(v),
+                        _ => return Err(self.error("http_stream_start() requires body data")),
+                    };
+                    
+                    // Generate session ID using atomic counter + milliseconds (fits in JS safe integer range)
+                    use std::sync::atomic::{AtomicU64, Ordering};
+                    static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+                    let counter = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
+                    let millis = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64;
+                    // Use lower bits of millis + counter to stay within JS safe integer range
+                    let session_id = ((millis & 0xFFFFFFFF) << 16) | (counter & 0xFFFF);
+                    
+                    // Initialize session
+                    {
+                        let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                        sessions.insert(session_id, StreamSession {
+                            buffer: Vec::new(),
+                            done: false,
+                            error: None,
+                        });
+                    }
+                    
+                    // Spawn background thread for streaming
+                    let url_clone = url.clone();
+                    let session_id_clone = session_id;
+                    std::thread::spawn(move || {
+                        let client = match reqwest::blocking::Client::builder()
+                            .timeout(std::time::Duration::from_secs(300))
+                            .build() 
+                        {
+                            Ok(c) => c,
+                            Err(e) => {
+                                let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                                if let Some(session) = sessions.get_mut(&session_id_clone) {
+                                    session.error = Some(format!("Client error: {}", e));
+                                    session.done = true;
+                                }
+                                return;
+                            }
+                        };
+                        
+                        let response = match client.post(&url_clone)
+                            .header("Content-Type", "application/json")
+                            .json(&json_body)
+                            .send()
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                                if let Some(session) = sessions.get_mut(&session_id_clone) {
+                                    session.error = Some(format!("Request error: {}", e));
+                                    session.done = true;
+                                }
+                                return;
+                            }
+                        };
+                        
+                        // Read streaming response line by line (NDJSON format)
+                        use std::io::BufRead;
+                        let reader = std::io::BufReader::new(response);
+                        for line in reader.lines() {
+                            match line {
+                                Ok(line) if !line.is_empty() => {
+                                    let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                                    if let Some(session) = sessions.get_mut(&session_id_clone) {
+                                        session.buffer.push(line);
+                                    }
+                                }
+                                Err(e) => {
+                                    let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                                    if let Some(session) = sessions.get_mut(&session_id_clone) {
+                                        session.error = Some(format!("Read error: {}", e));
+                                        session.done = true;
+                                    }
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
+                        
+                        // Mark as done
+                        let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                        if let Some(session) = sessions.get_mut(&session_id_clone) {
+                            session.done = true;
+                        }
+                    });
+                    
+                    Ok(Value::Int(session_id as i64))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_stream_start() requires native feature"))
+                }
+            }
+            "http_stream_poll" => {
+                // http_stream_poll(session_id) -> { chunks: [...], done: bool, error: string|null }
+                #[cfg(feature = "native")]
+                {
+                    let session_id = match args.get(0) {
+                        Some(Value::Int(id)) => *id as u64,
+                        _ => return Err(self.error("http_stream_poll() requires session ID")),
+                    };
+                    
+                    let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                    if let Some(session) = sessions.get_mut(&session_id) {
+                        // Drain buffer
+                        let chunks: Vec<Value> = session.buffer.drain(..)
+                            .map(|s| Value::String(s))
+                            .collect();
+                        
+                        let error_val = match &session.error {
+                            Some(e) => Value::String(e.clone()),
+                            None => Value::None,
+                        };
+                        
+                        Ok(Value::Dict(vec![
+                            (Value::String("chunks".to_string()), Value::List(chunks)),
+                            (Value::String("done".to_string()), Value::Bool(session.done)),
+                            (Value::String("error".to_string()), error_val),
+                        ]))
+                    } else {
+                        Ok(Value::Dict(vec![
+                            (Value::String("chunks".to_string()), Value::List(vec![])),
+                            (Value::String("done".to_string()), Value::Bool(true)),
+                            (Value::String("error".to_string()), Value::String("Session not found".to_string())),
+                        ]))
+                    }
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_stream_poll() requires native feature"))
+                }
+            }
+            "http_stream_close" => {
+                // http_stream_close(session_id) -> bool
+                #[cfg(feature = "native")]
+                {
+                    let session_id = match args.get(0) {
+                        Some(Value::Int(id)) => *id as u64,
+                        _ => return Err(self.error("http_stream_close() requires session ID")),
+                    };
+                    
+                    let mut sessions = STREAM_SESSIONS.lock().unwrap();
+                    let removed = sessions.remove(&session_id).is_some();
+                    Ok(Value::Bool(removed))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_stream_close() requires native feature"))
+                }
             }
             // Additional utility functions
             "chr" => match args.get(0) {
