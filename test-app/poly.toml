@@ -1,0 +1,22 @@
+[package]
+name = "test-app"
+version = "0.1.0"
+
+[web]
+dir = "web"
+
+[window]
+width = 1024
+height = 768
+resizable = true
+
+# System Tray (optional)
+# [tray]
+# enabled = true
+# tooltip = "My App"
+# minimize_to_tray = false
+# close_to_tray = false
+
+# JavaScript Dependencies (managed by poly add/remove)
+# Example: poly add alpinejs
+[dependencies]
