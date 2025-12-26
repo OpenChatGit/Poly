@@ -1,20 +1,21 @@
-# 🔷 Poly
+# Poly
 
 **Build native desktop apps with web technologies — simpler than Electron, faster than Tauri.**
 
 Poly is a modern framework for building cross-platform desktop applications using HTML, CSS, and JavaScript. It provides native OS integration out-of-the-box with zero configuration.
 
-## ✨ Features
+## Features
 
-- 🚀 **Lightweight** — Small binary size, fast startup
-- 🎨 **Custom Titlebar** — Beautiful frameless windows by default
-- 📁 **Native Dialogs** — File open/save, folder picker, message boxes
-- 🔄 **Auto-Updater** — Built-in update system with GitHub Releases support
-- 📂 **File System API** — Read/write files from JavaScript
-- 🔥 **Hot Reload** — Instant updates during development
-- 🌐 **Web Technologies** — Use HTML, CSS, JS, Alpine.js, any framework
+- **Lightweight** — Small binary size (~10MB), fast startup
+- **Custom Titlebar** — Beautiful frameless windows by default
+- **System Tray** — Run apps in background with customizable tray menu
+- **Native Dialogs** — File open/save, folder picker, message boxes
+- **Auto-Updater** — Built-in update system with GitHub Releases support
+- **File System API** — Read/write files from JavaScript
+- **Hot Reload** — Instant updates during development
+- **Web Technologies** — Use HTML, CSS, JS, Alpine.js, or any framework
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Install Poly
@@ -31,16 +32,13 @@ poly dev
 poly run --native
 ```
 
-## 📦 Installation
+## Installation
 
-### From Source (Recommended)
+### From Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/OpenChatGit/Poly.git
 cd Poly
-
-# Install globally with native features
 cargo install --path poly --features native
 ```
 
@@ -49,7 +47,7 @@ cargo install --path poly --features native
 - Rust 1.70+
 - Windows 10+, macOS 10.15+, or Linux
 
-## 🛠️ CLI Commands
+## CLI Commands
 
 | Command | Description |
 |---------|-------------|
@@ -58,9 +56,9 @@ cargo install --path poly --features native
 | `poly run --native` | Run as native desktop app |
 | `poly build` | Build for production |
 | `poly update` | Check for updates |
-| `poly --version` | Show version & check for updates |
+| `poly --version` | Show version and check for updates |
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 my-app/
@@ -76,15 +74,48 @@ my-app/
     └── icon.svg        # Titlebar icon (optional)
 ```
 
-## 🎨 Custom Titlebar
+## Configuration
 
-Poly automatically provides a beautiful custom titlebar — no configuration needed!
+### poly.toml
 
-- **Windows**: Minimize, Maximize, Close buttons on the right
-- **macOS**: Traffic light buttons on the left
-- **Custom Icon**: Add `assets/icon.svg` for your own titlebar icon
+```toml
+[package]
+name = "my-app"
+version = "1.0.0"
 
-## 📡 JavaScript API
+[web]
+dir = "web"
+
+[window]
+width = 1024
+height = 768
+resizable = true
+
+[tray]
+enabled = true
+tooltip = "My App"
+minimize_to_tray = false
+close_to_tray = true
+
+# Custom tray menu
+[[tray.menu]]
+id = "show"
+label = "Show Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
+
+[update]
+enabled = true
+source = "github"
+github_repo = "user/my-app"
+```
+
+## JavaScript API
 
 ### Dialogs
 
@@ -98,7 +129,7 @@ const file = await poly.dialog.open({
 const savePath = await poly.dialog.save({ defaultName: 'document.txt' });
 const folder = await poly.dialog.folder();
 
-// Custom in-app dialogs (styleable)
+// Custom in-app dialogs
 await poly.dialog.message('Success', 'File saved!', 'info');
 const confirmed = await poly.dialog.confirm('Delete?', 'Are you sure?');
 
@@ -118,17 +149,20 @@ const result = await poly.dialog.custom({
 ### File System
 
 ```javascript
-// Read file
 const content = await poly.fs.read('/path/to/file.txt');
-
-// Write file
 await poly.fs.write('/path/to/file.txt', 'Hello World');
-
-// Check if exists
 const exists = await poly.fs.exists('/path/to/file.txt');
-
-// List directory
 const files = await poly.fs.readDir('/path/to/folder');
+```
+
+### Window Control
+
+```javascript
+poly.window.minimize();  // Minimize (or hide to tray if configured)
+poly.window.maximize();  // Toggle maximize
+poly.window.close();     // Close (or hide to tray if configured)
+poly.window.hide();      // Hide to tray
+poly.window.show();      // Show and focus window
 ```
 
 ### Auto-Updater
@@ -138,7 +172,6 @@ const files = await poly.fs.readDir('/path/to/folder');
 const info = await poly.updater.checkGithub('user/repo', '1.0.0');
 
 if (info.update_available) {
-  // Download and install
   const path = await poly.updater.download(info.download_url);
   await poly.updater.install(path);
 }
@@ -150,90 +183,90 @@ await poly.updater.checkAndPrompt({
 });
 ```
 
-### IPC (Call Backend Functions)
+### IPC (Backend Functions)
 
 ```javascript
 // Call a function defined in main.poly
 const result = await poly.invoke('myFunction', { arg1: 'value' });
 ```
 
-## ⚙️ Configuration
+## System Tray
 
-### poly.toml
+Enable system tray to run your app in the background:
 
 ```toml
-[package]
-name = "my-app"
-version = "1.0.0"
-
-[web]
-dir = "web"
-
-[window]
-width = 1024
-height = 768
-resizable = true
-
-[update]
+[tray]
 enabled = true
-source = "github"
-github_repo = "user/my-app"
+tooltip = "My App"
+close_to_tray = true
+
+[[tray.menu]]
+id = "show"
+label = "Show Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "settings"
+label = "Settings"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
 ```
 
-## 🔄 Auto-Updates
+Special menu IDs:
+- `show` — Shows and focuses the window
+- `quit` or `exit` — Exits the application
+- `separator` — Adds a separator line
+- Any other ID — Custom action
+
+## Custom Titlebar
+
+Poly automatically provides a custom titlebar with no configuration needed:
+
+- **Windows**: Minimize, Maximize, Close buttons on the right
+- **macOS**: Traffic light buttons on the left
+- **Custom Icon**: Add `assets/icon.svg` for your own titlebar icon
+
+## Auto-Updates
 
 Poly has built-in auto-update support:
 
-1. **CLI Updates**: Run `poly --version` or `poly update` to check for Poly updates
-2. **App Updates**: Use `poly.updater` API in your app
+1. Run `poly --version` or `poly update` to check for Poly updates
+2. Use `poly.updater` API in your app for app updates
 
-### Setting up GitHub Releases
+### GitHub Releases Setup
 
 1. Create a release on GitHub
-2. Upload your app binaries with platform-specific names:
+2. Upload binaries with platform names:
    - `my-app-windows-x64.exe`
    - `my-app-macos-x64.dmg`
    - `my-app-linux-x64.AppImage`
-3. Poly will automatically find the right download for each platform
+3. Poly automatically finds the right download for each platform
 
-## 🏗️ Architecture
-
-```
-Poly/
-├── poly/                   # Core framework
-│   ├── src/
-│   │   ├── main.rs         # CLI & dev server
-│   │   ├── lib.rs          # Library exports
-│   │   ├── native.rs       # Native window (wry/tao)
-│   │   ├── updater.rs      # Auto-updater
-│   │   ├── lexer.rs        # Poly language lexer
-│   │   ├── parser.rs       # Poly language parser
-│   │   └── interpreter.rs  # Poly language runtime
-│   └── Cargo.toml
-├── poly-ui/                # UI framework (optional)
-└── poly-vscode/            # VS Code extension
-```
-
-## 🆚 Comparison
+## Comparison
 
 | Feature | Poly | Electron | Tauri |
 |---------|------|----------|-------|
 | Binary Size | ~10MB | ~150MB | ~5MB |
 | Memory Usage | Low | High | Low |
-| Custom Titlebar | ✅ Default | Manual | Manual |
-| Auto-Updater | ✅ Built-in | Plugin | Plugin |
-| Native Dialogs | ✅ Built-in | Plugin | Built-in |
-| Hot Reload | ✅ Built-in | Plugin | Built-in |
+| Custom Titlebar | Built-in | Manual | Manual |
+| System Tray | Built-in | Plugin | Plugin |
+| Auto-Updater | Built-in | Plugin | Plugin |
+| Native Dialogs | Built-in | Plugin | Built-in |
+| Hot Reload | Built-in | Plugin | Built-in |
 | Setup Complexity | Simple | Complex | Medium |
 
-## 📄 License
+## License
 
 MIT
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
-Made with ❤️ by the Poly Team
+Made with care by the Poly Team

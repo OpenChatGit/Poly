@@ -1,6 +1,6 @@
 [package]
 name = "poly"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
 authors = ["Poly Team"]
@@ -28,6 +28,9 @@ serde_json = "1.0"
 wry = { version = "0.46", optional = true }
 tao = { version = "0.30", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+# System tray
+tray-icon = { version = "0.14", optional = true }
+muda = { version = "0.13", optional = true }
 # Native dialogs
 rfd = { version = "0.15", optional = true }
 # Auto-updater
@@ -39,7 +42,7 @@ self_update = { version = "0.39", optional = true }
 [features]
 default = []
 wasm = ["wasm-bindgen"]
-native = ["wry", "tao", "image", "rfd", "reqwest", "semver", "zip", "self_update"]
+native = ["wry", "tao", "image", "rfd", "reqwest", "semver", "zip", "self_update", "tray-icon", "muda"]
 
 [lib]
 name = "poly"

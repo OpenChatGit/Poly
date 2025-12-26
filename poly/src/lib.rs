@@ -5,6 +5,7 @@ pub mod interpreter;
 pub mod web;
 pub mod native;
 pub mod updater;
+pub mod tray;
 
 use lexer::Lexer;
 use parser::Parser;
@@ -12,6 +13,7 @@ use interpreter::Interpreter;
 
 pub use native::{NativeConfig, run_native_window, run_native_url, generate_native_bundle};
 pub use updater::{UpdateConfig, UpdateInfo, check_github_updates, check_custom_updates, download_update, install_update};
+pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
 
 /// Run Poly source code and return the output
 pub fn run(source: &str) -> Result<Vec<String>, String> {

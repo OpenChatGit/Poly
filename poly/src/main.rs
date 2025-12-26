@@ -16,7 +16,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.1.4";
+const VERSION: &str = "0.1.5";
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
 #[derive(Parser)]
@@ -173,7 +173,7 @@ fn print_version_with_update_check() {
                 print!("\r                                  \r");
                 
                 if info.update_available {
-                    println!("  {}✓ New version available:{} {}", GREEN, RESET, info.latest_version);
+                    println!("  {}> New version available:{} {}", GREEN, RESET, info.latest_version);
                     println!();
                     
                     if let Some(notes) = &info.release_notes {
@@ -197,7 +197,7 @@ fn print_version_with_update_check() {
                         }
                     }
                 } else {
-                    println!("  {}✓ You're on the latest version{}", GREEN, RESET);
+                    println!("  {}>{} You're on the latest version", GREEN, RESET);
                 }
             }
             Err(_e) => {
@@ -325,7 +325,7 @@ fn run_file_result(file: &str) -> Result<(), String> {
 
 fn run_repl() {
     println!();
-    println!("  {}POLY{} v0.1.4", CYAN, RESET);
+    println!("  {}POLY{} v0.1.5", CYAN, RESET);
     println!("  {}Type 'exit' to quit{}", DIM, RESET);
     println!();
     
@@ -376,7 +376,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry = entry.unwrap();
     
     println!();
-    println!("  {}POLY{} v0.1.4  {}dev server{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.1.5  {}dev server{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local:   {}http://localhost:{}{}", GREEN, RESET, CYAN, port, RESET);
     println!("  {}>{} Entry:   {}{}{}", DIM, RESET, DIM, entry.display(), RESET);
@@ -517,6 +517,33 @@ window.poly = {{
     async write(path, content) {{ return poly.invoke('__poly_fs_write', {{ path, content }}); }},
     async exists(path) {{ return poly.invoke('__poly_fs_exists', {{ path }}); }},
     async readDir(path) {{ return poly.invoke('__poly_fs_read_dir', {{ path }}); }}
+  }},
+  updater: {{
+    async checkGithub(repo, currentVersion) {{ return poly.invoke('__poly_updater_check_github', {{ repo, currentVersion }}); }},
+    async checkUrl(url, currentVersion) {{ return poly.invoke('__poly_updater_check_url', {{ url, currentVersion }}); }},
+    async download(url) {{ return poly.invoke('__poly_updater_download', {{ url }}); }},
+    async install(path) {{ return poly.invoke('__poly_updater_install', {{ path }}); }},
+    async checkAndPrompt(options) {{
+      const info = options.repo 
+        ? await poly.updater.checkGithub(options.repo, options.currentVersion)
+        : await poly.updater.checkUrl(options.url, options.currentVersion);
+      if (info.update_available) {{
+        const confirmed = await poly.dialog.confirm('Update Available', 
+          `Version ${{info.latest_version}} is available. Download now?`);
+        if (confirmed && info.download_url) {{
+          const path = await poly.updater.download(info.download_url);
+          await poly.updater.install(path);
+        }}
+      }}
+      return info;
+    }}
+  }},
+  window: {{
+    minimize() {{ if (window.ipc) window.ipc.postMessage('minimize'); }},
+    maximize() {{ if (window.ipc) window.ipc.postMessage('maximize'); }},
+    close() {{ if (window.ipc) window.ipc.postMessage('close'); }},
+    hide() {{ if (window.ipc) window.ipc.postMessage('hide'); }},
+    show() {{ if (window.ipc) window.ipc.postMessage('show'); }}
   }}
 }};
 // Initialize Lucide Icons
@@ -1146,7 +1173,7 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
         .ok_or_else(|| "No entry point found".to_string())?;
     
     println!();
-    println!("  {}POLY{} v0.1.4  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
+    println!("  {}POLY{} v0.1.5  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
     println!();
     
     let start = std::time::Instant::now();
@@ -1184,11 +1211,80 @@ fn run_native_app(project_path: &Path, _release: bool) {
         .and_then(|n| n.to_str())
         .unwrap_or("Poly App");
     
+    // Parse poly.toml for configuration
+    let poly_toml_path = project_path.join("poly.toml");
+    let (tray_enabled, tray_tooltip, minimize_to_tray, close_to_tray, tray_menu_items) = if poly_toml_path.exists() {
+        if let Ok(content) = fs::read_to_string(&poly_toml_path) {
+            // Simple TOML parsing for tray section
+            let mut enabled = false;
+            let mut tooltip = title.to_string();
+            let mut min_to_tray = false;
+            let mut close_to_tray_val = false;
+            let mut menu_items: Vec<(String, String)> = Vec::new();
+            let mut in_tray_section = false;
+            let mut in_menu_item = false;
+            let mut current_id = String::new();
+            let mut current_label = String::new();
+            
+            for line in content.lines() {
+                let line = line.trim();
+                if line == "[tray]" {
+                    in_tray_section = true;
+                    in_menu_item = false;
+                } else if line == "[[tray.menu]]" {
+                    // Save previous menu item if exists
+                    if !current_id.is_empty() {
+                        menu_items.push((current_id.clone(), current_label.clone()));
+                    }
+                    current_id = String::new();
+                    current_label = String::new();
+                    in_menu_item = true;
+                    in_tray_section = false;
+                } else if line.starts_with('[') && !line.starts_with("[[tray.menu]]") {
+                    // Save last menu item
+                    if !current_id.is_empty() {
+                        menu_items.push((current_id.clone(), current_label.clone()));
+                        current_id = String::new();
+                        current_label = String::new();
+                    }
+                    in_tray_section = false;
+                    in_menu_item = false;
+                } else if in_tray_section {
+                    if let Some(val) = line.strip_prefix("enabled").and_then(|s| s.trim().strip_prefix('=')) {
+                        enabled = val.trim().trim_matches('"') == "true";
+                    } else if let Some(val) = line.strip_prefix("tooltip").and_then(|s| s.trim().strip_prefix('=')) {
+                        tooltip = val.trim().trim_matches('"').to_string();
+                    } else if let Some(val) = line.strip_prefix("minimize_to_tray").and_then(|s| s.trim().strip_prefix('=')) {
+                        min_to_tray = val.trim().trim_matches('"') == "true";
+                    } else if let Some(val) = line.strip_prefix("close_to_tray").and_then(|s| s.trim().strip_prefix('=')) {
+                        close_to_tray_val = val.trim().trim_matches('"') == "true";
+                    }
+                } else if in_menu_item {
+                    if let Some(val) = line.strip_prefix("id").and_then(|s| s.trim().strip_prefix('=')) {
+                        current_id = val.trim().trim_matches('"').to_string();
+                    } else if let Some(val) = line.strip_prefix("label").and_then(|s| s.trim().strip_prefix('=')) {
+                        current_label = val.trim().trim_matches('"').to_string();
+                    }
+                }
+            }
+            // Don't forget the last menu item
+            if !current_id.is_empty() {
+                menu_items.push((current_id, current_label));
+            }
+            
+            (enabled, tooltip, min_to_tray, close_to_tray_val, menu_items)
+        } else {
+            (false, title.to_string(), false, false, Vec::new())
+        }
+    } else {
+        (false, title.to_string(), false, false, Vec::new())
+    };
+    
     // Find a free port
     let port = 9473u16;
     
     println!();
-    println!("  {}POLY{} v0.1.4  {}native{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.1.5  {}native{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
@@ -1238,11 +1334,29 @@ fn run_native_app(project_path: &Path, _release: bool) {
     
     let mut config = poly::NativeConfig::new(title)
         .with_size(1024, 768)
-        .with_dev_tools(true);
+        .with_dev_tools(true)
+        .with_tray(tray_enabled)
+        .with_minimize_to_tray(minimize_to_tray)
+        .with_close_to_tray(close_to_tray);
     
-    if let Some(icon) = icon_path {
+    config.tray_tooltip = Some(tray_tooltip.clone());
+    config.tray_menu_items = tray_menu_items;
+    
+    if let Some(icon) = icon_path.clone() {
         println!("  {}>{} Icon: {}", DIM, RESET, icon.display());
         config = config.with_icon(&icon.to_string_lossy());
+    }
+    
+    // Use same icon for tray if available
+    if let Some(ref icon) = icon_path {
+        config = config.with_tray_icon(&icon.to_string_lossy());
+    }
+    
+    if tray_enabled {
+        println!("  {}>{} System Tray: enabled", DIM, RESET);
+        if close_to_tray {
+            println!("  {}>{} Close to tray: yes", DIM, RESET);
+        }
     }
     
     println!();
@@ -1630,6 +1744,13 @@ window.poly = {
       
       return { updated: true, info };
     }
+  },
+  window: {
+    minimize() { if (window.ipc) window.ipc.postMessage('minimize'); },
+    maximize() { if (window.ipc) window.ipc.postMessage('maximize'); },
+    close() { if (window.ipc) window.ipc.postMessage('close'); },
+    hide() { if (window.ipc) window.ipc.postMessage('hide'); },
+    show() { if (window.ipc) window.ipc.postMessage('show'); }
   }
 };
 // Initialize Lucide Icons
@@ -1675,7 +1796,7 @@ fn build_app(path: &str, target: &str, release: bool) {
     let project_path = Path::new(path);
     
     println!();
-    println!("  {}POLY{} v0.1.4  {}build{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.1.5  {}build{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Target:  {}", DIM, RESET, target);
     println!("  {}>{} Mode:    {}", DIM, RESET, if release { "release" } else { "debug" });
@@ -1735,7 +1856,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
 fn create_project(name: &str, template: &str) {
     println!();
-    println!("  {}POLY{} v0.1.4", CYAN, RESET);
+    println!("  {}POLY{} v0.1.5", CYAN, RESET);
     println!();
     
     let project_path = Path::new(name);
@@ -1775,6 +1896,18 @@ version = "0.1.0"
 
 [web]
 dir = "web"
+
+[window]
+width = 1024
+height = 768
+resizable = true
+
+# System Tray (optional)
+# [tray]
+# enabled = true
+# tooltip = "My App"
+# minimize_to_tray = false
+# close_to_tray = false
 "#, name)).ok();
     
     // Direct HTML/CSS/JS files (Tauri/Electron style - edit directly, hot reload works)
@@ -2180,7 +2313,7 @@ fn add(a, b):
 
 fn init_project(_template: &str) {
     println!();
-    println!("  {}POLY{} v0.1.4", CYAN, RESET);
+    println!("  {}POLY{} v0.1.5", CYAN, RESET);
     println!();
     
     let cwd = std::env::current_dir().expect("Failed to get current directory");
