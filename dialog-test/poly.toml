@@ -1,0 +1,14 @@
+[package]
+name = "dialog-test"
+version = "0.1.0"
+
+[web]
+dir = "web"
+
+[update]
+enabled = true
+source = "github"
+github_repo = "user/my-app"
+# Oder für custom URL:
+# source = "custom"
+# update_url = "https://example.com/updates/manifest.json"

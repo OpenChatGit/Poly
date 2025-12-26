@@ -1,0 +1,51 @@
+[package]
+name = "poly"
+version = "0.1.4"
+edition = "2021"
+description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
+authors = ["Poly Team"]
+
+[dependencies]
+# Lexer/Parser
+logos = "0.14"           # Fast lexer generator
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+# Error handling
+thiserror = "1.0"
+miette = { version = "7.0", features = ["fancy"] }
+# Web interop (WASM)
+wasm-bindgen = { version = "0.2", optional = true }
+# TTY detection
+atty = "0.2"
+# File watching for hot reload
+notify = "7.0"
+# HTTP server for dev mode
+tiny_http = "0.12"
+# JSON serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Native WebView (like Tauri)
+wry = { version = "0.46", optional = true }
+tao = { version = "0.30", optional = true }
+image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
+# Native dialogs
+rfd = { version = "0.15", optional = true }
+# Auto-updater
+reqwest = { version = "0.11", features = ["blocking", "json"], optional = true }
+semver = { version = "1.0", optional = true }
+zip = { version = "0.6", optional = true }
+self_update = { version = "0.39", optional = true }
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]
+native = ["wry", "tao", "image", "rfd", "reqwest", "semver", "zip", "self_update"]
+
+[lib]
+name = "poly"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "poly"
+path = "src/main.rs"

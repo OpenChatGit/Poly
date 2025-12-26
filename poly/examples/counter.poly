@@ -1,0 +1,46 @@
+# Counter App with State Management
+# Run: cargo run -p poly -- poly/examples/counter.poly
+
+let initial = {"count": 0}
+let actions = {"increment": "this.state.count++", "decrement": "this.state.count--", "reset": "this.state.count = 0"}
+
+let store_js = store("App", initial, actions)
+
+let update_js = """
+appStore.subscribe((state) => {
+    document.getElementById('count').textContent = state.count;
+});
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('count').textContent = appStore.getState().count;
+});
+"""
+
+let app_js = store_js + update_js
+
+let body = """
+<div class="container">
+    <h1>Counter</h1>
+    <div class="counter"><span id="count">0</span></div>
+    <div class="buttons">
+        <button onclick="appStore.decrement()">-</button>
+        <button onclick="appStore.reset()">Reset</button>
+        <button onclick="appStore.increment()">+</button>
+    </div>
+</div>
+"""
+
+let css = """
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui; background: #0a0a0a; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.container { text-align: center; }
+h1 { font-size: 1.5rem; color: #888; margin-bottom: 2rem; }
+.counter { font-size: 5rem; font-weight: 200; color: #5dc1d2; margin-bottom: 2rem; }
+.buttons { display: flex; gap: 1rem; justify-content: center; }
+button { width: 60px; height: 60px; font-size: 1.5rem; border: 2px solid #5dc1d2; border-radius: 50%; background: #1a1a2e; color: #5dc1d2; cursor: pointer; }
+button:hover { background: #5dc1d2; color: #0a0a0a; }
+"""
+
+let page = html("Counter", body, css, app_js)
+write_file("poly/examples/counter.html", page)
+
+print("Counter app generated: poly/examples/counter.html")

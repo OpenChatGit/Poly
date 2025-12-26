@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dialog Test</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app" x-data="app()">
+    <div class="container">
+      <h1><i data-lucide="message-square"></i> Native Dialogs Demo</h1>
+      <p class="subtitle">Test Poly's native dialog APIs</p>
+
+      <div class="demo-grid">
+        <!-- File Open -->
+        <div class="demo-card">
+          <h3><i data-lucide="file"></i> Open File</h3>
+          <button class="btn btn-primary" @click="openFile">
+            <i data-lucide="folder-open"></i> Select File
+          </button>
+          <p class="result" x-show="selectedFile" x-text="selectedFile"></p>
+        </div>
+
+        <!-- File Save -->
+        <div class="demo-card">
+          <h3><i data-lucide="save"></i> Save File</h3>
+          <button class="btn btn-primary" @click="saveFile">
+            <i data-lucide="download"></i> Save As...
+          </button>
+          <p class="result" x-show="savedPath" x-text="savedPath"></p>
+        </div>
+
+        <!-- Folder Picker -->
+        <div class="demo-card">
+          <h3><i data-lucide="folder"></i> Pick Folder</h3>
+          <button class="btn btn-primary" @click="pickFolder">
+            <i data-lucide="folder-search"></i> Select Folder
+          </button>
+          <p class="result" x-show="selectedFolder" x-text="selectedFolder"></p>
+        </div>
+
+        <!-- Message Box -->
+        <div class="demo-card">
+          <h3><i data-lucide="info"></i> Message Box</h3>
+          <div class="btn-group">
+            <button class="btn btn-info" @click="showMessage('info')">Info</button>
+            <button class="btn btn-warning" @click="showMessage('warning')">Warning</button>
+            <button class="btn btn-error" @click="showMessage('error')">Error</button>
+          </div>
+        </div>
+
+        <!-- Confirm Dialog -->
+        <div class="demo-card">
+          <h3><i data-lucide="help-circle"></i> Confirm Dialog</h3>
+          <button class="btn btn-primary" @click="confirmAction">
+            <i data-lucide="check-circle"></i> Ask Confirmation
+          </button>
+          <p class="result" x-show="confirmResult !== null">
+            Result: <span x-text="confirmResult ? 'Yes' : 'No'"></span>
+          </p>
+        </div>
+
+        <!-- Custom Dialog -->
+        <div class="demo-card">
+          <h3><i data-lucide="layout"></i> Custom Dialog</h3>
+          <button class="btn btn-primary" @click="customDialog">
+            <i data-lucide="sparkles"></i> Custom Buttons
+          </button>
+          <p class="result" x-show="customResult" x-text="'Selected: ' + customResult"></p>
+        </div>
+
+        <!-- File System -->
+        <div class="demo-card">
+          <h3><i data-lucide="hard-drive"></i> File System</h3>
+          <button class="btn btn-primary" @click="readCurrentDir">
+            <i data-lucide="list"></i> List Current Dir
+          </button>
+          <div class="file-list" x-show="files.length > 0">
+            <template x-for="(file, i) in files.slice(0, 5)" :key="i">
+              <div class="file-item">
+                <i :data-lucide="file.isDir ? 'folder' : 'file'"></i>
+                <span x-text="file.name"></span>
+              </div>
+            </template>
+            <p x-show="files.length > 5" class="more">...and <span x-text="files.length - 5"></span> more</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

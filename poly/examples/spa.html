@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poly SPA</title>
+    <style>
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: system-ui; background: #0a0a0a; color: #fff; min-height: 100vh; }
+nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; background: #111; border-bottom: 1px solid #222; }
+.logo { font-weight: 600; color: #5dc1d2; font-size: 1.2rem; }
+.links { display: flex; gap: 1.5rem; }
+.links a { color: #888; text-decoration: none; }
+.links a:hover { color: #5dc1d2; }
+main { max-width: 800px; margin: 0 auto; padding: 3rem 2rem; }
+.page h1 { color: #5dc1d2; margin-bottom: 1rem; }
+.page p { color: #aaa; line-height: 1.6; }
+button { padding: 10px 20px; background: #5dc1d2; color: #000; border: none; border-radius: 4px; cursor: pointer; }
+
+</style>
+</head>
+<body>
+
+<nav>
+    <div class="logo">Poly SPA</div>
+    <div class="links">
+        <a href="#/">Home</a>
+        <a href="#/about">About</a>
+        <a href="#/contact">Contact</a>
+    </div>
+</nav>
+<main id="app"></main>
+
+<script>
+const routes = {
+  '/': `<div class='page'><h1>Home</h1><p>Welcome to the Poly SPA demo!</p></div>`,
+  '/about': `<div class='page'><h1>About</h1><p>Poly is a Python-like language with built-in web framework.</p></div>`,
+  '/contact': `<div class='page'><h1>Contact</h1><button onclick="alert('Hello!')">Say Hello</button></div>`,
+};
+
+const notFoundComponent = `<div class='page'><h1>404</h1><p>Page not found</p></div>`;
+
+class Router {
+  constructor() {
+    this.currentPath = window.location.hash.slice(1) || '/';
+    window.addEventListener('hashchange', () => this.navigate());
+    window.addEventListener('load', () => this.navigate());
+  }
+
+  navigate(path) {
+    if (path) { window.location.hash = path; return; }
+    this.currentPath = window.location.hash.slice(1) || '/';
+    const app = document.getElementById('app');
+    app.innerHTML = routes[this.currentPath] || notFoundComponent;
+    window.dispatchEvent(new CustomEvent('routechange', { detail: { path: this.currentPath } }));
+  }
+}
+
+const router = new Router();
+function navigate(path) { router.navigate(path); }
+
+</script>
+</body>
+</html>

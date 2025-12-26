@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poly UI - Web</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        h1 {
+            font-size: 1.5rem;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .container {
+            flex: 1;
+            display: flex;
+            padding: 20px;
+            gap: 20px;
+        }
+        
+        .editor-panel, .preview-panel {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel-header {
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .panel-title {
+            font-weight: 600;
+            color: #00d9ff;
+        }
+        
+        #editor {
+            flex: 1;
+            background: #0d1117;
+            color: #c9d1d9;
+            border: none;
+            padding: 16px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: none;
+            outline: none;
+        }
+        
+        #canvas-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0d1117;
+        }
+        
+        #output {
+            padding: 16px;
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            background: rgba(0, 0, 0, 0.3);
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .btn {
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            color: #1a1a2e;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .status {
+            padding: 8px 16px;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .status.ready { color: #3fb950; }
+        .status.error { color: #f85149; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔷 Poly UI</h1>
+        <span style="color: #666;">Web Preview</span>
+    </header>
+    
+    <div class="container">
+        <div class="editor-panel">
+            <div class="panel-header">
+                <span class="panel-title">📝 Poly Code</span>
+                <button class="btn" onclick="runCode()">▶ Run</button>
+            </div>
+            <textarea id="editor" spellcheck="false"># Poly UI Demo
+print("Hello from Poly UI!")
+
+class Counter:
+    def __init__(self):
+        self.value = 0
+    
+    def increment(self):
+        self.value = self.value + 1
+        return self.value
+    
+    def decrement(self):
+        self.value = self.value - 1
+        return self.value
+
+let counter = Counter()
+print("Initial: " + str(counter.value))
+print("After increment: " + str(counter.increment()))
+print("After increment: " + str(counter.increment()))
+print("After decrement: " + str(counter.decrement()))
+
+# List operations
+let numbers = [1, 2, 3, 4, 5]
+let doubled = [x * 2 for x in numbers]
+print("Doubled: " + str(doubled))
+</textarea>
+            <div id="output"></div>
+        </div>
+        
+        <div class="preview-panel">
+            <div class="panel-header">
+                <span class="panel-title">🖼️ UI Preview</span>
+                <span id="status" class="status">Loading WASM...</span>
+            </div>
+            <div id="canvas-container">
+                <canvas id="poly-canvas" width="600" height="400"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Will load WASM module when built
+        let polyModule = null;
+        
+        window.runCode = async function() {
+            const code = document.getElementById('editor').value;
+            const output = document.getElementById('output');
+            
+            try {
+                if (polyModule && polyModule.run_poly) {
+                    const result = polyModule.run_poly(code);
+                    output.innerHTML = `<pre style="color: #3fb950;">${escapeHtml(result)}</pre>`;
+                } else {
+                    // Fallback simulation
+                    output.innerHTML = `<pre style="color: #ffc107;">WASM not loaded. Build with wasm-pack first.</pre>`;
+                    simulateOutput(code, output);
+                }
+            } catch (e) {
+                output.innerHTML = `<pre style="color: #f85149;">Error: ${escapeHtml(e.toString())}</pre>`;
+            }
+        };
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function simulateOutput(code, output) {
+            // Simple print extraction for demo
+            const prints = code.match(/print\(["']([^"']+)["']\)/g) || [];
+            if (prints.length > 0) {
+                const lines = prints.map(p => p.match(/print\(["']([^"']+)["']\)/)[1]);
+                output.innerHTML += `<pre style="color: #888;">${lines.join('\n')}</pre>`;
+            }
+        }
+        
+        // Try to load WASM
+        async function initWasm() {
+            const status = document.getElementById('status');
+            try {
+                const module = await import('./pkg/poly_ui.js');
+                await module.default();
+                polyModule = module;
+                status.textContent = '✓ Ready';
+                status.className = 'status ready';
+            } catch (e) {
+                status.textContent = '⚠ Simulation mode';
+                status.className = 'status';
+                console.log('WASM not available:', e);
+            }
+        }
+        
+        // Draw demo UI on canvas
+        function drawDemoUI() {
+            const canvas = document.getElementById('poly-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Background
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Header
+            ctx.fillStyle = '#252535';
+            ctx.fillRect(0, 0, canvas.width, 50);
+            
+            // Cards
+            const cardColors = ['#2a2a3a', '#2a2a3a', '#2a2a3a'];
+            for (let i = 0; i < 3; i++) {
+                ctx.fillStyle = cardColors[i];
+                roundRect(ctx, 20 + i * 190, 70, 170, 100, 8);
+            }
+            
+            // Buttons
+            ctx.fillStyle = '#007aff';
+            roundRect(ctx, 20, 190, 100, 36, 6);
+            
+            ctx.fillStyle = '#5856d6';
+            roundRect(ctx, 130, 190, 100, 36, 6);
+            
+            ctx.fillStyle = '#ff3b30';
+            roundRect(ctx, 240, 190, 100, 36, 6);
+            
+            // Progress bar
+            ctx.fillStyle = '#333';
+            roundRect(ctx, 20, 250, canvas.width - 40, 8, 4);
+            ctx.fillStyle = '#007aff';
+            roundRect(ctx, 20, 250, (canvas.width - 40) * 0.6, 8, 4);
+            
+            // Text
+            ctx.fillStyle = '#fff';
+            ctx.font = '14px system-ui';
+            ctx.fillText('Poly UI Preview', 20, 30);
+        }
+        
+        function roundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+            ctx.fill();
+        }
+        
+        // Keyboard shortcut
+        document.getElementById('editor').addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                runCode();
+            }
+        });
+        
+        initWasm();
+        drawDemoUI();
+    </script>
+</body>
+</html>

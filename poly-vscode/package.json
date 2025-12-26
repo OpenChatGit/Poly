@@ -1,0 +1,28 @@
+{
+  "name": "poly-lang",
+  "displayName": "Poly Language",
+  "description": "Syntax highlighting for the Poly programming language",
+  "version": "0.1.0",
+  "publisher": "poly",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "poly",
+        "aliases": ["Poly", "poly"],
+        "extensions": [".poly"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "poly",
+        "scopeName": "source.poly",
+        "path": "./syntaxes/poly.tmLanguage.json"
+      }
+    ]
+  }
+}

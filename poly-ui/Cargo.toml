@@ -1,0 +1,63 @@
+[package]
+name = "poly-ui"
+version = "0.1.0"
+edition = "2021"
+description = "Poly UI - High-performance cross-platform UI framework"
+
+[dependencies]
+# Core Poly language
+poly = { path = "../poly" }
+
+# Window & Graphics
+winit = "0.30"
+wgpu = "23.0"
+raw-window-handle = "0.6"
+bytemuck = { version = "1.24", features = ["derive"] }
+
+# Math & Layout
+glam = "0.29"              # Fast math (vectors, matrices)
+taffy = "0.6"              # Flexbox layout engine (same as Tauri uses)
+
+# Fonts & Text
+cosmic-text = "0.12"       # Modern text rendering
+fontdb = "0.21"
+
+# Image loading
+image = "0.25"
+
+# Async runtime
+tokio = { version = "1.42", features = ["rt-multi-thread", "macros"] }
+pollster = "0.4"           # Block on async
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Hot reload
+notify = "7.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlCanvasElement",
+    "WebGl2RenderingContext", "GpuDevice"
+]}
+wasm-bindgen-futures = "0.4"
+console_error_panic_hook = "0.1"
+
+[features]
+default = ["desktop"]
+desktop = []
+web = []
+
+[[bin]]
+name = "poly-ui"
+path = "src/main.rs"
+
+[[example]]
+name = "counter"
+path = "examples/counter.rs"
+
+[[example]]
+name = "todo"
+path = "examples/todo.rs"
