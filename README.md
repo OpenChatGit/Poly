@@ -4,6 +4,8 @@
 
 Poly is a modern framework for building cross-platform desktop applications using HTML, CSS, and JavaScript. It provides native OS integration out-of-the-box with zero configuration.
 
+> **Platform Support:** Currently focused on Windows development and testing. Linux and macOS support are planned — since Poly is built with Rust and cross-platform libraries (wry/tao), it will work on all platforms once the Windows version is mature and I have access to test environments for other operating systems.
+
 ## Features
 
 - **Lightweight** — Small binary size (~10MB), fast startup
