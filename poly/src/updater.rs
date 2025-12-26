@@ -242,9 +242,11 @@ fn get_platform_patterns() -> Vec<&'static str> {
 #[cfg(feature = "native")]
 pub fn download_update(url: &str, progress_callback: Option<Box<dyn Fn(u64, u64)>>) -> Result<std::path::PathBuf, String> {
     use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
     
     let client = reqwest::blocking::Client::builder()
         .user_agent("Poly-Updater/1.0")
+        .timeout(std::time::Duration::from_secs(300)) // 5 min timeout
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
@@ -258,10 +260,24 @@ pub fn download_update(url: &str, progress_callback: Option<Box<dyn Fn(u64, u64)
     
     let total_size = response.content_length().unwrap_or(0);
     
-    // Get filename from URL
+    // Get filename from URL and add timestamp for uniqueness
     let filename = url.split('/').last().unwrap_or("update");
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let temp_dir = std::env::temp_dir();
-    let download_path = temp_dir.join(format!("poly_update_{}", filename));
+    let download_path = temp_dir.join(format!("poly_update_{}_{}", timestamp, filename));
+    
+    // Remove old update files
+    if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with("poly_update_") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
     
     let mut file = std::fs::File::create(&download_path)
         .map_err(|e| format!("Failed to create temp file: {}", e))?;
@@ -297,12 +313,59 @@ pub fn install_update(update_path: &Path) -> Result<(), String> {
     let ext = update_path.extension().and_then(|e| e.to_str()).unwrap_or("");
     
     match ext {
-        "exe" | "msi" => {
-            // Run installer and exit current app
-            Command::new(update_path)
+        "msi" => {
+            // Run MSI installer and exit current app
+            Command::new("msiexec")
+                .args(["/i", &update_path.to_string_lossy()])
                 .spawn()
                 .map_err(|e| format!("Failed to run installer: {}", e))?;
             
+            std::process::exit(0);
+        }
+        "exe" => {
+            // For exe files, we need to replace the current executable
+            // This is tricky because the current exe is locked
+            // We'll create a batch script to do the replacement after we exit
+            
+            let current_exe = std::env::current_exe()
+                .map_err(|e| format!("Failed to get current exe path: {}", e))?;
+            
+            let batch_path = std::env::temp_dir().join("poly_update.bat");
+            let batch_content = format!(
+                r#"@echo off
+echo Updating Poly...
+timeout /t 2 /nobreak >nul
+copy /Y "{}" "{}"
+if errorlevel 1 (
+    echo Update failed! Please manually copy the file.
+    echo From: {}
+    echo To: {}
+    pause
+) else (
+    echo Update complete!
+    del "{}"
+    start "" "{}"
+)
+del "%~f0"
+"#,
+                update_path.display(),
+                current_exe.display(),
+                update_path.display(),
+                current_exe.display(),
+                update_path.display(),
+                current_exe.display()
+            );
+            
+            std::fs::write(&batch_path, batch_content)
+                .map_err(|e| format!("Failed to create update script: {}", e))?;
+            
+            // Run the batch script and exit
+            Command::new("cmd")
+                .args(["/C", "start", "", &batch_path.to_string_lossy()])
+                .spawn()
+                .map_err(|e| format!("Failed to run update script: {}", e))?;
+            
+            println!("  Update will complete after Poly exits...");
             std::process::exit(0);
         }
         "zip" => {

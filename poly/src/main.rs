@@ -284,26 +284,37 @@ fn check_for_updates_interactive() {
 #[cfg(feature = "native")]
 fn download_and_install_update(info: &poly::UpdateInfo) {
     if let Some(url) = &info.download_url {
-        println!("  {}Downloading update...{}", DIM, RESET);
+        print!("  {}Downloading update...{}", DIM, RESET);
+        io::stdout().flush().ok();
         
-        match poly::download_update(url, None) {
+        // Progress callback
+        let progress = |downloaded: u64, total: u64| {
+            if total > 0 {
+                let percent = (downloaded * 100) / total;
+                print!("\r  {}Downloading update... {}%{}", DIM, percent, RESET);
+                io::stdout().flush().ok();
+            }
+        };
+        
+        match poly::download_update(url, Some(Box::new(progress))) {
             Ok(path) => {
-                println!("  {}>{} Downloaded to: {}", GREEN, RESET, path.display());
-                println!("  {}Installing...{}", DIM, RESET);
+                println!("\r  {}>{} Downloaded to: {}                    ", GREEN, RESET, path.display());
+                print!("  {}Installing...{}", DIM, RESET);
+                io::stdout().flush().ok();
                 
                 match poly::install_update(&path) {
                     Ok(_) => {
-                        println!("  {}>{} Update installed successfully!", GREEN, RESET);
+                        println!("\r  {}>{} Update installed successfully!          ", GREEN, RESET);
                         println!("  {}>{} Please restart Poly to use the new version.", DIM, RESET);
                     }
                     Err(e) => {
-                        println!("  {}>{} {}Installation failed:{} {}", RED, RESET, RED, RESET, e);
+                        println!("\r  {}>{} {}Installation failed:{} {}          ", RED, RESET, RED, RESET, e);
                         println!("  {}>{} You can manually install from: {}", DIM, RESET, path.display());
                     }
                 }
             }
             Err(e) => {
-                println!("  {}>{} {}Download failed:{} {}", RED, RESET, RED, RESET, e);
+                println!("\r  {}>{} {}Download failed:{} {}          ", RED, RESET, RED, RESET, e);
             }
         }
     } else {
