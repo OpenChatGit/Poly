@@ -56,6 +56,9 @@ cargo install --path poly --features native
 | `poly dev` | Start dev server with hot reload |
 | `poly run --native` | Run as native desktop app |
 | `poly build` | Build for production |
+| `poly build --release` | Optimized release build |
+| `poly build --installer` | Create installer/package |
+| `poly build --ci` | Generate GitHub Actions workflow |
 | `poly add <package>` | Add a JavaScript package (from npm) |
 | `poly remove <package>` | Remove a package |
 | `poly install` | Install packages from poly.lock |
@@ -405,6 +408,56 @@ Poly has built-in auto-update support:
    - `my-app-linux-x64.AppImage`
 3. Poly automatically finds the right download for each platform
 
+## Cross-Platform Builds
+
+Poly makes it easy to build your app for Windows, macOS, and Linux.
+
+### Build for Current Platform
+
+```bash
+# Development build
+poly build
+
+# Optimized release build
+poly build --release
+
+# Create installer/package (.zip on Windows, .app on macOS, .tar.gz on Linux)
+poly build --release --installer
+```
+
+### Build for All Platforms (GitHub Actions)
+
+Generate a CI workflow that builds for all platforms automatically:
+
+```bash
+poly build --ci
+```
+
+This creates `.github/workflows/build.yml` that:
+- Builds for Windows, macOS, and Linux
+- Creates release packages automatically
+- Uploads to GitHub Releases when you push a tag
+
+```bash
+# After pushing to GitHub:
+git tag v1.0.0
+git push --tags
+# GitHub Actions builds for all platforms!
+```
+
+### Build Output
+
+```
+dist/
+├── windows/
+│   ├── my-app.exe           # Windows executable
+│   └── bundle/              # Bundled assets
+├── macos/
+│   └── my-app.app/          # macOS app bundle
+└── linux/
+    └── my-app               # Linux executable
+```
+
 ## Comparison
 
 | Feature | Poly | Electron | Tauri |
@@ -412,6 +465,7 @@ Poly has built-in auto-update support:
 | Binary Size | ~7MB | ~150MB | ~5MB |
 | Memory Usage | Low | High | Low |
 | Package Manager | UV-style fast | npm | npm/cargo |
+| Cross-Platform Build | Built-in + CI | electron-builder | tauri-action |
 | Custom Titlebar | Built-in | Manual | Manual |
 | System Tray | Built-in | Plugin | Plugin |
 | Auto-Updater | Built-in | Plugin | Plugin |

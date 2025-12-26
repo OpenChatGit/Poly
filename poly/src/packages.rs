@@ -30,6 +30,7 @@ pub struct NpmPackage {
 pub struct NpmDist {
     pub tarball: String,
     #[serde(default)]
+    #[allow(dead_code)]
     pub integrity: Option<String>,
 }
 

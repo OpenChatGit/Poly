@@ -8,6 +8,7 @@ use notify::{Watcher, RecursiveMode, Event, EventKind};
 use serde_json;
 
 mod packages;
+mod build;
 
 // ANSI color codes for terminal output
 const CYAN: &str = "\x1b[36m";
@@ -84,13 +85,21 @@ enum Commands {
         #[arg(default_value = ".")]
         path: String,
         
-        /// Build target (native, web, all)
-        #[arg(short, long, default_value = "native")]
+        /// Target platform (windows, macos, linux, current)
+        #[arg(short, long, default_value = "current")]
         target: String,
         
-        /// Release build
+        /// Release build (optimized)
         #[arg(long)]
         release: bool,
+        
+        /// Create installer/package
+        #[arg(long)]
+        installer: bool,
+        
+        /// Generate GitHub Actions CI workflow
+        #[arg(long)]
+        ci: bool,
     },
     
     /// Create a new Poly project
@@ -149,7 +158,17 @@ fn main() {
     let result = match cli.command {
         Some(Commands::Dev { path, port, open }) => { run_dev_server(&path, port, open); Ok(()) },
         Some(Commands::Run { path, release, native }) => run_app_result(&path, release, native),
-        Some(Commands::Build { path, target, release }) => { build_app(&path, &target, release); Ok(()) },
+        Some(Commands::Build { path, target, release, installer, ci }) => { 
+            if ci {
+                if let Err(e) = build::generate_ci_workflow(Path::new(&path)) {
+                    eprintln!("{}error{}: {}", RED, RESET, e);
+                    std::process::exit(1);
+                }
+            } else {
+                build_app(&path, &target, release, installer); 
+            }
+            Ok(()) 
+        },
         Some(Commands::New { name, template }) => { create_project(&name, &template); Ok(()) },
         Some(Commands::Init { template }) => { init_project(&template); Ok(()) },
         Some(Commands::Update) => { check_for_updates_interactive(); Ok(()) },
@@ -2057,27 +2076,45 @@ if (typeof lucide !== 'undefined') {
     }
 }
 
-fn build_app(path: &str, target: &str, release: bool) {
+fn build_app(path: &str, target: &str, release: bool, installer: bool) {
     let project_path = Path::new(path);
     
-    println!();
-    println!("  {}POLY{} v0.2.2  {}build{}", CYAN, RESET, DIM, RESET);
-    println!();
-    println!("  {}>{} Target:  {}", DIM, RESET, target);
-    println!("  {}>{} Mode:    {}", DIM, RESET, if release { "release" } else { "debug" });
-    println!();
-    
-    let start = std::time::Instant::now();
-    
+    // Check if it's the old-style target (web, native, all)
     match target {
-        "web" | "wasm" => build_web(project_path, release),
-        "native" => build_native(project_path, release),
-        "all" => { build_native(project_path, release); build_web(project_path, release); }
-        _ => { eprintln!("{}error{}: Unknown target '{}'. Use: native, web, all", RED, RESET, target); std::process::exit(1); }
+        "web" | "wasm" => {
+            println!();
+            println!("  {}POLY{} {}build{}", CYAN, RESET, DIM, RESET);
+            println!();
+            build_web(project_path, release);
+            println!();
+            return;
+        }
+        "all" => {
+            // Build both web and native
+            println!();
+            println!("  {}POLY{} {}build{}", CYAN, RESET, DIM, RESET);
+            println!();
+            build_web(project_path, release);
+            // Fall through to native build
+        }
+        _ => {}
     }
     
-    println!();
-    println!("  {}done{} in {}ms", GREEN, RESET, start.elapsed().as_millis());
+    // Use new cross-platform build system
+    let platform = build::Platform::from_str(target).unwrap_or(build::Platform::Current);
+    
+    let config = build::BuildConfig {
+        project_path: project_path.to_path_buf(),
+        platform,
+        release,
+        bundle: true,
+        installer,
+    };
+    
+    if let Err(e) = build::build(&config) {
+        eprintln!("{}error{}: {}", RED, RESET, e);
+        std::process::exit(1);
+    }
 }
 
 fn build_web(project_path: &Path, _release: bool) {
@@ -2094,17 +2131,6 @@ fn build_web(project_path: &Path, _release: bool) {
     }
     
     println!("  {}>{} dist/web/index.html", GREEN, RESET);
-}
-
-fn build_native(project_path: &Path, _release: bool) {
-    let dist = project_path.join("dist/native");
-    fs::create_dir_all(&dist).ok();
-    
-    if let Some(entry) = find_entry_point(project_path) {
-        let dest = dist.join("app.poly");
-        fs::copy(&entry, &dest).ok();
-        println!("  {}>{} dist/native/app.poly", GREEN, RESET);
-    }
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
