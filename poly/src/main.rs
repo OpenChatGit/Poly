@@ -355,7 +355,7 @@ fn run_file_result(file: &str) -> Result<(), String> {
 
 fn run_repl() {
     println!();
-    println!("  {}POLY{} v0.2.1", CYAN, RESET);
+    println!("  {}POLY{} v0.2.2", CYAN, RESET);
     println!("  {}Type 'exit' to quit{}", DIM, RESET);
     println!();
     
@@ -406,7 +406,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry = entry.unwrap();
     
     println!();
-    println!("  {}POLY{} v0.2.1  {}dev server{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.2  {}dev server{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local:   {}http://localhost:{}{}", GREEN, RESET, CYAN, port, RESET);
     println!("  {}>{} Entry:   {}{}{}", DIM, RESET, DIM, entry.display(), RESET);
@@ -1295,7 +1295,7 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
         .ok_or_else(|| "No entry point found".to_string())?;
     
     println!();
-    println!("  {}POLY{} v0.2.1  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
+    println!("  {}POLY{} v0.2.2  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
     println!();
     
     let start = std::time::Instant::now();
@@ -1406,7 +1406,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let port = 9473u16;
     
     println!();
-    println!("  {}POLY{} v0.2.1  {}native{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.2  {}native{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
@@ -2051,7 +2051,7 @@ fn build_app(path: &str, target: &str, release: bool) {
     let project_path = Path::new(path);
     
     println!();
-    println!("  {}POLY{} v0.2.1  {}build{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.2  {}build{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Target:  {}", DIM, RESET, target);
     println!("  {}>{} Mode:    {}", DIM, RESET, if release { "release" } else { "debug" });
@@ -2111,7 +2111,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
 fn create_project(name: &str, template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.1", CYAN, RESET);
+    println!("  {}POLY{} v0.2.2", CYAN, RESET);
     println!();
     
     let project_path = Path::new(name);
@@ -2163,7 +2163,17 @@ resizable = true
 # tooltip = "My App"
 # minimize_to_tray = false
 # close_to_tray = false
+
+# JavaScript Dependencies (managed by poly add/remove)
+# Example: poly add alpinejs
+[dependencies]
 "#, name)).ok();
+
+    // Create .gitignore
+    fs::write(project_path.join(".gitignore"), r#"/dist
+/target
+packages/
+"#).ok();
     
     // Direct HTML/CSS/JS files (Tauri/Electron style - edit directly, hot reload works)
     match template {
@@ -2553,8 +2563,7 @@ fn add(a, b):
         _ => { eprintln!("{}error{}: Unknown template '{}'", RED, RESET, template); std::process::exit(1); }
     };
     
-    // .gitignore - don't ignore HTML files (they're the source now!)
-    fs::write(project_path.join(".gitignore"), "/dist\n/target\n").ok();
+    // .gitignore is already created above with packages/ included
     
     println!(" {}done{}", GREEN, RESET);
     println!();
@@ -2562,13 +2571,14 @@ fn add(a, b):
     println!("    cd {}", name);
     println!("    poly dev");
     println!();
+    println!("  {}Add packages:{} poly add alpinejs", DIM, RESET);
     println!("  {}Edit web/index.html directly - hot reload is automatic{}", DIM, RESET);
     println!();
 }
 
 fn init_project(_template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.1", CYAN, RESET);
+    println!("  {}POLY{} v0.2.2", CYAN, RESET);
     println!();
     
     let cwd = std::env::current_dir().expect("Failed to get current directory");
@@ -2585,7 +2595,22 @@ version = "0.1.0"
 
 [web]
 dir = "web"
+
+# JavaScript Dependencies (managed by poly add/remove)
+# Example: poly add alpinejs
+[dependencies]
 "#, name)).ok();
+    }
+    
+    // Create .gitignore if not exists
+    if !Path::new(".gitignore").exists() {
+        fs::write(".gitignore", r#"/dist
+/target
+packages/
+"#).ok();
+    } else {
+        // Add packages/ to existing .gitignore if not present
+        add_to_gitignore("packages/").ok();
     }
     
     // Create web/index.html directly (Tauri/Electron style)
@@ -2665,6 +2690,7 @@ print("Backend ready")
     println!("  {}Initialized{} Poly project", GREEN, RESET);
     println!();
     println!("  {}Next:{} poly dev", DIM, RESET);
+    println!("  {}Add packages:{} poly add alpinejs", DIM, RESET);
     println!("  {}Edit web/index.html directly - hot reload is automatic{}", DIM, RESET);
     println!();
 }

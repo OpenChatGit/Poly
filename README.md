@@ -56,14 +56,88 @@ cargo install --path poly --features native
 | `poly dev` | Start dev server with hot reload |
 | `poly run --native` | Run as native desktop app |
 | `poly build` | Build for production |
+| `poly add <package>` | Add a JavaScript package |
+| `poly remove <package>` | Remove a package |
 | `poly update` | Check for updates |
 | `poly --version` | Show version and check for updates |
+
+## Package Management
+
+Poly has a built-in package manager for JavaScript libraries. No npm or node_modules needed!
+
+```bash
+# Add packages from npm/CDN
+poly add alpinejs
+poly add chart.js
+poly add three
+poly add lodash
+
+# Add specific version
+poly add alpinejs -v 3.14.0
+
+# Remove packages
+poly remove chart.js
+```
+
+### How It Works
+
+- Packages are downloaded to `packages/<name>/` folder
+- Dependencies are tracked in `poly.toml` under `[dependencies]`
+- `packages/` is automatically added to `.gitignore`
+- Server automatically serves `/packages/` route
+
+### Using Packages in HTML
+
+```html
+<!-- In your web/index.html -->
+<script src="/packages/alpinejs/alpine.min.js" defer></script>
+<script src="/packages/chart.js/chart.min.js"></script>
+<script src="/packages/lodash/lodash.min.js"></script>
+```
+
+### Supported Packages
+
+| Package | Command |
+|---------|---------|
+| Alpine.js | `poly add alpinejs` |
+| Chart.js | `poly add chart.js` |
+| Three.js | `poly add three` |
+| Lodash | `poly add lodash` |
+| Axios | `poly add axios` |
+| Day.js | `poly add dayjs` |
+| Marked | `poly add marked` |
+| Highlight.js | `poly add highlight.js` |
+| GSAP | `poly add gsap` |
+| Anime.js | `poly add anime` |
+| D3.js | `poly add d3` |
+| Vue | `poly add vue` |
+| Preact | `poly add preact` |
+| HTMX | `poly add htmx` |
+| Tailwind CSS | `poly add tailwind` |
+| Lucide Icons | `poly add lucide` |
+| Leaflet | `poly add leaflet` |
+
+### poly.toml Dependencies
+
+```toml
+[package]
+name = "my-app"
+version = "1.0.0"
+
+[dependencies]
+alpinejs = "3.14.3"
+"chart.js" = "4.5.1"
+lodash = "4.17.21"
+```
 
 ## Project Structure
 
 ```
 my-app/
 ├── poly.toml           # Project configuration
+├── packages/           # JavaScript dependencies (auto-managed)
+│   ├── alpinejs/
+│   └── chart.js/
 ├── src/
 │   └── main.poly       # Backend logic (optional)
 ├── web/
