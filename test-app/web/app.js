@@ -68,26 +68,58 @@ function app() {
             <html>
             <head>
               <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
                 body { 
-                  margin: 0; 
                   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                   color: white;
                   font-family: system-ui;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  height: 100vh;
+                  min-height: 100vh;
                 }
-                .content { text-align: center; }
+                /* Custom Titlebar */
+                .titlebar {
+                  height: 32px; background: rgba(0,0,0,0.3); display: flex;
+                  justify-content: space-between; align-items: center;
+                  padding: 0 12px; -webkit-app-region: drag;
+                }
+                .titlebar-title { font-size: 12px; opacity: 0.8; }
+                .titlebar-buttons { display: flex; gap: 4px; -webkit-app-region: no-drag; }
+                .titlebar-btn {
+                  width: 28px; height: 24px; border: none; background: transparent;
+                  color: white; cursor: pointer; font-size: 12px; border-radius: 4px;
+                  opacity: 0.7;
+                }
+                .titlebar-btn:hover { background: rgba(255,255,255,0.2); opacity: 1; }
+                .titlebar-btn.close:hover { background: #e81123; }
+                .content { 
+                  display: flex; align-items: center; justify-content: center;
+                  height: calc(100vh - 32px); text-align: center;
+                }
                 h1 { font-size: 32px; margin-bottom: 8px; }
                 p { opacity: 0.8; }
+                button {
+                  margin-top: 16px; padding: 10px 20px; border: none;
+                  background: rgba(255,255,255,0.2); color: white;
+                  border-radius: 8px; cursor: pointer; font-size: 14px;
+                }
+                button:hover { background: rgba(255,255,255,0.3); }
               </style>
             </head>
             <body>
+              <div class="titlebar" onmousedown="poly.window.drag()">
+                <div class="titlebar-title">${this.windowTitle || 'Test Window'}</div>
+                <div class="titlebar-buttons">
+                  <button class="titlebar-btn" onclick="poly.window.minimize()">─</button>
+                  <button class="titlebar-btn" onclick="poly.window.maximize()">□</button>
+                  <button class="titlebar-btn close" onclick="poly.window.close()">✕</button>
+                </div>
+              </div>
               <div class="content">
-                <h1>🎉 New Window!</h1>
-                <p>Created from Poly Multi-Window API</p>
-                <p>Window: ${this.windowTitle || 'Test Window'}</p>
+                <div>
+                  <h1>🎉 Custom Window!</h1>
+                  <p>Frameless window with custom titlebar</p>
+                  <p>Created via poly.windows.create()</p>
+                  <button onclick="poly.window.close()">Close Window</button>
+                </div>
               </div>
             </body>
             </html>
@@ -96,7 +128,7 @@ function app() {
         this.windowResult = '✓ Window created with ID: ' + result.id;
         this.testsRun++;
       } catch (e) {
-        this.windowResult = '✗ Error: ' + e.message;
+        this.windowResult = '✗ Error: ' + (e.message || e);
       }
     },
 
@@ -104,6 +136,26 @@ function app() {
       try {
         const count = await poly.windows.count();
         this.windowResult = '✓ Window count: ' + count;
+        this.testsRun++;
+      } catch (e) {
+        this.windowResult = '✗ Error: ' + e.message;
+      }
+    },
+
+    async listWindows() {
+      try {
+        const ids = await poly.windows.list();
+        this.windowResult = '✓ Window IDs: ' + JSON.stringify(ids);
+        this.testsRun++;
+      } catch (e) {
+        this.windowResult = '✗ Error: ' + e.message;
+      }
+    },
+
+    async closeAllWindows() {
+      try {
+        await poly.windows.closeAll();
+        this.windowResult = '✓ All windows closed';
         this.testsRun++;
       } catch (e) {
         this.windowResult = '✗ Error: ' + e.message;

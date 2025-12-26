@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
 #[cfg(feature = "native")]
 use once_cell::sync::Lazy;
 
+#[cfg(feature = "native")]
+use std::sync::mpsc::{channel, Sender};
+
 /// Window ID counter
 #[cfg(feature = "native")]
 static WINDOW_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -22,7 +25,6 @@ pub struct WindowConfig {
     pub resizable: bool,
     pub decorations: bool,
     pub always_on_top: bool,
-    pub parent_id: Option<u64>,
 }
 
 impl Default for WindowConfig {
@@ -34,9 +36,8 @@ impl Default for WindowConfig {
             url: None,
             html: None,
             resizable: true,
-            decorations: false, // Frameless by default for custom titlebar
+            decorations: false,
             always_on_top: false,
-            parent_id: None,
         }
     }
 }
@@ -66,55 +67,38 @@ impl WindowConfig {
     }
 }
 
-/// Window handle for controlling a window
+/// Window handle
 #[derive(Debug, Clone)]
 pub struct WindowHandle {
     pub id: u64,
 }
 
-/// Global window registry
+/// Commands to send to windows
 #[cfg(feature = "native")]
-pub static WINDOW_REGISTRY: Lazy<Arc<Mutex<WindowRegistry>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(WindowRegistry::new()))
-});
-
-/// Registry to track all windows
-#[cfg(feature = "native")]
-pub struct WindowRegistry {
-    windows: HashMap<u64, WindowInfo>,
+#[derive(Debug)]
+pub enum WindowCommand {
+    Close,
+    Minimize,
+    Maximize,
+    Show,
+    Hide,
 }
 
+/// Window info stored in registry
 #[cfg(feature = "native")]
 struct WindowInfo {
     #[allow(dead_code)]
     title: String,
-    #[allow(dead_code)]
-    visible: bool,
+    sender: Sender<WindowCommand>,
 }
 
+/// Global window registry
 #[cfg(feature = "native")]
-impl WindowRegistry {
-    pub fn new() -> Self {
-        Self {
-            windows: HashMap::new(),
-        }
-    }
-    
-    pub fn register(&mut self, id: u64, title: String) {
-        self.windows.insert(id, WindowInfo { title, visible: true });
-    }
-    
-    pub fn unregister(&mut self, id: u64) {
-        self.windows.remove(&id);
-    }
-    
-    pub fn count(&self) -> usize {
-        self.windows.len()
-    }
-}
+pub static WINDOW_REGISTRY: Lazy<Arc<Mutex<HashMap<u64, WindowInfo>>>> = Lazy::new(|| {
+    Arc::new(Mutex::new(HashMap::new()))
+});
 
-/// Create a new window (returns window ID)
-/// Note: This creates a window in a separate thread
+/// Create a new window
 #[cfg(feature = "native")]
 pub fn create_window(config: WindowConfig) -> Result<WindowHandle, String> {
     use std::thread;
@@ -122,37 +106,81 @@ pub fn create_window(config: WindowConfig) -> Result<WindowHandle, String> {
     let id = WINDOW_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
     let title = config.title.clone();
     
+    // Create channel for commands
+    let (tx, rx) = channel::<WindowCommand>();
+    
     // Register window
     {
         let mut registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Lock error: {}", e))?;
-        registry.register(id, title.clone());
+        registry.insert(id, WindowInfo { title, sender: tx });
     }
     
     // Spawn window in new thread
     thread::spawn(move || {
-        if let Err(e) = run_window(id, config) {
+        if let Err(e) = run_window(id, config, rx) {
             eprintln!("Window {} error: {}", id, e);
         }
         
         // Unregister on close
         if let Ok(mut registry) = WINDOW_REGISTRY.lock() {
-            registry.unregister(id);
+            registry.remove(&id);
         }
     });
     
     Ok(WindowHandle { id })
 }
 
+/// Close a window by ID
 #[cfg(feature = "native")]
-fn run_window(id: u64, config: WindowConfig) -> Result<(), String> {
+pub fn close_window(id: u64) -> Result<(), String> {
+    let registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Lock error: {}", e))?;
+    
+    if let Some(info) = registry.get(&id) {
+        info.sender.send(WindowCommand::Close).map_err(|e| format!("Send error: {}", e))?;
+        Ok(())
+    } else {
+        Err(format!("Window {} not found", id))
+    }
+}
+
+/// Close all windows
+#[cfg(feature = "native")]
+pub fn close_all_windows() -> Result<(), String> {
+    let registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Lock error: {}", e))?;
+    
+    for (_, info) in registry.iter() {
+        let _ = info.sender.send(WindowCommand::Close);
+    }
+    Ok(())
+}
+
+/// Get window count
+#[cfg(feature = "native")]
+pub fn window_count() -> usize {
+    WINDOW_REGISTRY.lock().map(|r| r.len()).unwrap_or(0)
+}
+
+/// List all window IDs
+#[cfg(feature = "native")]
+pub fn list_windows() -> Vec<u64> {
+    WINDOW_REGISTRY.lock()
+        .map(|r| r.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+#[cfg(feature = "native")]
+fn run_window(id: u64, config: WindowConfig, rx: std::sync::mpsc::Receiver<WindowCommand>) -> Result<(), String> {
     use tao::{
         event::{Event, WindowEvent},
-        event_loop::{ControlFlow, EventLoop},
+        event_loop::{ControlFlow, EventLoopBuilder},
         window::WindowBuilder,
+        platform::windows::EventLoopBuilderExtWindows,
     };
     use wry::WebViewBuilder;
     
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoopBuilder::new()
+        .with_any_thread(true)
+        .build();
     
     let window = WindowBuilder::new()
         .with_title(&config.title)
@@ -165,6 +193,7 @@ fn run_window(id: u64, config: WindowConfig) -> Result<(), String> {
     
     let window = Arc::new(window);
     let window_clone = Arc::clone(&window);
+    let window_for_cmd = Arc::clone(&window);
     
     // Build webview
     let mut builder = WebViewBuilder::new()
@@ -180,7 +209,9 @@ fn run_window(id: u64, config: WindowConfig) -> Result<(), String> {
                         window_clone.set_maximized(true);
                     }
                 }
-                "close" => std::process::exit(0),
+                "close" => {
+                    window_clone.set_visible(false);
+                }
                 cmd if cmd.starts_with("drag") => {
                     let _ = window_clone.drag_window();
                 }
@@ -188,42 +219,93 @@ fn run_window(id: u64, config: WindowConfig) -> Result<(), String> {
             }
         });
     
-    // Set content
+    // Set content - inject IPC bridge for window controls
+    let ipc_script = r#"<script>
+window.ipc = {
+  postMessage: function(msg) {
+    if (window.__TAURI_IPC__) window.__TAURI_IPC__(msg);
+    else if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(msg);
+    else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) window.webkit.messageHandlers.ipc.postMessage(msg);
+  }
+};
+window.poly = window.poly || {};
+window.poly.window = {
+  minimize: function() { window.ipc.postMessage('minimize'); },
+  maximize: function() { window.ipc.postMessage('maximize'); },
+  close: function() { window.ipc.postMessage('close'); },
+  drag: function() { window.ipc.postMessage('drag'); }
+};
+</script>"#;
+
     if let Some(url) = &config.url {
         builder = builder.with_url(url);
     } else if let Some(html) = &config.html {
-        builder = builder.with_html(html);
+        // Inject IPC script into user's HTML
+        let mut html_with_ipc = html.clone();
+        if html_with_ipc.contains("</head>") {
+            html_with_ipc = html_with_ipc.replace("</head>", &format!("{}</head>", ipc_script));
+        } else if html_with_ipc.contains("<body") {
+            html_with_ipc = html_with_ipc.replace("<body", &format!("{}<body", ipc_script));
+        } else {
+            html_with_ipc = format!("{}{}", ipc_script, html_with_ipc);
+        }
+        builder = builder.with_html(&html_with_ipc);
     } else {
-        builder = builder.with_html(&format!(r#"
-            <!DOCTYPE html>
-            <html>
-            <head><title>{}</title></head>
-            <body style="margin:0;background:#1a1a1f;color:#fff;font-family:system-ui;">
-                <div style="padding:20px;">
-                    <h1>Window {}</h1>
-                    <p>This is a Poly window.</p>
-                </div>
-            </body>
-            </html>
-        "#, config.title, id));
+        // Minimal default - user should provide their own HTML
+        builder = builder.with_html(&format!(r#"<!DOCTYPE html>
+<html>
+<head><title>{}</title>{}</head>
+<body style="margin:0;background:#1a1a1f;color:#fff;font-family:system-ui;padding:20px;">
+<p>Window {} - Provide your own HTML via the 'html' option</p>
+</body>
+</html>"#, config.title, ipc_script, id));
     }
     
     let _webview = builder.build(&*window)
         .map_err(|e| format!("WebView build error: {}", e))?;
     
+    // Proxy for event loop
+    let proxy = event_loop.create_proxy();
+    
+    // Thread to receive commands
+    std::thread::spawn(move || {
+        while let Ok(cmd) = rx.recv() {
+            match cmd {
+                WindowCommand::Close => {
+                    window_for_cmd.set_visible(false);
+                    let _ = proxy.send_event(());
+                    break;
+                }
+                WindowCommand::Minimize => window_for_cmd.set_minimized(true),
+                WindowCommand::Maximize => {
+                    if window_for_cmd.is_maximized() {
+                        window_for_cmd.set_maximized(false);
+                    } else {
+                        window_for_cmd.set_maximized(true);
+                    }
+                }
+                WindowCommand::Show => {
+                    window_for_cmd.set_visible(true);
+                    window_for_cmd.set_focus();
+                }
+                WindowCommand::Hide => window_for_cmd.set_visible(false),
+            }
+        }
+    });
+    
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         
-        if let Event::WindowEvent { event: WindowEvent::CloseRequested, .. } = event {
-            *control_flow = ControlFlow::Exit;
+        match event {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::UserEvent(()) => {
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
         }
     });
-}
-
-/// Get window count
-#[cfg(feature = "native")]
-pub fn window_count() -> usize {
-    WINDOW_REGISTRY.lock().map(|r| r.count()).unwrap_or(0)
 }
 
 // Stubs for non-native
@@ -233,6 +315,21 @@ pub fn create_window(_config: WindowConfig) -> Result<WindowHandle, String> {
 }
 
 #[cfg(not(feature = "native"))]
+pub fn close_window(_id: u64) -> Result<(), String> {
+    Err("Requires native feature".to_string())
+}
+
+#[cfg(not(feature = "native"))]
+pub fn close_all_windows() -> Result<(), String> {
+    Err("Requires native feature".to_string())
+}
+
+#[cfg(not(feature = "native"))]
 pub fn window_count() -> usize {
     0
+}
+
+#[cfg(not(feature = "native"))]
+pub fn list_windows() -> Vec<u64> {
+    vec![]
 }

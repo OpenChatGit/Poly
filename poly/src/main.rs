@@ -648,6 +648,9 @@ window.poly = {{
   }},
   windows: {{
     async create(options = {{}}) {{ return poly.invoke('__poly_window_create', options); }},
+    async close(id) {{ return poly.invoke('__poly_window_close', {{ id }}); }},
+    async closeAll() {{ return poly.invoke('__poly_window_close_all', {{}}); }},
+    async list() {{ return poly.invoke('__poly_window_list', {{}}); }},
     async count() {{ return poly.invoke('__poly_window_count', {{}}); }}
   }}
 }};
@@ -1202,6 +1205,45 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             #[cfg(not(feature = "native"))]
             {
                 serde_json::json!({"result": 0}).to_string()
+            }
+        }
+        "__poly_window_close" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::window::close_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_close_all" => {
+            #[cfg(feature = "native")]
+            {
+                match poly::window::close_all_windows() {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_list" => {
+            #[cfg(feature = "native")]
+            {
+                let ids = poly::window::list_windows();
+                serde_json::json!({"result": ids}).to_string()
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"result": []}).to_string()
             }
         }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
@@ -2045,6 +2087,9 @@ window.poly = {
   },
   windows: {
     async create(options = {}) { return poly.invoke('__poly_window_create', options); },
+    async close(id) { return poly.invoke('__poly_window_close', { id }); },
+    async closeAll() { return poly.invoke('__poly_window_close_all', {}); },
+    async list() { return poly.invoke('__poly_window_list', {}); },
     async count() { return poly.invoke('__poly_window_count', {}); }
   }
 };

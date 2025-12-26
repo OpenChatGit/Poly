@@ -39,8 +39,10 @@
       <h2>🪟 Multi-Window</h2>
       <div class="row">
         <input type="text" x-model="windowTitle" placeholder="Window title...">
-        <button @click="createWindow()">Create Window</button>
-        <button @click="getWindowCount()">Count Windows</button>
+        <button @click="createWindow()">Create</button>
+        <button @click="getWindowCount()">Count</button>
+        <button @click="listWindows()">List</button>
+        <button @click="closeAllWindows()">Close All</button>
       </div>
       <div class="result" x-show="windowResult" x-text="windowResult"></div>
     </div>
