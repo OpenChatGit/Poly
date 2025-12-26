@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.3";
+const VERSION: &str = "0.2.4";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -384,7 +384,7 @@ fn run_file_result(file: &str) -> Result<(), String> {
 
 fn run_repl() {
     println!();
-    println!("  {}POLY{} v0.2.2", CYAN, RESET);
+    println!("  {}POLY{} v0.2.4", CYAN, RESET);
     println!("  {}Type 'exit' to quit{}", DIM, RESET);
     println!();
     
@@ -435,7 +435,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry = entry.unwrap();
     
     println!();
-    println!("  {}POLY{} v0.2.2  {}dev server{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.4  {}dev server{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local:   {}http://localhost:{}{}", GREEN, RESET, CYAN, port, RESET);
     println!("  {}>{} Entry:   {}{}{}", DIM, RESET, DIM, entry.display(), RESET);
@@ -1324,7 +1324,7 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
         .ok_or_else(|| "No entry point found".to_string())?;
     
     println!();
-    println!("  {}POLY{} v0.2.2  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
+    println!("  {}POLY{} v0.2.4  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
     println!();
     
     let start = std::time::Instant::now();
@@ -1435,7 +1435,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let port = 9473u16;
     
     println!();
-    println!("  {}POLY{} v0.2.2  {}native{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.4  {}native{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
@@ -2147,7 +2147,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
 fn create_project(name: &str, template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.2", CYAN, RESET);
+    println!("  {}POLY{} v0.2.4", CYAN, RESET);
     println!();
     
     let project_path = Path::new(name);
@@ -2614,7 +2614,7 @@ fn add(a, b):
 
 fn init_project(_template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.2", CYAN, RESET);
+    println!("  {}POLY{} v0.2.4", CYAN, RESET);
     println!();
     
     let cwd = std::env::current_dir().expect("Failed to get current directory");
