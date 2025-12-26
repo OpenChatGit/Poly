@@ -1,6 +1,6 @@
 # Poly
 
-**Build native desktop apps with web technologies — simpler than Electron, faster than Tauri.**
+**Build native desktop apps with web technologies — lightweight, fast, and easy to use.**
 
 Poly is a modern framework for building cross-platform desktop applications using HTML, CSS, and JavaScript. It provides native OS integration out-of-the-box with zero configuration.
 
