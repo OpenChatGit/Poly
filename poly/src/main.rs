@@ -16,7 +16,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.1";
+const VERSION: &str = "0.2.2";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -110,6 +110,22 @@ enum Commands {
     
     /// Check for updates
     Update,
+    
+    /// Add a JavaScript package from npm/CDN
+    Add {
+        /// Package name (e.g., alpinejs, chart.js, three)
+        package: String,
+        
+        /// Specific version (default: latest)
+        #[arg(short, long)]
+        version: Option<String>,
+    },
+    
+    /// Remove a JavaScript package
+    Remove {
+        /// Package name to remove
+        package: String,
+    },
 }
 
 fn main() {
@@ -128,6 +144,8 @@ fn main() {
         Some(Commands::New { name, template }) => { create_project(&name, &template); Ok(()) },
         Some(Commands::Init { template }) => { init_project(&template); Ok(()) },
         Some(Commands::Update) => { check_for_updates_interactive(); Ok(()) },
+        Some(Commands::Add { package, version }) => add_package(&package, version.as_deref()),
+        Some(Commands::Remove { package }) => remove_package(&package),
         None => {
             if let Some(expr) = cli.eval {
                 match poly::eval(&expr) {
@@ -647,7 +665,7 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
                 }
                 _ => {
-                    // First try the exact path, then try in web/ folder
+                    // First try the exact path, then try in web/ folder, then packages/
                     let url_path = url.trim_start_matches('/');
                     let file_path = project_path_http.join(url_path);
                     let web_file_path = project_path_http.join("web").join(url_path);
@@ -661,19 +679,42 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                     };
                     
                     if let Some(path) = actual_path {
-                        let content = fs::read_to_string(&path).unwrap_or_default();
-                        let ct = match path.extension().and_then(|e| e.to_str()) {
-                            Some("html") => "text/html; charset=utf-8",
-                            Some("css") => "text/css; charset=utf-8",
-                            Some("js") => "application/javascript; charset=utf-8",
-                            Some("json") => "application/json",
-                            Some("svg") => "image/svg+xml",
-                            Some("png") => "image/png",
-                            Some("jpg") | Some("jpeg") => "image/jpeg",
-                            _ => "text/plain",
-                        };
-                        tiny_http::Response::from_string(content)
-                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
+                        // Use read for binary files, read_to_string for text
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let is_binary = matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "ico" | "woff" | "woff2" | "ttf" | "eot");
+                        
+                        if is_binary {
+                            match fs::read(&path) {
+                                Ok(content) => {
+                                    let ct = match ext {
+                                        "png" => "image/png",
+                                        "jpg" | "jpeg" => "image/jpeg",
+                                        "gif" => "image/gif",
+                                        "ico" => "image/x-icon",
+                                        "woff" => "font/woff",
+                                        "woff2" => "font/woff2",
+                                        "ttf" => "font/ttf",
+                                        "eot" => "application/vnd.ms-fontobject",
+                                        _ => "application/octet-stream",
+                                    };
+                                    tiny_http::Response::from_data(content)
+                                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
+                                }
+                                Err(_) => tiny_http::Response::from_string("Read Error").with_status_code(500)
+                            }
+                        } else {
+                            let content = fs::read_to_string(&path).unwrap_or_default();
+                            let ct = match ext {
+                                "html" => "text/html; charset=utf-8",
+                                "css" => "text/css; charset=utf-8",
+                                "js" => "application/javascript; charset=utf-8",
+                                "json" => "application/json",
+                                "svg" => "image/svg+xml",
+                                _ => "text/plain",
+                            };
+                            tiny_http::Response::from_string(content)
+                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
+                        }
                     } else {
                         tiny_http::Response::from_string("Not Found").with_status_code(404)
                     }
@@ -2626,4 +2667,328 @@ print("Backend ready")
     println!("  {}Next:{} poly dev", DIM, RESET);
     println!("  {}Edit web/index.html directly - hot reload is automatic{}", DIM, RESET);
     println!();
+}
+
+// ============================================
+// Package Management (poly add / poly remove)
+// ============================================
+
+/// Known packages with their CDN URLs
+fn get_package_info(name: &str) -> Option<(&'static str, &'static str)> {
+    // Returns (cdn_url_template, main_file)
+    // {version} will be replaced with actual version
+    match name.to_lowercase().as_str() {
+        "alpinejs" | "alpine" => Some(("https://unpkg.com/alpinejs@{version}/dist/cdn.min.js", "alpine.min.js")),
+        "chart.js" | "chartjs" => Some(("https://unpkg.com/chart.js@{version}/dist/chart.umd.min.js", "chart.min.js")),
+        "three" | "three.js" | "threejs" => Some(("https://unpkg.com/three@{version}/build/three.min.js", "three.min.js")),
+        "lodash" => Some(("https://unpkg.com/lodash@{version}/lodash.min.js", "lodash.min.js")),
+        "axios" => Some(("https://unpkg.com/axios@{version}/dist/axios.min.js", "axios.min.js")),
+        "dayjs" => Some(("https://unpkg.com/dayjs@{version}/dayjs.min.js", "dayjs.min.js")),
+        "marked" => Some(("https://unpkg.com/marked@{version}/marked.min.js", "marked.min.js")),
+        "highlight.js" | "highlightjs" => Some(("https://unpkg.com/@highlightjs/cdn-assets@{version}/highlight.min.js", "highlight.min.js")),
+        "prism" | "prismjs" => Some(("https://unpkg.com/prismjs@{version}/prism.min.js", "prism.min.js")),
+        "gsap" => Some(("https://unpkg.com/gsap@{version}/dist/gsap.min.js", "gsap.min.js")),
+        "anime" | "animejs" => Some(("https://unpkg.com/animejs@{version}/lib/anime.min.js", "anime.min.js")),
+        "d3" => Some(("https://unpkg.com/d3@{version}/dist/d3.min.js", "d3.min.js")),
+        "moment" => Some(("https://unpkg.com/moment@{version}/min/moment.min.js", "moment.min.js")),
+        "luxon" => Some(("https://unpkg.com/luxon@{version}/build/global/luxon.min.js", "luxon.min.js")),
+        "socket.io" | "socketio" => Some(("https://unpkg.com/socket.io-client@{version}/dist/socket.io.min.js", "socket.io.min.js")),
+        "htmx" => Some(("https://unpkg.com/htmx.org@{version}/dist/htmx.min.js", "htmx.min.js")),
+        "petite-vue" => Some(("https://unpkg.com/petite-vue@{version}/dist/petite-vue.iife.js", "petite-vue.min.js")),
+        "vue" => Some(("https://unpkg.com/vue@{version}/dist/vue.global.prod.js", "vue.min.js")),
+        "preact" => Some(("https://unpkg.com/preact@{version}/dist/preact.min.js", "preact.min.js")),
+        "mithril" => Some(("https://unpkg.com/mithril@{version}/mithril.min.js", "mithril.min.js")),
+        "hyperscript" | "_hyperscript" => Some(("https://unpkg.com/hyperscript.org@{version}/dist/_hyperscript.min.js", "hyperscript.min.js")),
+        "tailwindcss" | "tailwind" => Some(("https://unpkg.com/@tailwindcss/browser@{version}", "tailwind.min.js")),
+        "daisyui" => Some(("https://cdn.jsdelivr.net/npm/daisyui@{version}/dist/full.min.css", "daisyui.min.css")),
+        "lucide" => Some(("https://unpkg.com/lucide@{version}/dist/umd/lucide.min.js", "lucide.min.js")),
+        "feather" | "feather-icons" => Some(("https://unpkg.com/feather-icons@{version}/dist/feather.min.js", "feather.min.js")),
+        "iconify" => Some(("https://unpkg.com/iconify-icon@{version}/dist/iconify-icon.min.js", "iconify.min.js")),
+        "sortablejs" | "sortable" => Some(("https://unpkg.com/sortablejs@{version}/Sortable.min.js", "sortable.min.js")),
+        "dragula" => Some(("https://unpkg.com/dragula@{version}/dist/dragula.min.js", "dragula.min.js")),
+        "swiper" => Some(("https://unpkg.com/swiper@{version}/swiper-bundle.min.js", "swiper.min.js")),
+        "leaflet" => Some(("https://unpkg.com/leaflet@{version}/dist/leaflet.js", "leaflet.min.js")),
+        "maplibre" | "maplibre-gl" => Some(("https://unpkg.com/maplibre-gl@{version}/dist/maplibre-gl.js", "maplibre-gl.min.js")),
+        _ => None,
+    }
+}
+
+/// Fetch latest version from npm registry
+#[cfg(feature = "native")]
+fn fetch_latest_version(package: &str) -> Result<String, String> {
+    let package_lower = package.to_lowercase();
+    let npm_name = match package_lower.as_str() {
+        "alpine" => "alpinejs",
+        "chartjs" => "chart.js",
+        "threejs" | "three.js" => "three",
+        "highlightjs" => "@highlightjs/cdn-assets",
+        "prism" => "prismjs",
+        "anime" => "animejs",
+        "socketio" => "socket.io-client",
+        "tailwindcss" => "@tailwindcss/browser",
+        "feather" => "feather-icons",
+        "hyperscript" => "hyperscript.org",
+        "sortable" => "sortablejs",
+        "maplibre" => "maplibre-gl",
+        other => other,
+    };
+    
+    let url = format!("https://registry.npmjs.org/{}/latest", npm_name);
+    
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Poly-Package-Manager/1.0")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+    
+    let response = client.get(&url)
+        .send()
+        .map_err(|e| format!("Failed to fetch package info: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Package '{}' not found on npm", package));
+    }
+    
+    let json: serde_json::Value = response.json()
+        .map_err(|e| format!("Failed to parse npm response: {}", e))?;
+    
+    json["version"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Version not found in npm response".to_string())
+}
+
+#[cfg(not(feature = "native"))]
+fn fetch_latest_version(_package: &str) -> Result<String, String> {
+    Err("Package management requires native feature".to_string())
+}
+
+/// Download file from URL
+#[cfg(feature = "native")]
+fn download_file(url: &str, dest: &Path) -> Result<(), String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Poly-Package-Manager/1.0")
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+    
+    let response = client.get(url)
+        .send()
+        .map_err(|e| format!("Download failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Download failed: HTTP {}", response.status()));
+    }
+    
+    let content = response.bytes()
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    // Create parent directories
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    
+    fs::write(dest, &content)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    
+    Ok(())
+}
+
+#[cfg(not(feature = "native"))]
+fn download_file(_url: &str, _dest: &Path) -> Result<(), String> {
+    Err("Package management requires native feature".to_string())
+}
+
+/// Add a package to the project
+fn add_package(package: &str, version: Option<&str>) -> Result<(), String> {
+    println!();
+    println!("  {}POLY{} {}add{}", CYAN, RESET, DIM, RESET);
+    println!();
+    
+    // Check if we're in a Poly project
+    if !Path::new("poly.toml").exists() {
+        return Err("Not a Poly project. Run 'poly init' first or create poly.toml".to_string());
+    }
+    
+    // Get package info
+    let (url_template, filename) = get_package_info(package)
+        .ok_or_else(|| format!("Unknown package '{}'. Try using the npm package name.", package))?;
+    
+    // Get version
+    let version = match version {
+        Some(v) => v.to_string(),
+        None => {
+            print!("  {}Fetching latest version...{}", DIM, RESET);
+            io::stdout().flush().ok();
+            let v = fetch_latest_version(package)?;
+            print!("\r                                    \r");
+            v
+        }
+    };
+    
+    println!("  {}>{} Adding {}{}@{}{}", GREEN, RESET, BOLD, package, version, RESET);
+    
+    // Build download URL
+    let url = url_template.replace("{version}", &version);
+    
+    // Create packages directory
+    let package_dir = Path::new("packages").join(package);
+    fs::create_dir_all(&package_dir)
+        .map_err(|e| format!("Failed to create packages directory: {}", e))?;
+    
+    // Download file
+    let dest_path = package_dir.join(filename);
+    print!("  {}Downloading...{}", DIM, RESET);
+    io::stdout().flush().ok();
+    
+    download_file(&url, &dest_path)?;
+    
+    println!("\r  {}>{} Downloaded to {}{}", GREEN, RESET, DIM, dest_path.display());
+    
+    // Update poly.toml
+    update_poly_toml_dependency(package, &version)?;
+    
+    // Add to .gitignore if not already there
+    add_to_gitignore("packages/")?;
+    
+    println!();
+    println!("  {}Usage in HTML:{}", DIM, RESET);
+    if filename.ends_with(".css") {
+        println!("  <link rel=\"stylesheet\" href=\"/packages/{}/{}\" />", package, filename);
+    } else {
+        println!("  <script src=\"/packages/{}/{}\"></script>", package, filename);
+    }
+    println!();
+    
+    Ok(())
+}
+
+/// Remove a package from the project
+fn remove_package(package: &str) -> Result<(), String> {
+    println!();
+    println!("  {}POLY{} {}remove{}", CYAN, RESET, DIM, RESET);
+    println!();
+    
+    let package_dir = Path::new("packages").join(package);
+    
+    if !package_dir.exists() {
+        return Err(format!("Package '{}' is not installed", package));
+    }
+    
+    // Remove directory
+    fs::remove_dir_all(&package_dir)
+        .map_err(|e| format!("Failed to remove package: {}", e))?;
+    
+    println!("  {}>{} Removed {}{}{}", GREEN, RESET, BOLD, package, RESET);
+    
+    // Update poly.toml
+    remove_from_poly_toml(package)?;
+    
+    println!();
+    
+    Ok(())
+}
+
+/// Update poly.toml with new dependency
+fn update_poly_toml_dependency(package: &str, version: &str) -> Result<(), String> {
+    let toml_path = Path::new("poly.toml");
+    let content = fs::read_to_string(toml_path)
+        .map_err(|e| format!("Failed to read poly.toml: {}", e))?;
+    
+    // Check if [dependencies] section exists
+    if content.contains("[dependencies]") {
+        // Check if package already exists
+        let dep_line = format!("{} = ", package);
+        if content.contains(&dep_line) || content.contains(&format!("\"{}\" = ", package)) {
+            // Update existing
+            let mut new_content = String::new();
+            for line in content.lines() {
+                if line.starts_with(&dep_line) || line.starts_with(&format!("\"{}\"", package)) {
+                    if package.contains('.') || package.contains('-') {
+                        new_content.push_str(&format!("\"{}\" = \"{}\"\n", package, version));
+                    } else {
+                        new_content.push_str(&format!("{} = \"{}\"\n", package, version));
+                    }
+                } else {
+                    new_content.push_str(line);
+                    new_content.push('\n');
+                }
+            }
+            fs::write(toml_path, new_content.trim_end())
+                .map_err(|e| format!("Failed to write poly.toml: {}", e))?;
+        } else {
+            // Add new dependency after [dependencies]
+            let new_content = if package.contains('.') || package.contains('-') {
+                content.replace("[dependencies]", &format!("[dependencies]\n\"{}\" = \"{}\"", package, version))
+            } else {
+                content.replace("[dependencies]", &format!("[dependencies]\n{} = \"{}\"", package, version))
+            };
+            fs::write(toml_path, new_content)
+                .map_err(|e| format!("Failed to write poly.toml: {}", e))?;
+        }
+    } else {
+        // Add [dependencies] section
+        let dep_entry = if package.contains('.') || package.contains('-') {
+            format!("\n\n[dependencies]\n\"{}\" = \"{}\"", package, version)
+        } else {
+            format!("\n\n[dependencies]\n{} = \"{}\"", package, version)
+        };
+        let new_content = format!("{}{}", content.trim_end(), dep_entry);
+        fs::write(toml_path, new_content)
+            .map_err(|e| format!("Failed to write poly.toml: {}", e))?;
+    }
+    
+    Ok(())
+}
+
+/// Remove dependency from poly.toml
+fn remove_from_poly_toml(package: &str) -> Result<(), String> {
+    let toml_path = Path::new("poly.toml");
+    let content = fs::read_to_string(toml_path)
+        .map_err(|e| format!("Failed to read poly.toml: {}", e))?;
+    
+    let mut new_lines: Vec<&str> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        // Skip lines that match the package
+        if trimmed.starts_with(&format!("{} =", package)) 
+            || trimmed.starts_with(&format!("\"{}\" =", package)) 
+            || trimmed.starts_with(&format!("{} =", package))
+        {
+            continue;
+        }
+        new_lines.push(line);
+    }
+    
+    fs::write(toml_path, new_lines.join("\n"))
+        .map_err(|e| format!("Failed to write poly.toml: {}", e))?;
+    
+    Ok(())
+}
+
+/// Add entry to .gitignore if not present
+fn add_to_gitignore(entry: &str) -> Result<(), String> {
+    let gitignore_path = Path::new(".gitignore");
+    
+    let content = if gitignore_path.exists() {
+        fs::read_to_string(gitignore_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    
+    if !content.contains(entry) {
+        let new_content = if content.is_empty() {
+            entry.to_string()
+        } else if content.ends_with('\n') {
+            format!("{}{}\n", content, entry)
+        } else {
+            format!("{}\n{}\n", content, entry)
+        };
+        
+        fs::write(gitignore_path, new_content)
+            .map_err(|e| format!("Failed to update .gitignore: {}", e))?;
+    }
+    
+    Ok(())
 }

@@ -25,3 +25,5 @@ id = "separator"
 [[tray.menu]]
 id = "quit"
 label = "Exit"
+
+[dependencies]
