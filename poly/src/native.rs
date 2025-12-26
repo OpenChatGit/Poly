@@ -309,7 +309,9 @@ fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>
 /// Run a native window with a URL (frameless with custom titlebar)
 #[cfg(feature = "native")]
 pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
+    #[allow(unused_imports)]
     use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    #[allow(unused_imports)]
     use tray_icon::{TrayIconBuilder, Icon as TrayIconType, menu::{Menu, MenuItem, PredefinedMenuItem, MenuEvent}};
     
     let event_loop = EventLoop::new();

@@ -81,6 +81,7 @@ pub enum TrayEvent {
 pub struct TrayHandle {
     _tray: TrayIcon,
     event_receiver: mpsc::Receiver<TrayEvent>,
+    #[allow(dead_code)]
     menu_items: Arc<Mutex<std::collections::HashMap<String, String>>>,
 }
 
@@ -237,7 +238,7 @@ fn load_tray_icon(path: &str) -> Result<Icon, Box<dyn std::error::Error>> {
     };
     
     let img = image::load(reader, format)?;
-    let (width, height) = img.dimensions();
+    let (_width, _height) = img.dimensions();
     
     // Resize to standard tray icon size (32x32 or 64x64)
     let size = 32u32;

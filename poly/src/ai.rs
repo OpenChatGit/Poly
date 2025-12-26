@@ -135,6 +135,7 @@ pub enum StreamEvent {
 }
 
 /// Get base URL for provider
+#[allow(dead_code)]
 fn get_base_url(provider: &AiProvider, custom_url: Option<&str>) -> String {
     match custom_url {
         Some(url) => url.to_string(),
@@ -535,6 +536,7 @@ fn chat_anthropic(base_url: &str, request: &ChatRequest) -> Result<ChatResponse,
 }
 
 /// Extract thinking content from <think> tags (for models that use them)
+#[allow(dead_code)]
 fn extract_thinking(content: &str) -> (String, Option<String>) {
     // Check for <think>...</think> tags (DeepSeek, some Ollama models)
     if let Some(start) = content.find("<think>") {

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::fs;
-use std::io::{self, Write, BufRead, Read};
+use std::io::{self, Write, BufRead};
 use std::path::Path;
 use std::sync::mpsc::channel;
 use std::time::Duration;
@@ -17,6 +17,7 @@ const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
 const VERSION: &str = "0.2.1";
+#[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
 #[derive(Parser)]
@@ -413,7 +414,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     }
     
     // Channel for reloading interpreter
-    let (reload_tx, reload_rx) = std::sync::mpsc::channel::<String>();
+    let (_reload_tx, reload_rx) = std::sync::mpsc::channel::<String>();
     let interpreter_reload = Arc::clone(&interpreter);
     
     // Interpreter reload thread
@@ -800,6 +801,7 @@ fn handle_ipc_invoke_stateful(interpreter: &std::sync::Arc<std::sync::Mutex<poly
     }
 }
 
+#[allow(dead_code)]
 fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
     // Parse the request: { "fn": "function_name", "args": { ... } }
     let request: serde_json::Value = match serde_json::from_str(body) {

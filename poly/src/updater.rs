@@ -89,6 +89,7 @@ pub struct UpdateInfo {
 
 /// GitHub Release API response
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GitHubRelease {
     tag_name: String,
     body: Option<String>,
@@ -97,6 +98,7 @@ struct GitHubRelease {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GitHubAsset {
     name: String,
     browser_download_url: String,
@@ -434,8 +436,6 @@ pub fn install_update(update_path: &Path) -> Result<(), String> {
 
 #[cfg(feature = "native")]
 fn extract_and_replace(zip_path: &Path) -> Result<(), String> {
-    use std::io::Read;
-    
     let file = std::fs::File::open(zip_path)
         .map_err(|e| format!("Failed to open zip: {}", e))?;
     
@@ -445,7 +445,7 @@ fn extract_and_replace(zip_path: &Path) -> Result<(), String> {
     let exe_path = std::env::current_exe()
         .map_err(|e| format!("Failed to get exe path: {}", e))?;
     
-    let exe_dir = exe_path.parent()
+    let _exe_dir = exe_path.parent()
         .ok_or("Failed to get exe directory")?;
     
     // Extract to temp, then replace
