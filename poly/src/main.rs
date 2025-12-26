@@ -16,7 +16,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.1.5";
+const VERSION: &str = "0.2.1";
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
 #[derive(Parser)]
@@ -336,7 +336,7 @@ fn run_file_result(file: &str) -> Result<(), String> {
 
 fn run_repl() {
     println!();
-    println!("  {}POLY{} v0.1.5", CYAN, RESET);
+    println!("  {}POLY{} v0.2.1", CYAN, RESET);
     println!("  {}Type 'exit' to quit{}", DIM, RESET);
     println!();
     
@@ -387,7 +387,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry = entry.unwrap();
     
     println!();
-    println!("  {}POLY{} v0.1.5  {}dev server{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.1  {}dev server{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local:   {}http://localhost:{}{}", GREEN, RESET, CYAN, port, RESET);
     println!("  {}>{} Entry:   {}{}{}", DIM, RESET, DIM, entry.display(), RESET);
@@ -397,6 +397,36 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let reload_counter_http = Arc::clone(&reload_counter);
     let project_path_http = project_path_owned.clone();
     let entry_http = entry.clone();
+    
+    // Create persistent interpreter wrapped in Arc<Mutex>
+    use std::sync::Mutex;
+    let interpreter = Arc::new(Mutex::new(poly::create_interpreter()));
+    let interpreter_http = Arc::clone(&interpreter);
+    
+    // Initialize interpreter with source
+    {
+        let source = fs::read_to_string(&entry).unwrap_or_default();
+        let mut interp = interpreter.lock().unwrap();
+        if let Err(e) = poly::init_interpreter(&mut interp, &source) {
+            eprintln!("{}error{}: Failed to initialize interpreter: {}", RED, RESET, e);
+        }
+    }
+    
+    // Channel for reloading interpreter
+    let (reload_tx, reload_rx) = std::sync::mpsc::channel::<String>();
+    let interpreter_reload = Arc::clone(&interpreter);
+    
+    // Interpreter reload thread
+    std::thread::spawn(move || {
+        for source in reload_rx {
+            let mut interp = interpreter_reload.lock().unwrap();
+            // Reset interpreter and reinitialize
+            *interp = poly::create_interpreter();
+            if let Err(e) = poly::init_interpreter(&mut interp, &source) {
+                eprintln!("{}error{}: Reload failed: {}", RED, RESET, e);
+            }
+        }
+    });
     
     // HTTP server thread
     thread::spawn(move || {
@@ -412,11 +442,18 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
                     if custom_index.exists() {
                         let mut html = fs::read_to_string(&custom_index).unwrap_or_default();
                         
-                        // Inject Alpine.js and Lucide Icons in <head>
-                        let head_scripts = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
+                        // Only inject Alpine.js if not already present
+                        if !html.contains("alpine") && !html.contains("Alpine") {
+                            let head_scripts = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
-                        if html.contains("</head>") {
-                            html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                            if html.contains("</head>") {
+                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                            }
+                        } else if !html.contains("lucide") {
+                            let head_scripts = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
+                            if html.contains("</head>") {
+                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                            }
                         }
                         
                         // Inject hot reload script, IPC bridge, and icon initialization
@@ -594,11 +631,11 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
                 }
                 "/__poly_invoke" => {
-                    // IPC Bridge - call Poly functions from JavaScript
+                    // IPC Bridge - call Poly functions from JavaScript (stateful)
                     let mut body = String::new();
                     request.as_reader().read_to_string(&mut body).ok();
                     
-                    let result = handle_ipc_invoke(&entry_http, &body);
+                    let result = handle_ipc_invoke_stateful(&interpreter_http, &body);
                     tiny_http::Response::from_string(result)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
                         .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
@@ -683,14 +720,19 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                     std::thread::sleep(Duration::from_millis(50));
                     reload_counter.fetch_add(1, Ordering::Relaxed);
                     
-                    // Only run Poly interpreter for .poly file changes
+                    // Only reload Poly interpreter for .poly file changes
                     let has_poly_change = event.paths.iter().any(|p| {
                         p.extension().and_then(|e| e.to_str()) == Some("poly")
                     });
                     
                     if has_poly_change {
                         let start = std::time::Instant::now();
-                        match poly::run(&fs::read_to_string(&entry).unwrap_or_default()) {
+                        let source = fs::read_to_string(&entry).unwrap_or_default();
+                        
+                        // Reload the persistent interpreter
+                        let mut interp = interpreter.lock().unwrap();
+                        *interp = poly::create_interpreter();
+                        match poly::init_interpreter(&mut interp, &source) {
                             Ok(_) => println!(" {}({}ms){}", DIM, start.elapsed().as_millis(), RESET),
                             Err(e) => println!("\n  {}error{}: {}", RED, RESET, e),
                         }
@@ -725,6 +767,39 @@ fn execute_poly_for_web(entry: &Path) -> String {
     }
 }
 
+/// Handle IPC invoke with a persistent (stateful) interpreter
+fn handle_ipc_invoke_stateful(interpreter: &std::sync::Arc<std::sync::Mutex<poly::interpreter::Interpreter>>, body: &str) -> String {
+    // Parse the request: { "fn": "function_name", "args": { ... } }
+    let request: serde_json::Value = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(e) => return serde_json::json!({"error": format!("Invalid JSON: {}", e)}).to_string(),
+    };
+    
+    let fn_name = match request.get("fn").and_then(|v| v.as_str()) {
+        Some(name) => name,
+        None => return serde_json::json!({"error": "Missing 'fn' field"}).to_string(),
+    };
+    
+    let args = request.get("args").cloned().unwrap_or(serde_json::json!({}));
+    
+    // Handle built-in system APIs (prefixed with __poly_)
+    if fn_name.starts_with("__poly_") {
+        return handle_system_api(fn_name, &args);
+    }
+    
+    // Build argument string from JSON
+    let args_str = json_to_poly_value(&args);
+    
+    // Call function on persistent interpreter
+    let mut interp = interpreter.lock().unwrap();
+    match poly::call_function(&mut interp, fn_name, &args_str) {
+        Ok(json_result) => {
+            format!(r#"{{"result":{}}}"#, json_result)
+        }
+        Err(e) => serde_json::json!({"error": e}).to_string(),
+    }
+}
+
 fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
     // Parse the request: { "fn": "function_name", "args": { ... } }
     let request: serde_json::Value = match serde_json::from_str(body) {
@@ -750,15 +825,8 @@ fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
         Err(e) => return serde_json::json!({"error": format!("Failed to read: {}", e)}).to_string(),
     };
     
-    // Build argument string from JSON (positional args)
-    let args_str = if let Some(obj) = args.as_object() {
-        obj.iter()
-            .map(|(_, v)| json_to_poly_value(v))
-            .collect::<Vec<_>>()
-            .join(", ")
-    } else {
-        String::new()
-    };
+    // Build argument string from JSON (pass entire args object as single argument)
+    let args_str = json_to_poly_value(&args);
     
     // Create a call expression - the result will be the last evaluated value
     let call_expr = format!("{fn_name}({args_str})");
@@ -1184,7 +1252,7 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
         .ok_or_else(|| "No entry point found".to_string())?;
     
     println!();
-    println!("  {}POLY{} v0.1.5  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
+    println!("  {}POLY{} v0.2.1  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
     println!();
     
     let start = std::time::Instant::now();
@@ -1295,7 +1363,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let port = 9473u16;
     
     println!();
-    println!("  {}POLY{} v0.1.5  {}native{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.1  {}native{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
@@ -1370,37 +1438,72 @@ fn run_native_app(project_path: &Path, _release: bool) {
         }
     }
     
+    // Hot reload watcher info
+    println!("  {}>{} Hot reload: watching {}", DIM, RESET, web_dir.display());
+    
     println!();
+    
+    // Hot reload counter for native mode
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let reload_counter = Arc::new(AtomicU64::new(1));
+    let reload_counter_server = Arc::clone(&reload_counter);
+    let reload_counter_watcher = Arc::clone(&reload_counter);
+    
+    // Create persistent interpreter for native mode
+    use std::sync::Mutex;
+    let interpreter: Arc<Mutex<poly::interpreter::Interpreter>> = Arc::new(Mutex::new(poly::create_interpreter()));
+    let interpreter_server = Arc::clone(&interpreter);
+    let interpreter_watcher = Arc::clone(&interpreter);
     
     // Start local HTTP server in background thread
     let web_dir_arc = Arc::new(web_dir);
     let web_dir_server = Arc::clone(&web_dir_arc);
+    let project_path_for_watcher = project_path.to_path_buf();
     let project_path_owned = project_path.to_path_buf();
     let entry_path = find_entry_point(&project_path_owned);
+    let entry_path_for_init = entry_path.clone();
+    let entry_path_for_server = entry_path.clone();
     let titlebar_icon_for_server = titlebar_icon_svg.clone();
+    
+    // Initialize interpreter with source
+    if let Some(ref entry) = entry_path_for_init {
+        let source = fs::read_to_string(entry).unwrap_or_default();
+        let mut interp = interpreter.lock().unwrap();
+        if let Err(e) = poly::init_interpreter(&mut interp, &source) {
+            eprintln!("{}error{}: Failed to initialize interpreter: {}", RED, RESET, e);
+        }
+    }
     
     thread::spawn(move || {
         let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
             .expect("Failed to start local server");
         
+        let entry_path = entry_path_for_server;
+        
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
             
+            // Hot reload endpoint
+            let response = if url == "/__poly_reload" {
+                let current = reload_counter_server.load(Ordering::Relaxed);
+                tiny_http::Response::from_string(format!(r#"{{"version":{}}}"#, current))
+                    .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+            }
             // Serve titlebar icon
-            let response = if url == "/__poly_titlebar_icon" {
+            else if url == "/__poly_titlebar_icon" {
                 let icon_svg = titlebar_icon_for_server.as_deref().unwrap_or("");
                 tiny_http::Response::from_string(format!(r#"{{"icon":{}}}"#, 
                     if icon_svg.is_empty() { "null".to_string() } else { format!("\"{}\"", icon_svg.replace('"', "\\\"")) }
                 ))
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
             }
-            // Handle IPC invoke
+            // Handle IPC invoke (stateful)
             else if url == "/__poly_invoke" {
                 let mut body = String::new();
                 request.as_reader().read_to_string(&mut body).ok();
                 
-                let result = if let Some(ref entry) = entry_path {
-                    handle_ipc_invoke(entry, &body)
+                let result = if entry_path.is_some() {
+                    handle_ipc_invoke_stateful(&interpreter_server, &body)
                 } else {
                     // No entry point, only handle system APIs
                     handle_ipc_invoke_system_only(&body)
@@ -1434,11 +1537,19 @@ fn run_native_app(project_path: &Path, _release: bool) {
                     let final_content = if ct.starts_with("text/html") {
                         let mut html = String::from_utf8_lossy(&content).to_string();
                         
-                        // Inject scripts in <head>
-                        let head_scripts = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
+                        // Only inject Alpine.js if not already present
+                        if !html.contains("alpine") && !html.contains("Alpine") {
+                            let head_scripts = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
-                        if html.contains("</head>") {
-                            html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                            if html.contains("</head>") {
+                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                            }
+                        } else if !html.contains("lucide") {
+                            // Only inject Lucide if Alpine is present but Lucide isn't
+                            let head_scripts = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
+                            if html.contains("</head>") {
+                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                            }
                         }
                         
                         // Inject IPC Bridge and Lucide initialization before </body>
@@ -1769,6 +1880,27 @@ if (typeof lucide !== 'undefined') {
   lucide.createIcons();
   document.addEventListener('alpine:initialized', () => lucide.createIcons());
 }
+// Hot Reload for Native Mode
+(function() {
+  let v = 0, polling = false;
+  async function check() {
+    if (!document.hidden) {
+      try { 
+        const r = await fetch('/__poly_reload'); 
+        const d = await r.json(); 
+        if (v > 0 && d.version > v) { 
+          location.reload(); 
+        }
+        v = d.version;
+      } catch(e) {}
+    }
+    if (polling) setTimeout(check, 500);
+  }
+  function start() { if (!polling) { polling = true; check(); } }
+  function stop() { polling = false; }
+  document.addEventListener('visibilitychange', () => document.hidden ? stop() : start());
+  start();
+})();
 </script>"##;
                         if html.contains("</body>") {
                             html = html.replace("</body>", &format!("{}</body>", body_script));
@@ -1786,6 +1918,75 @@ if (typeof lucide !== 'undefined') {
                 }
             };
             let _ = request.respond(response);
+        }
+    });
+    
+    // Clone entry_path for watcher thread
+    let entry_path_watcher = entry_path.clone();
+    
+    // File watcher for hot reload
+    thread::spawn(move || {
+        use notify::{Watcher, RecursiveMode};
+        use std::sync::mpsc::channel;
+        
+        let (tx, rx) = channel();
+        let mut watcher = match notify::recommended_watcher(move |res| { let _ = tx.send(res); }) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("  {}warning{}: Could not start file watcher: {}", "\x1b[33m", RESET, e);
+                return;
+            }
+        };
+        
+        // Watch the web directory within the project
+        let web_path = project_path_for_watcher.join("web");
+        let watch_path = if web_path.exists() { web_path } else { project_path_for_watcher.clone() };
+        
+        // Also watch src directory for .poly files
+        let src_path = project_path_for_watcher.join("src");
+        
+        if let Err(e) = watcher.watch(&watch_path, RecursiveMode::Recursive) {
+            eprintln!("  {}warning{}: Could not watch directory: {}", "\x1b[33m", RESET, e);
+        }
+        
+        if src_path.exists() {
+            if let Err(e) = watcher.watch(&src_path, RecursiveMode::Recursive) {
+                eprintln!("  {}warning{}: Could not watch src directory: {}", "\x1b[33m", RESET, e);
+            }
+        }
+        
+        loop {
+            match rx.recv() {
+                Ok(Ok(event)) => {
+                    // Check for .poly file changes
+                    let has_poly_change = event.paths.iter().any(|p| {
+                        p.extension().and_then(|e| e.to_str()) == Some("poly")
+                    });
+                    
+                    // Reload interpreter for .poly changes
+                    if has_poly_change {
+                        if let Some(ref entry) = entry_path_watcher {
+                            let source = fs::read_to_string(entry).unwrap_or_default();
+                            let mut interp = interpreter_watcher.lock().unwrap();
+                            *interp = poly::create_interpreter();
+                            if let Err(e) = poly::init_interpreter(&mut interp, &source) {
+                                eprintln!("  {}error{}: Reload failed: {}", RED, RESET, e);
+                            }
+                        }
+                    }
+                    
+                    // Reload for relevant file changes (HTML/CSS/JS/JSON/SVG/Poly)
+                    let dominated_by_relevant = event.paths.iter().any(|p| {
+                        let ext = p.extension().and_then(|e| e.to_str());
+                        matches!(ext, Some("html") | Some("css") | Some("js") | Some("json") | Some("svg") | Some("poly"))
+                    });
+                    
+                    if dominated_by_relevant {
+                        reload_counter_watcher.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+                Ok(Err(_)) | Err(_) => {}
+            }
         }
     });
     
@@ -1807,7 +2008,7 @@ fn build_app(path: &str, target: &str, release: bool) {
     let project_path = Path::new(path);
     
     println!();
-    println!("  {}POLY{} v0.1.5  {}build{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v0.2.1  {}build{}", CYAN, RESET, DIM, RESET);
     println!();
     println!("  {}>{} Target:  {}", DIM, RESET, target);
     println!("  {}>{} Mode:    {}", DIM, RESET, if release { "release" } else { "debug" });
@@ -1867,7 +2068,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
 
 fn create_project(name: &str, template: &str) {
     println!();
-    println!("  {}POLY{} v0.1.5", CYAN, RESET);
+    println!("  {}POLY{} v0.2.1", CYAN, RESET);
     println!();
     
     let project_path = Path::new(name);
@@ -2324,7 +2525,7 @@ fn add(a, b):
 
 fn init_project(_template: &str) {
     println!();
-    println!("  {}POLY{} v0.1.5", CYAN, RESET);
+    println!("  {}POLY{} v0.2.1", CYAN, RESET);
     println!();
     
     let cwd = std::env::current_dir().expect("Failed to get current directory");

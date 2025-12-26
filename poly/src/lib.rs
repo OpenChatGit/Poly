@@ -6,6 +6,7 @@ pub mod web;
 pub mod native;
 pub mod updater;
 pub mod tray;
+pub mod ai;
 
 use lexer::Lexer;
 use parser::Parser;
@@ -14,6 +15,7 @@ use interpreter::Interpreter;
 pub use native::{NativeConfig, run_native_window, run_native_url, generate_native_bundle};
 pub use updater::{UpdateConfig, UpdateInfo, check_github_updates, check_custom_updates, download_update, install_update};
 pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
+pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, MessageRole, check_ollama, list_ollama_models, chat as ai_chat};
 
 /// Run Poly source code and return the output
 pub fn run(source: &str) -> Result<Vec<String>, String> {
@@ -54,6 +56,38 @@ pub fn eval_json(source: &str) -> Result<String, String> {
     let mut interpreter = Interpreter::new();
     let result = interpreter.run(&program)?;
     
+    Ok(result.to_json())
+}
+
+/// Create a new interpreter instance
+pub fn create_interpreter() -> Interpreter {
+    Interpreter::new()
+}
+
+/// Initialize interpreter with source code (parse and run definitions)
+pub fn init_interpreter(interpreter: &mut Interpreter, source: &str) -> Result<(), String> {
+    let lexer = Lexer::new(source);
+    let tokens = lexer.tokenize();
+    
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse()?;
+    
+    interpreter.run(&program)?;
+    Ok(())
+}
+
+/// Call a function on an existing interpreter and return JSON result
+pub fn call_function(interpreter: &mut Interpreter, fn_name: &str, args_json: &str) -> Result<String, String> {
+    // Parse the call expression
+    let call_source = format!("{}({})", fn_name, args_json);
+    
+    let lexer = Lexer::new(&call_source);
+    let tokens = lexer.tokenize();
+    
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse()?;
+    
+    let result = interpreter.run(&program)?;
     Ok(result.to_json())
 }
 

@@ -12,6 +12,7 @@ Poly is a modern framework for building cross-platform desktop applications usin
 - **Native Dialogs** — File open/save, folder picker, message boxes
 - **Auto-Updater** — Built-in update system with GitHub Releases support
 - **File System API** — Read/write files from JavaScript
+- **AI/LLM Integration** — Built-in support for Ollama, OpenAI, Anthropic
 - **Hot Reload** — Instant updates during development
 - **Web Technologies** — Use HTML, CSS, JS, Alpine.js, or any framework
 
@@ -190,6 +191,78 @@ await poly.updater.checkAndPrompt({
 const result = await poly.invoke('myFunction', { arg1: 'value' });
 ```
 
+## AI/LLM Integration
+
+Poly has built-in support for AI/LLM APIs, making it easy to build chat applications:
+
+### Ollama (Local)
+
+```javascript
+// Check if Ollama is running
+const available = await poly.ai.checkOllama();
+
+// List available models
+const models = await poly.ai.listModels();
+
+// Chat with Ollama
+const response = await poly.ai.ollama('llama3', [
+  { role: 'user', content: 'Hello!' }
+]);
+
+console.log(response.content);
+console.log(response.thinking); // Reasoning content if available
+```
+
+### OpenAI
+
+```javascript
+const response = await poly.ai.openai('gpt-4', [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'Hello!' }
+], 'sk-your-api-key');
+```
+
+### Anthropic (with Extended Thinking)
+
+```javascript
+const response = await poly.ai.anthropic('claude-3-5-sonnet-20241022', [
+  { role: 'user', content: 'Solve this step by step...' }
+], 'your-api-key', {
+  enableThinking: true,
+  thinkingBudget: 10000
+});
+
+console.log(response.thinking); // Claude's reasoning process
+console.log(response.content);  // Final answer
+```
+
+### Custom OpenAI-Compatible APIs
+
+```javascript
+// LM Studio, LocalAI, etc.
+const response = await poly.ai.custom('http://localhost:1234/v1', 'local-model', [
+  { role: 'user', content: 'Hello!' }
+]);
+```
+
+### Full Options
+
+```javascript
+const response = await poly.ai.chat({
+  provider: 'ollama',        // 'ollama', 'openai', 'anthropic', 'custom'
+  baseUrl: 'http://localhost:11434',
+  model: 'llama3',
+  messages: [
+    { role: 'system', content: 'You are helpful.' },
+    { role: 'user', content: 'Hello!' }
+  ],
+  temperature: 0.7,
+  maxTokens: 4096,
+  enableThinking: true,      // For reasoning models
+  thinkingBudget: 10000      // Anthropic thinking budget
+});
+```
+
 ## System Tray
 
 Enable system tray to run your app in the background:
@@ -256,6 +329,7 @@ Poly has built-in auto-update support:
 | System Tray | Built-in | Plugin | Plugin |
 | Auto-Updater | Built-in | Plugin | Plugin |
 | Native Dialogs | Built-in | Plugin | Built-in |
+| AI/LLM Integration | Built-in | None | None |
 | Hot Reload | Built-in | Plugin | Built-in |
 | Setup Complexity | Simple | Complex | Medium |
 

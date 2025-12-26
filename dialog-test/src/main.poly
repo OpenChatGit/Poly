@@ -1,5 +1,0 @@
-# dialog-test - Backend Logic (optional)
-# This file is for server-side logic, APIs, etc.
-# Your frontend is in web/index.html, web/styles.css, web/app.js
-
-print("Backend ready")
