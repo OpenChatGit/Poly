@@ -91,6 +91,18 @@
       <div class="result" x-show="aiResult" x-text="aiResult"></div>
     </div>
 
+    <!-- Notification Test -->
+    <div class="card">
+      <h2>🔔 Notifications</h2>
+      <div class="row">
+        <input type="text" x-model="notifyTitle" placeholder="Title...">
+        <input type="text" x-model="notifyBody" placeholder="Body...">
+        <button @click="showNotification()">Show</button>
+        <button @click="showNotificationTimeout()">5s Timeout</button>
+      </div>
+      <div class="result" x-show="notifyResult" x-text="notifyResult"></div>
+    </div>
+
     <div class="footer">
       <span>Poly v0.2.5</span>
       <span x-text="'Tests: ' + testsRun"></span>

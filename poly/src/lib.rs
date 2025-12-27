@@ -9,6 +9,7 @@ pub mod tray;
 pub mod ai;
 pub mod clipboard;
 pub mod window;
+pub mod notification;
 
 use lexer::Lexer;
 use parser::Parser;

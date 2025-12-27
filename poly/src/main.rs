@@ -652,6 +652,10 @@ window.poly = {{
     async closeAll() {{ return poly.invoke('__poly_window_close_all', {{}}); }},
     async list() {{ return poly.invoke('__poly_window_list', {{}}); }},
     async count() {{ return poly.invoke('__poly_window_count', {{}}); }}
+  }},
+  notification: {{
+    async show(title, body, icon) {{ return poly.invoke('__poly_notification_show', {{ title, body, icon }}); }},
+    async showWithTimeout(title, body, timeout) {{ return poly.invoke('__poly_notification_show_timeout', {{ title, body, timeout }}); }}
   }}
 }};
 // Initialize Lucide Icons
@@ -1244,6 +1248,41 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             #[cfg(not(feature = "native"))]
             {
                 serde_json::json!({"result": []}).to_string()
+            }
+        }
+        // Notification APIs
+        "__poly_notification_show" => {
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Notification");
+            let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            let icon = args.get("icon").and_then(|v| v.as_str());
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::notification::show(title, body, icon) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_notification_show_timeout" => {
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Notification");
+            let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            let timeout = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(5000) as u32;
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::notification::show_with_timeout(title, body, timeout) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
             }
         }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
@@ -2091,6 +2130,10 @@ window.poly = {
     async closeAll() { return poly.invoke('__poly_window_close_all', {}); },
     async list() { return poly.invoke('__poly_window_list', {}); },
     async count() { return poly.invoke('__poly_window_count', {}); }
+  },
+  notification: {
+    async show(title, body, icon) { return poly.invoke('__poly_notification_show', { title, body, icon }); },
+    async showWithTimeout(title, body, timeout) { return poly.invoke('__poly_notification_show_timeout', { title, body, timeout }); }
   }
 };
 // Initialize Lucide Icons

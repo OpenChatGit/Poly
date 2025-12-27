@@ -23,6 +23,11 @@ function app() {
     
     // AI
     aiResult: '',
+    
+    // Notifications
+    notifyTitle: 'Hello!',
+    notifyBody: 'This is a notification from Poly',
+    notifyResult: '',
 
     // ========== Clipboard Tests ==========
     async copyToClipboard() {
@@ -285,6 +290,34 @@ function app() {
         this.testsRun++;
       } catch (e) {
         this.aiResult = '✗ Error: ' + e.message;
+      }
+    },
+
+    // ========== Notification Tests ==========
+    async showNotification() {
+      try {
+        await poly.notification.show(
+          this.notifyTitle || 'Poly Notification',
+          this.notifyBody || 'Hello from Poly!'
+        );
+        this.notifyResult = '✓ Notification sent';
+        this.testsRun++;
+      } catch (e) {
+        this.notifyResult = '✗ Error: ' + (e.message || e);
+      }
+    },
+
+    async showNotificationTimeout() {
+      try {
+        await poly.notification.showWithTimeout(
+          this.notifyTitle || 'Poly Notification',
+          this.notifyBody || 'This will disappear in 5 seconds',
+          5000
+        );
+        this.notifyResult = '✓ Notification sent (5s timeout)';
+        this.testsRun++;
+      } catch (e) {
+        this.notifyResult = '✗ Error: ' + (e.message || e);
       }
     }
   };
