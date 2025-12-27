@@ -6,6 +6,7 @@ Complete reference for all Poly JavaScript APIs.
 
 - [Window Control](#window-control)
 - [Multi-Window](#multi-window)
+- [System Tray](#system-tray)
 - [Clipboard](#clipboard)
 - [Notifications](#notifications)
 - [Deep Links](#deep-links)
@@ -19,59 +20,63 @@ Complete reference for all Poly JavaScript APIs.
 
 ## Window Control
 
-Control the current window. Use these for custom titlebar implementation.
+Control the current window. Only available in native mode (`poly run --native`).
 
-### `poly.window.minimize()`
+> **Note:** Poly does NOT inject a titlebar automatically. When using `decorations = false` (frameless mode), you must build your own titlebar using the `polyWindow` API.
 
-Minimize the window (or hide to tray if configured).
+### `polyWindow.minimize()`
+
+Minimize the window.
 
 ```javascript
-poly.window.minimize();
+polyWindow.minimize();
 ```
 
-### `poly.window.maximize()`
+### `polyWindow.maximize()`
 
 Toggle maximize/restore.
 
 ```javascript
-poly.window.maximize();
+polyWindow.maximize();
 ```
 
-### `poly.window.close()`
+### `polyWindow.close()`
 
-Close the window (or hide to tray if configured).
+Close the window.
 
 ```javascript
-poly.window.close();
+polyWindow.close();
 ```
 
-### `poly.window.hide()`
-
-Hide window to system tray.
-
-```javascript
-poly.window.hide();
-```
-
-### `poly.window.show()`
-
-Show and focus the window.
-
-```javascript
-poly.window.show();
-```
-
-### `poly.window.drag()`
+### `polyWindow.drag()`
 
 Start window drag. Call this on mousedown for custom titlebar.
 
 ```javascript
-// Example: Custom titlebar
-<div class="titlebar" onmousedown="poly.window.drag()">
+polyWindow.drag();
+```
+
+### `polyWindow.isFrameless()`
+
+Check if the window is running in frameless mode (no native titlebar).
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+const frameless = await polyWindow.isFrameless();
+if (frameless) {
+  // Show custom titlebar
+}
+```
+
+### Custom Titlebar Example
+
+```html
+<div class="titlebar" onmousedown="polyWindow.drag()">
   <span>My App</span>
-  <button onclick="poly.window.minimize()">─</button>
-  <button onclick="poly.window.maximize()">□</button>
-  <button onclick="poly.window.close()">✕</button>
+  <button onclick="polyWindow.minimize()">─</button>
+  <button onclick="polyWindow.maximize()">□</button>
+  <button onclick="polyWindow.close()">✕</button>
 </div>
 ```
 
@@ -94,7 +99,7 @@ Create a new window.
 | `url` | string | - | URL to load |
 | `html` | string | - | HTML content |
 | `resizable` | boolean | true | Allow resize |
-| `decorations` | boolean | false | Show native titlebar |
+| `decorations` | boolean | true | Show native titlebar |
 
 **Returns:** `{ id: number }` - Window handle
 
@@ -107,11 +112,12 @@ const win = await poly.windows.create({
   url: 'http://localhost:3000/settings.html'
 });
 
-// Create window with inline HTML
+// Create frameless window with custom titlebar
 const win2 = await poly.windows.create({
   title: 'About',
   width: 400,
   height: 300,
+  decorations: false,
   html: `
     <!DOCTYPE html>
     <html>
@@ -132,12 +138,12 @@ const win2 = await poly.windows.create({
       </style>
     </head>
     <body>
-      <div class="titlebar" onmousedown="poly.window.drag()">
+      <div class="titlebar" onmousedown="polyWindow.drag()">
         <span>About</span>
         <div>
-          <button class="titlebar-btn" onclick="poly.window.minimize()">─</button>
-          <button class="titlebar-btn" onclick="poly.window.maximize()">□</button>
-          <button class="titlebar-btn close" onclick="poly.window.close()">✕</button>
+          <button class="titlebar-btn" onclick="polyWindow.minimize()">─</button>
+          <button class="titlebar-btn" onclick="polyWindow.maximize()">□</button>
+          <button class="titlebar-btn close" onclick="polyWindow.close()">✕</button>
         </div>
       </div>
       <div class="content">
@@ -182,6 +188,83 @@ Get number of open windows.
 ```javascript
 const count = await poly.windows.count();
 ```
+
+---
+
+## System Tray
+
+Display an icon in the system tray with a context menu. Configure in `poly.toml`.
+
+### Configuration
+
+```toml
+[tray]
+enabled = true
+tooltip = "My App"
+minimize_to_tray = false  # Minimize button hides to tray
+close_to_tray = true      # Close button hides to tray instead of exiting
+
+[[tray.menu]]
+id = "show"
+label = "Show Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "settings"
+label = "Settings"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
+```
+
+### Special Menu IDs
+
+| ID | Behavior |
+|----|----------|
+| `show` | Shows and focuses the window |
+| `quit` or `exit` | Exits the application |
+| `separator` | Adds a separator line |
+
+Any other ID will trigger a `polytray` event that you can handle in JavaScript.
+
+### `poly.tray.onMenuClick(callback)`
+
+Listen for custom tray menu clicks.
+
+```javascript
+poly.tray.onMenuClick((id) => {
+  switch (id) {
+    case 'settings':
+      openSettings();
+      break;
+    case 'about':
+      showAbout();
+      break;
+  }
+});
+```
+
+### `poly.tray.isEnabled()`
+
+Check if system tray is enabled.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+if (await poly.tray.isEnabled()) {
+  console.log('Tray is active');
+}
+```
+
+### Tray Behavior
+
+- When `close_to_tray = true`: Clicking the window close button hides the window to tray instead of exiting
+- When `minimize_to_tray = true`: Clicking minimize hides to tray instead of minimizing
+- Clicking the tray icon shows and focuses the window
+- The tray icon uses the app icon from `assets/icon.png` if available
 
 ---
 
@@ -713,7 +796,7 @@ const result = await poly.invoke('greet', { name: 'World' });
 
 ## Custom Titlebar Example
 
-Complete example of a custom frameless titlebar:
+Complete example of a custom frameless titlebar. Set `decorations = false` in `poly.toml` to use this.
 
 ```html
 <!DOCTYPE html>
@@ -730,7 +813,6 @@ Complete example of a custom frameless titlebar:
       justify-content: space-between;
       align-items: center;
       padding: 0 12px;
-      -webkit-app-region: drag; /* Makes titlebar draggable */
       user-select: none;
     }
     
@@ -742,7 +824,6 @@ Complete example of a custom frameless titlebar:
     .titlebar-buttons {
       display: flex;
       gap: 4px;
-      -webkit-app-region: no-drag; /* Buttons are clickable */
     }
     
     .titlebar-btn {
@@ -771,12 +852,12 @@ Complete example of a custom frameless titlebar:
   </style>
 </head>
 <body>
-  <div class="titlebar" onmousedown="poly.window.drag()">
+  <div class="titlebar" onmousedown="polyWindow.drag()">
     <div class="titlebar-title">My App</div>
     <div class="titlebar-buttons">
-      <button class="titlebar-btn" onclick="poly.window.minimize()">─</button>
-      <button class="titlebar-btn" onclick="poly.window.maximize()">□</button>
-      <button class="titlebar-btn close" onclick="poly.window.close()">✕</button>
+      <button class="titlebar-btn" onclick="polyWindow.minimize()">─</button>
+      <button class="titlebar-btn" onclick="polyWindow.maximize()">□</button>
+      <button class="titlebar-btn close" onclick="polyWindow.close()">✕</button>
     </div>
   </div>
   
@@ -787,37 +868,3 @@ Complete example of a custom frameless titlebar:
 </body>
 </html>
 ```
-
----
-
-## System Tray Configuration
-
-Configure in `poly.toml`:
-
-```toml
-[tray]
-enabled = true
-tooltip = "My App"
-minimize_to_tray = false
-close_to_tray = true
-
-[[tray.menu]]
-id = "show"
-label = "Show Window"
-
-[[tray.menu]]
-id = "separator"
-
-[[tray.menu]]
-id = "settings"
-label = "Settings"
-
-[[tray.menu]]
-id = "quit"
-label = "Exit"
-```
-
-**Special menu IDs:**
-- `show` — Shows and focuses the window
-- `quit` or `exit` — Exits the application
-- `separator` — Adds a separator line

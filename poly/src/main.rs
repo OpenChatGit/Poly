@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.5";
+const VERSION: &str = "0.2.6";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -663,6 +663,14 @@ window.poly = {{
     async isRegistered(protocol) {{ return poly.invoke('__poly_deeplink_is_registered', {{ protocol }}); }},
     async get() {{ return poly.invoke('__poly_deeplink_get', {{}}); }},
     async has() {{ return poly.invoke('__poly_deeplink_has', {{}}); }}
+  }},
+  tray: {{
+    // Listen for tray menu clicks
+    onMenuClick(callback) {{
+      window.addEventListener('polytray', (e) => callback(e.detail.id));
+    }},
+    // Check if tray is enabled (from poly.toml config)
+    async isEnabled() {{ return poly.invoke('__poly_tray_is_enabled', {{}}); }}
   }}
 }};
 // Initialize Lucide Icons
@@ -1331,6 +1339,11 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             let has = poly::deeplink::has_deep_link();
             serde_json::json!({"result": has}).to_string()
         }
+        "__poly_tray_is_enabled" => {
+            // This is determined by poly.toml config, return false in dev mode
+            // In native mode, the actual tray state is managed by the window
+            serde_json::json!({"result": false}).to_string()
+        }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
     }
 }
@@ -1583,6 +1596,41 @@ fn run_native_app(project_path: &Path, _release: bool) {
     
     // Parse poly.toml for configuration
     let poly_toml_path = project_path.join("poly.toml");
+    
+    // Window config defaults
+    let mut window_width: u32 = 1024;
+    let mut window_height: u32 = 768;
+    let mut window_decorations = true; // Native titlebar by default
+    let mut window_resizable = true;
+    let mut window_transparent = false; // Transparent background for frameless
+    
+    // Parse window section from poly.toml
+    if poly_toml_path.exists() {
+        if let Ok(content) = fs::read_to_string(&poly_toml_path) {
+            let mut in_window_section = false;
+            for line in content.lines() {
+                let line = line.trim();
+                if line == "[window]" {
+                    in_window_section = true;
+                } else if line.starts_with('[') && line != "[window]" {
+                    in_window_section = false;
+                } else if in_window_section {
+                    if let Some(val) = line.strip_prefix("width").and_then(|s| s.trim().strip_prefix('=')) {
+                        window_width = val.trim().parse().unwrap_or(1024);
+                    } else if let Some(val) = line.strip_prefix("height").and_then(|s| s.trim().strip_prefix('=')) {
+                        window_height = val.trim().parse().unwrap_or(768);
+                    } else if let Some(val) = line.strip_prefix("decorations").and_then(|s| s.trim().strip_prefix('=')) {
+                        window_decorations = val.trim() == "true";
+                    } else if let Some(val) = line.strip_prefix("resizable").and_then(|s| s.trim().strip_prefix('=')) {
+                        window_resizable = val.trim() == "true";
+                    } else if let Some(val) = line.strip_prefix("transparent").and_then(|s| s.trim().strip_prefix('=')) {
+                        window_transparent = val.trim() == "true";
+                    }
+                }
+            }
+        }
+    }
+    
     let (tray_enabled, tray_tooltip, minimize_to_tray, close_to_tray, tray_menu_items) = if poly_toml_path.exists() {
         if let Ok(content) = fs::read_to_string(&poly_toml_path) {
             // Simple TOML parsing for tray section
@@ -1659,26 +1707,6 @@ fn run_native_app(project_path: &Path, _release: bool) {
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
     
-    // Look for titlebar icon (SVG preferred for quality)
-    let titlebar_icon_candidates = [
-        project_path.join("assets/icon.svg"),
-        project_path.join("assets/titlebar-icon.svg"),
-        project_path.join("icon.svg"),
-    ];
-    let titlebar_icon_svg = titlebar_icon_candidates.iter()
-        .find(|p| p.exists())
-        .and_then(|p| fs::read_to_string(p).ok())
-        .map(|svg| {
-            // Clean up SVG for inline use (remove XML declaration, newlines)
-            svg.lines()
-                .filter(|l| !l.trim().starts_with("<?xml"))
-                .collect::<Vec<_>>()
-                .join("")
-                .replace('\n', "")
-                .replace('\r', "")
-                .replace('\'', "\\'")
-        });
-    
     // Look for window icon file (PNG for taskbar/dock)
     let icon_candidates = [
         project_path.join("assets/icon.png"),
@@ -1703,11 +1731,18 @@ fn run_native_app(project_path: &Path, _release: bool) {
         });
     
     let mut config = poly::NativeConfig::new(title)
-        .with_size(1024, 768)
+        .with_size(window_width, window_height)
+        .with_decorations(window_decorations)
+        .with_transparent(window_transparent)
         .with_dev_tools(true)
         .with_tray(tray_enabled)
         .with_minimize_to_tray(minimize_to_tray)
         .with_close_to_tray(close_to_tray);
+    
+    config.resizable = window_resizable;
+    
+    // Debug: show window config
+    println!("  {}>{} Window: {}x{}, decorations={}, transparent={}", DIM, RESET, window_width, window_height, window_decorations, window_transparent);
     
     config.tray_tooltip = Some(tray_tooltip.clone());
     config.tray_menu_items = tray_menu_items;
@@ -1754,7 +1789,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let entry_path = find_entry_point(&project_path_owned);
     let entry_path_for_init = entry_path.clone();
     let entry_path_for_server = entry_path.clone();
-    let titlebar_icon_for_server = titlebar_icon_svg.clone();
+    let decorations_for_server = window_decorations;
     
     // Initialize interpreter with source
     if let Some(ref entry) = entry_path_for_init {
@@ -1780,12 +1815,9 @@ fn run_native_app(project_path: &Path, _release: bool) {
                 tiny_http::Response::from_string(format!(r#"{{"version":{}}}"#, current))
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
             }
-            // Serve titlebar icon
-            else if url == "/__poly_titlebar_icon" {
-                let icon_svg = titlebar_icon_for_server.as_deref().unwrap_or("");
-                tiny_http::Response::from_string(format!(r#"{{"icon":{}}}"#, 
-                    if icon_svg.is_empty() { "null".to_string() } else { format!("\"{}\"", icon_svg.replace('"', "\\\"")) }
-                ))
+            // Serve window config (decorations, etc.)
+            else if url == "/__poly_config" {
+                tiny_http::Response::from_string(format!(r#"{{"decorations":{}}}"#, decorations_for_server))
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
             }
             // Handle IPC invoke (stateful)
@@ -1843,69 +1875,13 @@ fn run_native_app(project_path: &Path, _release: bool) {
                             }
                         }
                         
-                        // Inject IPC Bridge and Lucide initialization before </body>
+                        // Inject IPC Bridge and Poly API before </body>
                         let body_script = r##"<script>
-// Poly Custom Titlebar System
+// Poly Window API - User builds their own titlebar
 (function() {
-  // Check if running in native mode (wry injects window.ipc)
-  // We also check for the port 9473 which is used by native mode
   const isNative = typeof window.ipc !== 'undefined' || window.location.port === '9473';
   
   if (isNative) {
-    const style = document.createElement('style');
-    style.textContent = `
-      /* Custom Titlebar */
-      .poly-titlebar {
-        position: fixed; top: 0; left: 0; right: 0; height: 28px; z-index: 99998;
-        background: #0f0f13;
-        display: flex; align-items: center; justify-content: space-between;
-        -webkit-app-region: drag; user-select: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      }
-      .poly-titlebar-left { display: flex; align-items: center; gap: 8px; padding-left: 12px; }
-      .poly-titlebar-logo { width: 14px; height: 14px; }
-      .poly-titlebar-title { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.5); }
-      .poly-titlebar-controls { display: flex; height: 100%; -webkit-app-region: no-drag; }
-      .poly-titlebar-btn {
-        width: 40px; height: 100%; border: none; background: transparent;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer; transition: background 0.1s;
-      }
-      .poly-titlebar-btn svg { width: 9px; height: 9px; stroke: rgba(255,255,255,0.5); stroke-width: 1.5; fill: none; }
-      .poly-titlebar-btn:hover { background: rgba(255,255,255,0.1); }
-      .poly-titlebar-btn:hover svg { stroke: #fff; }
-      .poly-titlebar-btn.close:hover { background: #e81123; }
-      .poly-titlebar-btn.close:hover svg { stroke: #fff; }
-      /* macOS style traffic lights */
-      .poly-titlebar-macos { padding-left: 10px; gap: 6px; display: flex; align-items: center; -webkit-app-region: no-drag; }
-      .poly-titlebar-macos-btn {
-        width: 11px; height: 11px; border-radius: 50%; border: none; cursor: pointer;
-        display: flex; align-items: center; justify-content: center; transition: filter 0.1s;
-      }
-      .poly-titlebar-macos-btn svg { width: 5px; height: 5px; opacity: 0; transition: opacity 0.1s; }
-      .poly-titlebar-macos:hover .poly-titlebar-macos-btn svg { opacity: 1; }
-      .poly-titlebar-macos-btn.close { background: #ff5f57; }
-      .poly-titlebar-macos-btn.close svg { stroke: #820005; stroke-width: 2; }
-      .poly-titlebar-macos-btn.minimize { background: #febc2e; }
-      .poly-titlebar-macos-btn.minimize svg { stroke: #9a6a00; stroke-width: 2; }
-      .poly-titlebar-macos-btn.maximize { background: #28c840; }
-      .poly-titlebar-macos-btn.maximize svg { stroke: #006500; stroke-width: 2; }
-      .poly-titlebar-macos-btn:hover { filter: brightness(1.1); }
-      /* Body padding for titlebar */
-      body { padding-top: 28px !important; box-sizing: border-box; }
-      html { overflow: hidden; }
-      body { overflow: auto; height: calc(100vh - 28px); }
-    `;
-    document.head.appendChild(style);
-
-    // Default Poly Logo SVG with all polygons and gradients
-    const defaultLogo = '<svg viewBox="0 0 367 475" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="a" x1="0" y1="237" x2="367" y2="237" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1e6e95"/><stop offset="1" stop-color="#1971a2"/></linearGradient><linearGradient id="b" x1="301" y1="213" x2="314" y2="168" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1e76a4"/><stop offset="1" stop-color="#2689af"/></linearGradient><linearGradient id="c" x1="280" y1="261" x2="367" y2="261" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2696bb"/><stop offset="1" stop-color="#2689af"/></linearGradient><linearGradient id="d" x1="319" y1="165" x2="325" y2="2" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#62c2d0"/><stop offset="1" stop-color="#6ec5ce"/></linearGradient><linearGradient id="e" x1="269" y1="180" x2="282" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#1cb3c9"/><stop offset="1" stop-color="#52beca"/></linearGradient><linearGradient id="f" x1="240" y1="144" x2="230" y2="4" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#288ca6"/><stop offset="1" stop-color="#3ebac5"/></linearGradient><linearGradient id="g" x1="181" y1="141" x2="41" y2="-33" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#16a3bf"/><stop offset="1" stop-color="#1f9eb8"/></linearGradient><linearGradient id="h" x1="-14" y1="13" x2="103" y2="139" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5dc1d2"/><stop offset="1" stop-color="#19abc6"/></linearGradient><linearGradient id="i" x1="34" y1="194" x2="13" y2="-1" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2892b1"/><stop offset="1" stop-color="#19abc6"/></linearGradient><linearGradient id="j" x1="119" y1="316" x2="95" y2="119" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2786b9"/><stop offset="1" stop-color="#19abc6"/></linearGradient><linearGradient id="k" x1="96" y1="413" x2="82" y2="147" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#174e99"/><stop offset="1" stop-color="#1e80ad"/></linearGradient><linearGradient id="l" x1="44" y1="347" x2="30" y2="151" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#17428b"/><stop offset="1" stop-color="#176b9f"/></linearGradient><linearGradient id="m" x1="97" y1="443" x2="28" y2="371" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#26326e"/><stop offset="1" stop-color="#1c3e7d"/></linearGradient><linearGradient id="n" x1="31" y1="474" x2="36" y2="344" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#272f65"/><stop offset="1" stop-color="#24346b"/></linearGradient><linearGradient id="o" x1="29" y1="409" x2="14" y2="197" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#273169"/><stop offset="1" stop-color="#114b8a"/></linearGradient><linearGradient id="p" x1="129" y1="231" x2="213" y2="231" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2180b6"/><stop offset="1" stop-color="#268db8"/></linearGradient><linearGradient id="q" x1="187" y1="251" x2="280" y2="251" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#278cb9"/><stop offset="1" stop-color="#268ab7"/></linearGradient><linearGradient id="r" x1="105" y1="294" x2="158" y2="231" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#213567"/><stop offset="1" stop-color="#1d5f95"/></linearGradient><linearGradient id="s" x1="327" y1="210" x2="383" y2="95" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#3abacb"/><stop offset="1" stop-color="#54bfce"/></linearGradient><linearGradient id="t" x1="190" y1="344" x2="225" y2="273" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#124b94"/><stop offset="1" stop-color="#1e619d"/></linearGradient><linearGradient id="u" x1="0" y1="30" x2="280" y2="30" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5dc1d2"/><stop offset="1" stop-color="#6cc5d1"/></linearGradient></defs><path fill="url(#a)" d="M328 267l39-38V86L280 0H0v411l64 64 65-64V115l84 1 29 29v33l-29 29H130v107h151l48-47z"/><polygon fill="url(#b)" points="300 164 242 178 284 208 367 229 300 164"/><polygon fill="url(#c)" points="280 314 284 208 367 229 280 314"/><polygon fill="url(#d)" points="280 0 300 164 367 86 280 0"/><polygon fill="url(#e)" points="242 144 280 0 300 164 242 178 242 144"/><polygon fill="url(#f)" points="213 115 183 60 280 0 242 144 213 115"/><polygon fill="url(#g)" points="213 115 129 115 0 0 183 60 213 115"/><polygon fill="url(#h)" points="129 115 63 148 0 0 129 115"/><polygon fill="url(#i)" points="63 148 0 198 0 0 63 148"/><polygon fill="url(#j)" points="129 115 63 148 129 314 129 115"/><polygon fill="url(#k)" points="63 148 53 347 129 411 129 314 63 148"/><polygon fill="url(#l)" points="0 198 53 347 63 148 0 198"/><polygon fill="url(#m)" points="64 475 53 347 129 411 64 475"/><polygon fill="url(#n)" points="53 347 0 411 64 475 53 347"/><polygon fill="url(#o)" points="0 411 53 347 0 198 0 411"/><polygon fill="url(#p)" points="129 207 187 255 213 207 129 207"/><polygon fill="url(#q)" points="280 314 187 255 213 207 233 187 280 314"/><polygon fill="url(#r)" points="129 207 129 314 187 255 129 207"/><polygon fill="url(#s)" points="300 164 367 229 367 86 300 164"/><polygon fill="url(#t)" points="129 314 187 255 280 314 129 314"/><polygon fill="url(#u)" points="280 0 183 60 0 0 280 0"/></svg>';
-
-    // Detect platform (Windows vs macOS)
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-    
-    const titlebar = document.createElement('div');
-    titlebar.className = 'poly-titlebar';
-    
     // Helper function to send IPC message
     const sendIPC = (msg) => {
       if (window.ipc && window.ipc.postMessage) {
@@ -1913,81 +1889,17 @@ fn run_native_app(project_path: &Path, _release: bool) {
       }
     };
     
-    // Build titlebar HTML
-    const buildTitlebar = (logoSvg) => {
-      if (isMac) {
-        titlebar.innerHTML = `
-          <div class="poly-titlebar-macos">
-            <button class="poly-titlebar-macos-btn close" data-action="close">
-              <svg viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8"/></svg>
-            </button>
-            <button class="poly-titlebar-macos-btn minimize" data-action="minimize">
-              <svg viewBox="0 0 10 10"><path d="M1 5h8"/></svg>
-            </button>
-            <button class="poly-titlebar-macos-btn maximize" data-action="maximize">
-              <svg viewBox="0 0 10 10"><path d="M1 1h8v8H1z"/></svg>
-            </button>
-          </div>
-          <div class="poly-titlebar-left" style="padding-left: 8px;">
-            <div class="poly-titlebar-logo">${logoSvg}</div>
-            <span class="poly-titlebar-title">${document.title || 'Poly App'}</span>
-          </div>
-          <div style="width: 60px;"></div>
-        `;
-      } else {
-        titlebar.innerHTML = `
-          <div class="poly-titlebar-left">
-            <div class="poly-titlebar-logo">${logoSvg}</div>
-            <span class="poly-titlebar-title">${document.title || 'Poly App'}</span>
-          </div>
-          <div class="poly-titlebar-controls">
-            <button class="poly-titlebar-btn" data-action="minimize">
-              <svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg>
-            </button>
-            <button class="poly-titlebar-btn" data-action="maximize">
-              <svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" rx="1"/></svg>
-            </button>
-            <button class="poly-titlebar-btn close" data-action="close">
-              <svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0l-10 10"/></svg>
-            </button>
-          </div>
-        `;
-      }
-      
-      // Add click handlers
-      titlebar.querySelectorAll('[data-action]').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          sendIPC(btn.dataset.action);
-        });
-      });
-      
-      // Enable window dragging
-      titlebar.addEventListener('mousedown', (e) => {
-        if (!e.target.closest('[data-action]') && !e.target.closest('.poly-titlebar-macos')) {
-          sendIPC('drag');
-        }
-      });
+    // Expose window control API
+    window.polyWindow = {
+      minimize: () => sendIPC('minimize'),
+      maximize: () => sendIPC('maximize'),
+      close: () => sendIPC('close'),
+      drag: () => sendIPC('drag'),
+      // Check if running in frameless mode
+      isFrameless: () => fetch('/__poly_config').then(r => r.json()).then(d => d.decorations === false).catch(() => false)
     };
     
-    // Try to load custom icon from assets/icon.svg
-    fetch('/__poly_titlebar_icon')
-      .then(r => r.json())
-      .then(data => {
-        buildTitlebar(data.icon || defaultLogo);
-      })
-      .catch(() => {
-        buildTitlebar(defaultLogo);
-      });
-    
-    // Insert titlebar when DOM is ready
-    if (document.body) {
-      document.body.insertBefore(titlebar, document.body.firstChild);
-    } else {
-      document.addEventListener('DOMContentLoaded', () => {
-        document.body.insertBefore(titlebar, document.body.firstChild);
-      });
-    }
+    console.log('[Poly] Window API ready: polyWindow.minimize(), polyWindow.maximize(), polyWindow.close(), polyWindow.drag()');
   }
 })();
 
@@ -2187,6 +2099,14 @@ window.poly = {
     async isRegistered(protocol) { return poly.invoke('__poly_deeplink_is_registered', { protocol }); },
     async get() { return poly.invoke('__poly_deeplink_get', {}); },
     async has() { return poly.invoke('__poly_deeplink_has', {}); }
+  },
+  tray: {
+    // Listen for tray menu clicks
+    onMenuClick(callback) {
+      window.addEventListener('polytray', (e) => callback(e.detail.id));
+    },
+    // Check if tray is enabled (from poly.toml config)
+    async isEnabled() { return poly.invoke('__poly_tray_is_enabled', {}); }
   }
 };
 // Initialize Lucide Icons

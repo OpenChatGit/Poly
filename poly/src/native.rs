@@ -2,13 +2,6 @@
 //! Similar to Tauri/Electron but lightweight
 
 #[cfg(feature = "native")]
-use tao::{
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
-};
-
-#[cfg(feature = "native")]
 use wry::WebViewBuilder;
 
 /// Configuration for native window
@@ -24,17 +17,11 @@ pub struct NativeConfig {
     pub always_on_top: bool,
     pub dev_tools: bool,
     pub icon_path: Option<String>,
-    /// Enable system tray
     pub tray_enabled: bool,
-    /// Tray icon path (uses icon_path if not set)
     pub tray_icon_path: Option<String>,
-    /// Tray tooltip
     pub tray_tooltip: Option<String>,
-    /// Minimize to tray instead of taskbar
     pub minimize_to_tray: bool,
-    /// Close to tray instead of exiting
     pub close_to_tray: bool,
-    /// Custom tray menu items: (id, label) - "separator" id for separator
     pub tray_menu_items: Vec<(String, String)>,
 }
 
@@ -63,46 +50,43 @@ impl Default for NativeConfig {
 
 impl NativeConfig {
     pub fn new(title: &str) -> Self {
-        Self {
-            title: title.to_string(),
-            ..Default::default()
-        }
+        Self { title: title.to_string(), ..Default::default() }
     }
     
     pub fn with_size(mut self, width: u32, height: u32) -> Self {
-        self.width = width;
-        self.height = height;
-        self
+        self.width = width; self.height = height; self
     }
     
     pub fn with_dev_tools(mut self, enabled: bool) -> Self {
-        self.dev_tools = enabled;
-        self
+        self.dev_tools = enabled; self
     }
     
     pub fn with_icon(mut self, path: &str) -> Self {
-        self.icon_path = Some(path.to_string());
-        self
+        self.icon_path = Some(path.to_string()); self
     }
     
     pub fn with_tray(mut self, enabled: bool) -> Self {
-        self.tray_enabled = enabled;
-        self
+        self.tray_enabled = enabled; self
     }
     
     pub fn with_tray_icon(mut self, path: &str) -> Self {
-        self.tray_icon_path = Some(path.to_string());
-        self
+        self.tray_icon_path = Some(path.to_string()); self
     }
     
     pub fn with_minimize_to_tray(mut self, enabled: bool) -> Self {
-        self.minimize_to_tray = enabled;
-        self
+        self.minimize_to_tray = enabled; self
     }
     
     pub fn with_close_to_tray(mut self, enabled: bool) -> Self {
-        self.close_to_tray = enabled;
-        self
+        self.close_to_tray = enabled; self
+    }
+    
+    pub fn with_decorations(mut self, enabled: bool) -> Self {
+        self.decorations = enabled; self
+    }
+    
+    pub fn with_transparent(mut self, enabled: bool) -> Self {
+        self.transparent = enabled; self
     }
 }
 
@@ -110,172 +94,78 @@ impl NativeConfig {
 // Native Dialogs API
 // ============================================
 
-/// Show a file open dialog
 #[cfg(feature = "native")]
 pub fn dialog_open_file(title: Option<&str>, filters: Option<Vec<(&str, &[&str])>>) -> Option<String> {
     let mut dialog = rfd::FileDialog::new();
-    
-    if let Some(t) = title {
-        dialog = dialog.set_title(t);
-    }
-    
-    if let Some(f) = filters {
-        for (name, exts) in f {
-            dialog = dialog.add_filter(name, exts);
-        }
-    }
-    
+    if let Some(t) = title { dialog = dialog.set_title(t); }
+    if let Some(f) = filters { for (name, exts) in f { dialog = dialog.add_filter(name, exts); } }
     dialog.pick_file().map(|p| p.to_string_lossy().to_string())
 }
 
-/// Show a file open dialog for multiple files
 #[cfg(feature = "native")]
 pub fn dialog_open_files(title: Option<&str>, filters: Option<Vec<(&str, &[&str])>>) -> Vec<String> {
     let mut dialog = rfd::FileDialog::new();
-    
-    if let Some(t) = title {
-        dialog = dialog.set_title(t);
-    }
-    
-    if let Some(f) = filters {
-        for (name, exts) in f {
-            dialog = dialog.add_filter(name, exts);
-        }
-    }
-    
-    dialog.pick_files()
-        .map(|files| files.into_iter().map(|p| p.to_string_lossy().to_string()).collect())
-        .unwrap_or_default()
+    if let Some(t) = title { dialog = dialog.set_title(t); }
+    if let Some(f) = filters { for (name, exts) in f { dialog = dialog.add_filter(name, exts); } }
+    dialog.pick_files().map(|f| f.into_iter().map(|p| p.to_string_lossy().to_string()).collect()).unwrap_or_default()
 }
 
-/// Show a file save dialog
 #[cfg(feature = "native")]
 pub fn dialog_save_file(title: Option<&str>, default_name: Option<&str>, filters: Option<Vec<(&str, &[&str])>>) -> Option<String> {
     let mut dialog = rfd::FileDialog::new();
-    
-    if let Some(t) = title {
-        dialog = dialog.set_title(t);
-    }
-    
-    if let Some(name) = default_name {
-        dialog = dialog.set_file_name(name);
-    }
-    
-    if let Some(f) = filters {
-        for (name, exts) in f {
-            dialog = dialog.add_filter(name, exts);
-        }
-    }
-    
+    if let Some(t) = title { dialog = dialog.set_title(t); }
+    if let Some(name) = default_name { dialog = dialog.set_file_name(name); }
+    if let Some(f) = filters { for (name, exts) in f { dialog = dialog.add_filter(name, exts); } }
     dialog.save_file().map(|p| p.to_string_lossy().to_string())
 }
 
-/// Show a folder picker dialog
 #[cfg(feature = "native")]
 pub fn dialog_pick_folder(title: Option<&str>) -> Option<String> {
     let mut dialog = rfd::FileDialog::new();
-    
-    if let Some(t) = title {
-        dialog = dialog.set_title(t);
-    }
-    
+    if let Some(t) = title { dialog = dialog.set_title(t); }
     dialog.pick_folder().map(|p| p.to_string_lossy().to_string())
 }
 
-/// Message dialog level
 #[derive(Debug, Clone, Copy)]
-pub enum MessageLevel {
-    Info,
-    Warning,
-    Error,
-}
+pub enum MessageLevel { Info, Warning, Error }
 
-/// Show a message dialog
 #[cfg(feature = "native")]
 pub fn dialog_message(title: &str, message: &str, level: MessageLevel) {
-    let msg_level = match level {
+    let lvl = match level {
         MessageLevel::Info => rfd::MessageLevel::Info,
         MessageLevel::Warning => rfd::MessageLevel::Warning,
         MessageLevel::Error => rfd::MessageLevel::Error,
     };
-    
-    rfd::MessageDialog::new()
-        .set_title(title)
-        .set_description(message)
-        .set_level(msg_level)
-        .show();
+    rfd::MessageDialog::new().set_title(title).set_description(message).set_level(lvl).show();
 }
 
-/// Show a confirm dialog (Yes/No)
 #[cfg(feature = "native")]
 pub fn dialog_confirm(title: &str, message: &str) -> bool {
     rfd::MessageDialog::new()
-        .set_title(title)
-        .set_description(message)
+        .set_title(title).set_description(message)
         .set_level(rfd::MessageLevel::Info)
         .set_buttons(rfd::MessageButtons::YesNo)
         .show() == rfd::MessageDialogResult::Yes
 }
 
-// Stubs for non-native builds
 #[cfg(not(feature = "native"))]
-pub fn dialog_open_file(_title: Option<&str>, _filters: Option<Vec<(&str, &[&str])>>) -> Option<String> { None }
+pub fn dialog_open_file(_: Option<&str>, _: Option<Vec<(&str, &[&str])>>) -> Option<String> { None }
 #[cfg(not(feature = "native"))]
-pub fn dialog_open_files(_title: Option<&str>, _filters: Option<Vec<(&str, &[&str])>>) -> Vec<String> { vec![] }
+pub fn dialog_open_files(_: Option<&str>, _: Option<Vec<(&str, &[&str])>>) -> Vec<String> { vec![] }
 #[cfg(not(feature = "native"))]
-pub fn dialog_save_file(_title: Option<&str>, _default_name: Option<&str>, _filters: Option<Vec<(&str, &[&str])>>) -> Option<String> { None }
+pub fn dialog_save_file(_: Option<&str>, _: Option<&str>, _: Option<Vec<(&str, &[&str])>>) -> Option<String> { None }
 #[cfg(not(feature = "native"))]
-pub fn dialog_pick_folder(_title: Option<&str>) -> Option<String> { None }
+pub fn dialog_pick_folder(_: Option<&str>) -> Option<String> { None }
 #[cfg(not(feature = "native"))]
-pub fn dialog_message(_title: &str, _message: &str, _level: MessageLevel) {}
+pub fn dialog_message(_: &str, _: &str, _: MessageLevel) {}
 #[cfg(not(feature = "native"))]
-pub fn dialog_confirm(_title: &str, _message: &str) -> bool { false }
+pub fn dialog_confirm(_: &str, _: &str) -> bool { false }
 
 
 // ============================================
 // Window Management
 // ============================================
 
-/// Run a native window with the given HTML content
-#[cfg(feature = "native")]
-pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
-    let event_loop = EventLoop::new();
-    
-    let mut window_builder = WindowBuilder::new()
-        .with_title(&config.title)
-        .with_inner_size(tao::dpi::LogicalSize::new(config.width, config.height))
-        .with_resizable(config.resizable)
-        .with_decorations(config.decorations)
-        .with_always_on_top(config.always_on_top);
-    
-    if let Some(ref icon_path) = config.icon_path {
-        if let Ok(icon) = load_icon(icon_path) {
-            window_builder = window_builder.with_window_icon(Some(icon));
-        }
-    }
-    
-    let window = window_builder.build(&event_loop)?;
-    
-    let html_owned = html.to_string();
-    let _webview = WebViewBuilder::new()
-        .with_html(&html_owned)
-        .with_devtools(config.dev_tools)
-        .build(&window)?;
-    
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-        
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
-            _ => {}
-        }
-    });
-}
-
-/// Load an icon from a PNG file
 #[cfg(feature = "native")]
 fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>> {
     use std::fs::File;
@@ -283,174 +173,180 @@ fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>
     use image::GenericImageView;
     
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let img = image::load(reader, image::ImageFormat::Png)?;
+    let img = image::load(BufReader::new(file), image::ImageFormat::Png)?;
+    let (w, h) = img.dimensions();
+    let size = w.max(h);
     
-    let (width, height) = img.dimensions();
-    let size = width.max(height);
     let mut square = image::RgbaImage::new(size, size);
+    for p in square.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
     
-    for pixel in square.pixels_mut() {
-        *pixel = image::Rgba([0, 0, 0, 0]);
-    }
-    
-    let x_offset = (size - width) / 2;
-    let y_offset = (size - height) / 2;
-    
-    for (x, y, pixel) in img.to_rgba8().enumerate_pixels() {
-        square.put_pixel(x + x_offset, y + y_offset, *pixel);
+    let (xo, yo) = ((size - w) / 2, (size - h) / 2);
+    for (x, y, p) in img.to_rgba8().enumerate_pixels() {
+        square.put_pixel(x + xo, y + yo, *p);
     }
     
     let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
-    let icon = tao::window::Icon::from_rgba(resized.into_raw(), 64, 64)?;
-    Ok(icon)
+    Ok(tao::window::Icon::from_rgba(resized.into_raw(), 64, 64)?)
 }
 
-/// Run a native window with a URL (frameless with custom titlebar)
+/// Run a native window with HTML content
 #[cfg(feature = "native")]
-pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
-    #[allow(unused_imports)]
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-    #[allow(unused_imports)]
-    use tray_icon::{TrayIconBuilder, Icon as TrayIconType, menu::{Menu, MenuItem, PredefinedMenuItem, MenuEvent}};
+pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use tao::{
+        event::{Event, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+        window::WindowBuilder,
+    };
     
     let event_loop = EventLoop::new();
     
-    // Frameless window for custom titlebar
-    let mut window_builder = WindowBuilder::new()
+    let mut builder = WindowBuilder::new()
         .with_title(&config.title)
         .with_inner_size(tao::dpi::LogicalSize::new(config.width, config.height))
         .with_resizable(config.resizable)
-        .with_decorations(false); // No native titlebar!
+        .with_decorations(config.decorations)
+        .with_always_on_top(config.always_on_top)
+        .with_transparent(config.transparent);
     
     if let Some(ref icon_path) = config.icon_path {
         if let Ok(icon) = load_icon(icon_path) {
-            window_builder = window_builder.with_window_icon(Some(icon));
+            builder = builder.with_window_icon(Some(icon));
         }
     }
     
-    let window = Arc::new(window_builder.build(&event_loop)?);
-    let window_clone = Arc::clone(&window);
-    let window_for_tray = Arc::clone(&window);
+    let window = builder.build(&event_loop)?;
     
-    // Track if we should close to tray
-    let close_to_tray = config.close_to_tray;
-    let minimize_to_tray = config.minimize_to_tray;
+    let webview = WebViewBuilder::new()
+        .with_html(html)
+        .with_devtools(config.dev_tools)
+        .with_transparent(config.transparent)
+        .build(&window)?;
+    
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+        match event {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::WindowEvent { event: WindowEvent::Resized(size), .. } => {
+                let _ = webview.set_bounds(wry::Rect {
+                    position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(0.0, 0.0)),
+                    size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, size.height)),
+                });
+            }
+            _ => {}
+        }
+    });
+}
+
+/// Run a native window with a URL
+#[cfg(feature = "native")]
+pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
+    use tao::{
+        event::{Event, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+        window::WindowBuilder,
+    };
+    use std::sync::{Arc, Mutex};
+    
+    let event_loop = EventLoop::new();
+    
+    let mut builder = WindowBuilder::new()
+        .with_title(&config.title)
+        .with_inner_size(tao::dpi::LogicalSize::new(config.width as f64, config.height as f64))
+        .with_resizable(config.resizable)
+        .with_decorations(config.decorations)
+        .with_transparent(config.transparent);
+    
+    if let Some(ref icon_path) = config.icon_path {
+        if let Ok(icon) = load_icon(icon_path) {
+            builder = builder.with_window_icon(Some(icon));
+        }
+    }
+    
+    let window = builder.build(&event_loop)?;
+    let window = Arc::new(window);
+    let window_clone = Arc::clone(&window);
     
     // Create system tray if enabled
     let _tray = if config.tray_enabled {
-        let tray_menu = Menu::new();
+        use crate::tray::{TrayConfig, TrayMenuItem, create_tray};
         
-        // Track menu item IDs for event handling
-        let mut menu_id_map: std::collections::HashMap<tray_icon::menu::MenuId, String> = std::collections::HashMap::new();
-        let mut show_id: Option<tray_icon::menu::MenuId> = None;
-        let mut quit_id: Option<tray_icon::menu::MenuId> = None;
-        
-        // Use custom menu items if provided, otherwise use defaults
-        if config.tray_menu_items.is_empty() {
-            // Default menu
-            let show_item = MenuItem::new("Show", true, None);
-            let quit_item = MenuItem::new("Quit", true, None);
-            show_id = Some(show_item.id().clone());
-            quit_id = Some(quit_item.id().clone());
-            menu_id_map.insert(show_item.id().clone(), "show".to_string());
-            menu_id_map.insert(quit_item.id().clone(), "quit".to_string());
-            
-            tray_menu.append(&show_item)?;
-            tray_menu.append(&PredefinedMenuItem::separator())?;
-            tray_menu.append(&quit_item)?;
-        } else {
-            // Custom menu from config
-            for (id, label) in &config.tray_menu_items {
-                if id == "separator" {
-                    tray_menu.append(&PredefinedMenuItem::separator())?;
-                } else {
-                    let item = MenuItem::new(label, true, None);
-                    menu_id_map.insert(item.id().clone(), id.clone());
-                    
-                    // Track special IDs
-                    if id == "show" {
-                        show_id = Some(item.id().clone());
-                    } else if id == "quit" || id == "exit" {
-                        quit_id = Some(item.id().clone());
-                    }
-                    
-                    tray_menu.append(&item)?;
-                }
+        // Build menu items from config
+        let mut menu_items = Vec::new();
+        for (id, label) in &config.tray_menu_items {
+            if id == "separator" {
+                menu_items.push(TrayMenuItem::Separator);
+            } else {
+                menu_items.push(TrayMenuItem::Item {
+                    id: id.clone(),
+                    label: label.clone(),
+                    enabled: true,
+                });
             }
         }
         
-        // Load tray icon
-        let tray_icon_path = config.tray_icon_path.as_ref().or(config.icon_path.as_ref());
-        let tray_icon = if let Some(path) = tray_icon_path {
-            load_tray_icon_from_file(path)?
-        } else {
-            create_default_tray_icon()?
-        };
+        // Add default items if none specified
+        if menu_items.is_empty() {
+            menu_items = vec![
+                TrayMenuItem::Item { id: "show".to_string(), label: "Show".to_string(), enabled: true },
+                TrayMenuItem::Separator,
+                TrayMenuItem::Item { id: "quit".to_string(), label: "Quit".to_string(), enabled: true },
+            ];
+        }
         
-        let tooltip = config.tray_tooltip.as_ref().unwrap_or(&config.title);
+        let mut tray_config = TrayConfig::new(&config.tray_tooltip.clone().unwrap_or_else(|| config.title.clone()))
+            .with_menu(menu_items);
         
-        let tray = TrayIconBuilder::new()
-            .with_tooltip(tooltip)
-            .with_icon(tray_icon)
-            .with_menu(Box::new(tray_menu))
-            .build()?;
+        if let Some(ref icon_path) = config.tray_icon_path {
+            tray_config = tray_config.with_icon(icon_path);
+        } else if let Some(ref icon_path) = config.icon_path {
+            tray_config = tray_config.with_icon(icon_path);
+        }
         
-        // Handle tray menu events in a separate thread
-        let window_for_menu = Arc::clone(&window_for_tray);
-        std::thread::spawn(move || {
-            let receiver = MenuEvent::receiver();
-            loop {
-                if let Ok(event) = receiver.recv() {
-                    // Check for built-in actions
-                    if Some(&event.id) == show_id.as_ref() {
-                        window_for_menu.set_visible(true);
-                        window_for_menu.set_focus();
-                    } else if Some(&event.id) == quit_id.as_ref() {
-                        std::process::exit(0);
-                    }
-                    // Custom menu items will be handled via IPC
-                    // The menu_id_map could be used to send events to JS
-                    if let Some(custom_id) = menu_id_map.get(&event.id) {
-                        // For now, just log custom menu clicks
-                        // TODO: Send to webview via IPC
-                        eprintln!("Tray menu clicked: {}", custom_id);
-                    }
-                }
+        match create_tray(tray_config) {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                eprintln!("Warning: Failed to create system tray: {}", e);
+                None
             }
-        });
-        
-        Some(tray)
+        }
     } else {
         None
     };
     
-    let _webview = WebViewBuilder::new()
+    // Store tray handle and config for event handling
+    let tray_handle = Arc::new(Mutex::new(_tray));
+    let close_to_tray = config.close_to_tray;
+    let minimize_to_tray = config.minimize_to_tray;
+    let tray_enabled = config.tray_enabled;
+    
+    let webview = wry::WebViewBuilder::new()
         .with_url(url)
         .with_devtools(config.dev_tools)
-        .with_ipc_handler(move |req: wry::http::Request<String>| {
-            let body = req.body();
+        .with_transparent(config.transparent)
+        .with_ipc_handler(move |msg: wry::http::Request<String>| {
+            let body = msg.body();
             match body.as_str() {
                 "minimize" => {
-                    if minimize_to_tray {
+                    if minimize_to_tray && tray_enabled {
                         window_clone.set_visible(false);
                     } else {
                         window_clone.set_minimized(true);
                     }
                 }
                 "maximize" => {
-                    if window_clone.is_maximized() {
-                        window_clone.set_maximized(false);
-                    } else {
-                        window_clone.set_maximized(true);
-                    }
+                    window_clone.set_maximized(!window_clone.is_maximized());
                 }
                 "close" => {
-                    if close_to_tray {
+                    if close_to_tray && tray_enabled {
                         window_clone.set_visible(false);
                     } else {
                         std::process::exit(0);
                     }
+                }
+                "drag" => {
+                    let _ = window_clone.drag_window();
                 }
                 "hide" => {
                     window_clone.set_visible(false);
@@ -459,138 +355,127 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                     window_clone.set_visible(true);
                     window_clone.set_focus();
                 }
-                cmd if cmd.starts_with("drag") => {
-                    let _ = window_clone.drag_window();
-                }
                 _ => {}
             }
         })
-        .build(&*window)?;
+        .build(&window)?;
+    
+    let window_for_tray = Arc::clone(&window);
     
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         
+        // Handle tray events
+        if let Some(ref tray) = *tray_handle.lock().unwrap() {
+            while let Some(tray_event) = tray.poll_event() {
+                match tray_event {
+                    crate::tray::TrayEvent::MenuClick { id } => {
+                        match id.as_str() {
+                            "show" => {
+                                window_for_tray.set_visible(true);
+                                window_for_tray.set_focus();
+                            }
+                            "quit" | "exit" => {
+                                *control_flow = ControlFlow::Exit;
+                            }
+                            _ => {
+                                // Send custom menu event to webview
+                                let js = format!("window.dispatchEvent(new CustomEvent('polytray', {{ detail: {{ id: '{}' }} }}));", id);
+                                let _ = webview.evaluate_script(&js);
+                            }
+                        }
+                    }
+                    crate::tray::TrayEvent::IconClick | crate::tray::TrayEvent::IconDoubleClick => {
+                        window_for_tray.set_visible(true);
+                        window_for_tray.set_focus();
+                    }
+                }
+            }
+        }
+        
         match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                if close_to_tray && _tray.is_some() {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                if close_to_tray && tray_enabled {
                     window_for_tray.set_visible(false);
                 } else {
                     *control_flow = ControlFlow::Exit;
                 }
+            }
+            Event::WindowEvent { event: WindowEvent::Resized(size), .. } => {
+                let _ = webview.set_bounds(wry::Rect {
+                    position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(0.0, 0.0)),
+                    size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, size.height)),
+                });
             }
             _ => {}
         }
     });
 }
 
-/// Load tray icon from file
+// ============================================
+// Tray Icon Helpers
+// ============================================
+
 #[cfg(feature = "native")]
+#[allow(dead_code)]
 fn load_tray_icon_from_file(path: &str) -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::BufReader;
     use image::GenericImageView;
     
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
+    let format = if path.ends_with(".ico") { image::ImageFormat::Ico } else { image::ImageFormat::Png };
+    let img = image::load(BufReader::new(file), format)?;
+    let (w, h) = img.dimensions();
     
-    let format = if path.ends_with(".png") {
-        image::ImageFormat::Png
-    } else if path.ends_with(".ico") {
-        image::ImageFormat::Ico
-    } else {
-        image::ImageFormat::Png
-    };
-    
-    let img = image::load(reader, format)?;
-    let (width, height) = img.dimensions();
-    
-    // Windows tray icons should be 32x32 or 64x64
-    // Preserve aspect ratio by fitting into a square with transparency
     let size = 32u32;
-    
-    // Create a transparent square canvas
     let mut canvas = image::RgbaImage::new(size, size);
-    for pixel in canvas.pixels_mut() {
-        *pixel = image::Rgba([0, 0, 0, 0]);
-    }
+    for p in canvas.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
     
-    // Calculate scaling to fit while preserving aspect ratio
-    let scale = (size as f32 / width as f32).min(size as f32 / height as f32);
-    let new_width = (width as f32 * scale) as u32;
-    let new_height = (height as f32 * scale) as u32;
+    let scale = (size as f32 / w as f32).min(size as f32 / h as f32);
+    let (nw, nh) = ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
+    let resized = image::imageops::resize(&img.to_rgba8(), nw, nh, image::imageops::FilterType::Lanczos3);
     
-    // Resize the image preserving aspect ratio
-    let resized = image::imageops::resize(
-        &img.to_rgba8(),
-        new_width,
-        new_height,
-        image::imageops::FilterType::Lanczos3
-    );
+    let (xo, yo) = ((size - nw) / 2, (size - nh) / 2);
+    for (x, y, p) in resized.enumerate_pixels() { canvas.put_pixel(x + xo, y + yo, *p); }
     
-    // Center the resized image on the canvas
-    let x_offset = (size - new_width) / 2;
-    let y_offset = (size - new_height) / 2;
-    
-    for (x, y, pixel) in resized.enumerate_pixels() {
-        canvas.put_pixel(x + x_offset, y + y_offset, *pixel);
-    }
-    
-    let icon = tray_icon::Icon::from_rgba(canvas.into_raw(), size, size)?;
-    Ok(icon)
+    Ok(tray_icon::Icon::from_rgba(canvas.into_raw(), size, size)?)
 }
 
-/// Create default tray icon (Poly cyan circle)
 #[cfg(feature = "native")]
+#[allow(dead_code)]
 fn create_default_tray_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     let size = 32u32;
     let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    
     for y in 0..size {
         for x in 0..size {
-            let cx = (x as f32 - size as f32 / 2.0).abs();
-            let cy = (y as f32 - size as f32 / 2.0).abs();
-            let dist = (cx * cx + cy * cy).sqrt();
-            
-            if dist < size as f32 / 2.0 - 2.0 {
-                // Poly cyan: #5dc1d2
-                rgba.push(93);
-                rgba.push(193);
-                rgba.push(210);
-                rgba.push(255);
-            } else if dist < size as f32 / 2.0 {
-                let alpha = ((size as f32 / 2.0 - dist) * 127.0) as u8;
-                rgba.push(93);
-                rgba.push(193);
-                rgba.push(210);
-                rgba.push(alpha);
+            let dist = ((x as f32 - 16.0).powi(2) + (y as f32 - 16.0).powi(2)).sqrt();
+            if dist < 14.0 {
+                rgba.extend_from_slice(&[93, 193, 210, 255]); // Poly cyan
+            } else if dist < 16.0 {
+                rgba.extend_from_slice(&[93, 193, 210, ((16.0 - dist) * 127.0) as u8]);
             } else {
-                rgba.push(0);
-                rgba.push(0);
-                rgba.push(0);
-                rgba.push(0);
+                rgba.extend_from_slice(&[0, 0, 0, 0]);
             }
         }
     }
-    
-    let icon = tray_icon::Icon::from_rgba(rgba, size, size)?;
-    Ok(icon)
+    Ok(tray_icon::Icon::from_rgba(rgba, size, size)?)
 }
 
-/// Stub for when native feature is not enabled
-#[cfg(not(feature = "native"))]
-pub fn run_native_window(_html: &str, _config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
-    Err("Native feature not enabled. Build with --features native".into())
-}
+// ============================================
+// Stubs
+// ============================================
 
 #[cfg(not(feature = "native"))]
-pub fn run_native_url(_url: &str, _config: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
-    Err("Native feature not enabled. Build with --features native".into())
+pub fn run_native_window(_: &str, _: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
+    Err("Native feature not enabled".into())
 }
 
-/// Generate a standalone native app bundle
+#[cfg(not(feature = "native"))]
+pub fn run_native_url(_: &str, _: NativeConfig) -> Result<(), Box<dyn std::error::Error>> {
+    Err("Native feature not enabled".into())
+}
+
 pub fn generate_native_bundle(
     project_path: &std::path::Path,
     html_content: &str,
@@ -599,18 +484,10 @@ pub fn generate_native_bundle(
 ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
     let dist = project_path.join(if release { "dist/release" } else { "dist/debug" });
     std::fs::create_dir_all(&dist)?;
-    
-    let html_path = dist.join("index.html");
-    std::fs::write(&html_path, html_content)?;
-    
-    let config_json = serde_json::json!({
-        "title": config.title,
-        "width": config.width,
-        "height": config.height,
-        "resizable": config.resizable,
-        "devTools": config.dev_tools,
-    });
-    std::fs::write(dist.join("poly.json"), serde_json::to_string_pretty(&config_json)?)?;
-    
+    std::fs::write(dist.join("index.html"), html_content)?;
+    std::fs::write(dist.join("poly.json"), serde_json::to_string_pretty(&serde_json::json!({
+        "title": config.title, "width": config.width, "height": config.height,
+        "resizable": config.resizable, "devTools": config.dev_tools,
+    }))?)?;
     Ok(dist)
 }

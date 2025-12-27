@@ -1,0 +1,39 @@
+[package]
+name = "demo-app"
+version = "0.1.0"
+
+[web]
+dir = "web"
+
+[window]
+width = 1024
+height = 768
+resizable = true
+decorations = true
+
+[tray]
+enabled = true
+tooltip = "Poly Demo App"
+minimize_to_tray = false
+close_to_tray = true
+
+[[tray.menu]]
+id = "show"
+label = "Show Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "about"
+label = "About Poly"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
+
+# JavaScript Dependencies (managed by poly add/remove)
+[dependencies]

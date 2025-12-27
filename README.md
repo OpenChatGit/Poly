@@ -11,12 +11,12 @@ Poly is a modern framework for building cross-platform desktop applications usin
 - 🪶 **Lightweight** — ~7MB binary, fast startup
 - 🪟 **Multi-Window** — Create and manage multiple windows
 - 📋 **Clipboard** — Read/write system clipboard
-- 🎨 **Custom Titlebar** — Frameless windows by default
+- 🎨 **Frameless Windows** — Optional frameless mode with window control API
 - 📁 **Native Dialogs** — File open/save, folder picker
-- �  **Notifications** — Native OS notifications
-- � **Dieep Links** — Custom URL protocol handling (myapp://)
+- 🔔 **Notifications** — Native OS notifications
+- 🔗 **Deep Links** — Custom URL protocol handling (myapp://)
 - 🔄 **Auto-Updater** — Built-in GitHub Releases support
-- � **File Seystem** — Read/write files from JavaScript
+- 📂 **File System** — Read/write files from JavaScript
 - 🤖 **AI Integration** — Ollama, OpenAI, Anthropic built-in
 - 📦 **Package Manager** — UV-style fast npm package downloads
 - ⚡ **Hot Reload** — Instant updates during development
@@ -93,11 +93,12 @@ const win = await poly.windows.create({ title: 'New', width: 600, height: 400, h
 await poly.windows.close(win.id);
 await poly.windows.list();
 
-// Window Control (for custom titlebar)
-poly.window.minimize();
-poly.window.maximize();
-poly.window.close();
-poly.window.drag();
+// Window Control (for custom titlebar in frameless mode)
+polyWindow.minimize();
+polyWindow.maximize();
+polyWindow.close();
+polyWindow.drag();
+const isFrameless = await polyWindow.isFrameless();
 
 // Notifications
 await poly.notification.show('Title', 'Message body');
@@ -107,6 +108,9 @@ await poly.notification.showWithTimeout('Alert', 'Auto-dismiss', 5000);
 await poly.deeplink.register('myapp', 'My App');  // Register myapp://
 await poly.deeplink.unregister('myapp');          // Remove from registry
 const link = await poly.deeplink.get();           // Get launch URL
+
+// System Tray (configure in poly.toml)
+poly.tray.onMenuClick((id) => console.log('Menu clicked:', id));
 
 // Auto-Updater
 await poly.updater.checkGithub('user/repo', '1.0.0');
@@ -142,6 +146,7 @@ version = "1.0.0"
 [window]
 width = 1024
 height = 768
+decorations = true  # false for frameless window (requires custom titlebar)
 
 [tray]
 enabled = true
