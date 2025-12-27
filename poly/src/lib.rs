@@ -11,6 +11,7 @@ pub mod clipboard;
 pub mod window;
 pub mod notification;
 pub mod deeplink;
+pub mod templates;
 
 use lexer::Lexer;
 use parser::Parser;
