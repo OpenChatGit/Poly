@@ -28,6 +28,10 @@ function app() {
     notifyTitle: 'Hello!',
     notifyBody: 'This is a notification from Poly',
     notifyResult: '',
+    
+    // Deep Links
+    deeplinkProtocol: 'testapp',
+    deeplinkResult: '',
 
     // ========== Clipboard Tests ==========
     async copyToClipboard() {
@@ -318,6 +322,54 @@ function app() {
         this.testsRun++;
       } catch (e) {
         this.notifyResult = '✗ Error: ' + (e.message || e);
+      }
+    },
+
+    // ========== Deep Link Tests ==========
+    async registerDeeplink() {
+      const protocol = this.deeplinkProtocol || 'testapp';
+      try {
+        await poly.deeplink.register(protocol, 'Poly Test App');
+        this.deeplinkResult = `✓ Registered! Try opening: ${protocol}://hello in your browser`;
+        this.testsRun++;
+      } catch (e) {
+        this.deeplinkResult = '✗ Error: ' + (e.message || e);
+      }
+    },
+
+    async checkDeeplink() {
+      const protocol = this.deeplinkProtocol || 'testapp';
+      try {
+        const registered = await poly.deeplink.isRegistered(protocol);
+        this.deeplinkResult = registered 
+          ? `✓ "${protocol}://" is registered` 
+          : `✗ "${protocol}://" is NOT registered`;
+        this.testsRun++;
+      } catch (e) {
+        this.deeplinkResult = '✗ Error: ' + (e.message || e);
+      }
+    },
+
+    async unregisterDeeplink() {
+      const protocol = this.deeplinkProtocol || 'testapp';
+      try {
+        await poly.deeplink.unregister(protocol);
+        this.deeplinkResult = `✓ "${protocol}://" removed from registry`;
+        this.testsRun++;
+      } catch (e) {
+        this.deeplinkResult = '✗ Error: ' + (e.message || e);
+      }
+    },
+
+    async getDeeplink() {
+      try {
+        const url = await poly.deeplink.get();
+        this.deeplinkResult = url 
+          ? '✓ App was opened with: ' + url 
+          : '✓ No deep link (app was opened normally)';
+        this.testsRun++;
+      } catch (e) {
+        this.deeplinkResult = '✗ Error: ' + (e.message || e);
       }
     }
   };

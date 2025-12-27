@@ -10,6 +10,7 @@ pub mod ai;
 pub mod clipboard;
 pub mod window;
 pub mod notification;
+pub mod deeplink;
 
 use lexer::Lexer;
 use parser::Parser;

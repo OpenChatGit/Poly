@@ -103,6 +103,24 @@
       <div class="result" x-show="notifyResult" x-text="notifyResult"></div>
     </div>
 
+    <!-- Deep Link Test -->
+    <div class="card">
+      <h2>🔗 Deep Links (Custom URL Protocol)</h2>
+      <p style="color:#888;font-size:12px;margin-bottom:12px;">
+        Register a protocol like "testapp" → then "testapp://hello" opens your app
+      </p>
+      <div class="row">
+        <input type="text" x-model="deeplinkProtocol" placeholder="Protocol (e.g. myapp)">
+        <button @click="registerDeeplink()">Register</button>
+        <button @click="checkDeeplink()">Check</button>
+        <button @click="unregisterDeeplink()" style="background:#c44;">Unregister</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button @click="getDeeplink()">Get Pending URL</button>
+      </div>
+      <div class="result" x-show="deeplinkResult" x-text="deeplinkResult"></div>
+    </div>
+
     <div class="footer">
       <span>Poly v0.2.5</span>
       <span x-text="'Tests: ' + testsRun"></span>

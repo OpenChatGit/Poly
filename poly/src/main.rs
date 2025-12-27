@@ -656,6 +656,13 @@ window.poly = {{
   notification: {{
     async show(title, body, icon) {{ return poly.invoke('__poly_notification_show', {{ title, body, icon }}); }},
     async showWithTimeout(title, body, timeout) {{ return poly.invoke('__poly_notification_show_timeout', {{ title, body, timeout }}); }}
+  }},
+  deeplink: {{
+    async register(protocol, appName) {{ return poly.invoke('__poly_deeplink_register', {{ protocol, appName }}); }},
+    async unregister(protocol) {{ return poly.invoke('__poly_deeplink_unregister', {{ protocol }}); }},
+    async isRegistered(protocol) {{ return poly.invoke('__poly_deeplink_is_registered', {{ protocol }}); }},
+    async get() {{ return poly.invoke('__poly_deeplink_get', {{}}); }},
+    async has() {{ return poly.invoke('__poly_deeplink_has', {{}}); }}
   }}
 }};
 // Initialize Lucide Icons
@@ -1284,6 +1291,45 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             {
                 serde_json::json!({"error": "Native feature not enabled"}).to_string()
             }
+        }
+        // Deep Link APIs
+        "__poly_deeplink_register" => {
+            let protocol = args.get("protocol").and_then(|v| v.as_str()).unwrap_or("");
+            let app_name = args.get("appName").and_then(|v| v.as_str()).unwrap_or("Poly App");
+            
+            if protocol.is_empty() {
+                return serde_json::json!({"error": "Protocol name required"}).to_string();
+            }
+            
+            match poly::deeplink::register_protocol(protocol, app_name) {
+                Ok(_) => serde_json::json!({"result": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_deeplink_unregister" => {
+            let protocol = args.get("protocol").and_then(|v| v.as_str()).unwrap_or("");
+            
+            if protocol.is_empty() {
+                return serde_json::json!({"error": "Protocol name required"}).to_string();
+            }
+            
+            match poly::deeplink::unregister_protocol(protocol) {
+                Ok(_) => serde_json::json!({"result": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_deeplink_is_registered" => {
+            let protocol = args.get("protocol").and_then(|v| v.as_str()).unwrap_or("");
+            let registered = poly::deeplink::is_protocol_registered(protocol);
+            serde_json::json!({"result": registered}).to_string()
+        }
+        "__poly_deeplink_get" => {
+            let link = poly::deeplink::get_deep_link();
+            serde_json::json!({"result": link}).to_string()
+        }
+        "__poly_deeplink_has" => {
+            let has = poly::deeplink::has_deep_link();
+            serde_json::json!({"result": has}).to_string()
         }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
     }
@@ -2134,6 +2180,13 @@ window.poly = {
   notification: {
     async show(title, body, icon) { return poly.invoke('__poly_notification_show', { title, body, icon }); },
     async showWithTimeout(title, body, timeout) { return poly.invoke('__poly_notification_show_timeout', { title, body, timeout }); }
+  },
+  deeplink: {
+    async register(protocol, appName) { return poly.invoke('__poly_deeplink_register', { protocol, appName }); },
+    async unregister(protocol) { return poly.invoke('__poly_deeplink_unregister', { protocol }); },
+    async isRegistered(protocol) { return poly.invoke('__poly_deeplink_is_registered', { protocol }); },
+    async get() { return poly.invoke('__poly_deeplink_get', {}); },
+    async has() { return poly.invoke('__poly_deeplink_has', {}); }
   }
 };
 // Initialize Lucide Icons
