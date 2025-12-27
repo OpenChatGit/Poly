@@ -13,8 +13,10 @@ Poly is a modern framework for building cross-platform desktop applications usin
 - 📋 **Clipboard** — Read/write system clipboard
 - 🎨 **Custom Titlebar** — Frameless windows by default
 - 📁 **Native Dialogs** — File open/save, folder picker
+- �  **Notifications** — Native OS notifications
+- � **Dieep Links** — Custom URL protocol handling (myapp://)
 - 🔄 **Auto-Updater** — Built-in GitHub Releases support
-- 💾 **File System** — Read/write files from JavaScript
+- � **File Seystem** — Read/write files from JavaScript
 - 🤖 **AI Integration** — Ollama, OpenAI, Anthropic built-in
 - 📦 **Package Manager** — UV-style fast npm package downloads
 - ⚡ **Hot Reload** — Instant updates during development
@@ -97,6 +99,15 @@ poly.window.maximize();
 poly.window.close();
 poly.window.drag();
 
+// Notifications
+await poly.notification.show('Title', 'Message body');
+await poly.notification.showWithTimeout('Alert', 'Auto-dismiss', 5000);
+
+// Deep Links (Custom URL Protocol)
+await poly.deeplink.register('myapp', 'My App');  // Register myapp://
+await poly.deeplink.unregister('myapp');          // Remove from registry
+const link = await poly.deeplink.get();           // Get launch URL
+
 // Auto-Updater
 await poly.updater.checkGithub('user/repo', '1.0.0');
 
@@ -149,6 +160,8 @@ alpinejs = "3.14.3"
 | Package Manager | Built-in | npm | npm |
 | Multi-Window | ✅ | ✅ | ✅ |
 | Clipboard | ✅ | ✅ | Plugin |
+| Notifications | ✅ | ✅ | Plugin |
+| Deep Links | ✅ | ✅ | Plugin |
 | System Tray | ✅ | Plugin | Plugin |
 | AI/LLM | ✅ | ❌ | ❌ |
 | Setup | Simple | Complex | Medium |

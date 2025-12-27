@@ -7,6 +7,8 @@ Complete reference for all Poly JavaScript APIs.
 - [Window Control](#window-control)
 - [Multi-Window](#multi-window)
 - [Clipboard](#clipboard)
+- [Notifications](#notifications)
+- [Deep Links](#deep-links)
 - [Dialogs](#dialogs)
 - [File System](#file-system)
 - [Auto-Updater](#auto-updater)
@@ -210,6 +212,147 @@ Clear clipboard contents.
 
 ```javascript
 await poly.clipboard.clear();
+```
+
+---
+
+## Notifications
+
+Display native OS notifications.
+
+### `poly.notification.show(title, body, icon?)`
+
+Show a notification.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `title` | string | Notification title |
+| `body` | string | Notification message |
+| `icon` | string | (Optional) Path to icon |
+
+```javascript
+await poly.notification.show('Download Complete', 'Your file has been downloaded');
+
+// With icon
+await poly.notification.show('New Message', 'You have a new message', './assets/icon.png');
+```
+
+### `poly.notification.showWithTimeout(title, body, timeout)`
+
+Show a notification that auto-dismisses.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `title` | string | Notification title |
+| `body` | string | Notification message |
+| `timeout` | number | Auto-dismiss time in milliseconds |
+
+```javascript
+// Show notification for 5 seconds
+await poly.notification.showWithTimeout('Saved', 'Your changes have been saved', 5000);
+```
+
+---
+
+## Deep Links
+
+Register and handle custom URL protocols (e.g., `myapp://action`).
+
+### `poly.deeplink.register(protocol, appName)`
+
+Register a custom URL protocol in the system registry.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `protocol` | string | Protocol name (e.g., 'myapp' for myapp://) |
+| `appName` | string | Display name for the protocol |
+
+```javascript
+// Register myapp:// protocol
+await poly.deeplink.register('myapp', 'My Application');
+
+// Now myapp://anything will open your app
+```
+
+### `poly.deeplink.unregister(protocol)`
+
+Remove a custom URL protocol from the system registry.
+
+```javascript
+await poly.deeplink.unregister('myapp');
+```
+
+### `poly.deeplink.isRegistered(protocol)`
+
+Check if a protocol is registered.
+
+**Returns:** `boolean`
+
+```javascript
+const registered = await poly.deeplink.isRegistered('myapp');
+if (!registered) {
+  await poly.deeplink.register('myapp', 'My App');
+}
+```
+
+### `poly.deeplink.get()`
+
+Get the deep link URL that launched the app.
+
+**Returns:** `string | null` - The full URL or null if not launched via deep link
+
+```javascript
+const link = await poly.deeplink.get();
+if (link) {
+  // Parse and handle the deep link
+  // e.g., myapp://open/document/123
+  const url = new URL(link);
+  console.log(url.pathname); // /open/document/123
+}
+```
+
+### `poly.deeplink.has()`
+
+Check if the app was launched via a deep link.
+
+**Returns:** `boolean`
+
+```javascript
+if (await poly.deeplink.has()) {
+  const link = await poly.deeplink.get();
+  handleDeepLink(link);
+}
+```
+
+### Deep Link Example
+
+```javascript
+// On app startup
+async function init() {
+  // Register protocol if not already
+  if (!await poly.deeplink.isRegistered('myapp')) {
+    await poly.deeplink.register('myapp', 'My App');
+  }
+  
+  // Handle deep link if launched with one
+  if (await poly.deeplink.has()) {
+    const link = await poly.deeplink.get();
+    // myapp://action/param1/param2
+    const url = new URL(link);
+    
+    switch (url.pathname) {
+      case '/open':
+        openDocument(url.searchParams.get('id'));
+        break;
+      case '/settings':
+        showSettings();
+        break;
+    }
+  }
+}
 ```
 
 ---
