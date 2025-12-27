@@ -10,12 +10,13 @@ width = 1024
 height = 768
 resizable = true
 decorations = true
+single_instance = true
 
 [tray]
 enabled = true
 tooltip = "Poly Demo App"
 minimize_to_tray = false
-close_to_tray = true
+close_to_tray = false
 
 [[tray.menu]]
 id = "show"

@@ -12,10 +12,13 @@ Poly is a modern framework for building cross-platform desktop applications usin
 - 🪟 **Multi-Window** — Create and manage multiple windows
 - 📋 **Clipboard** — Read/write system clipboard
 - 🎨 **Frameless Windows** — Optional frameless mode with window control API
+- 🔒 **Single Instance** — Prevent multiple app instances
+- 🖥️ **Native Builds** — Build standalone .exe without console window
 - 📁 **Native Dialogs** — File open/save, folder picker
 - 🔔 **Notifications** — Native OS notifications
 - 🔗 **Deep Links** — Custom URL protocol handling (myapp://)
 - 🔄 **Auto-Updater** — Built-in GitHub Releases support
+- ✍️ **Code Signing** — Sign executables for Windows/macOS
 - 📂 **File System** — Read/write files from JavaScript
 - 🤖 **AI Integration** — Ollama, OpenAI, Anthropic built-in
 - 📦 **Package Manager** — UV-style fast npm package downloads
@@ -31,14 +34,15 @@ cargo install --git https://github.com/OpenChatGit/Poly.git poly --features nati
 poly new my-app
 cd my-app
 
-# Development
+# Development (hot reload)
 poly dev
 
-# Run native
+# Run as native window
 poly run --native
 
-# Build
+# Build standalone executable
 poly build --release
+# Output: dist/windows/my-app.exe (no console window!)
 ```
 
 ## CLI
@@ -48,7 +52,11 @@ poly build --release
 | `poly new <name>` | Create new project |
 | `poly dev` | Dev server with hot reload |
 | `poly run --native` | Run as native app |
-| `poly build --release` | Production build |
+| `poly build --release` | Production build (no console) |
+| `poly build --target windows` | Build for Windows |
+| `poly build --target macos` | Build for macOS |
+| `poly build --target linux` | Build for Linux |
+| `poly build --release --sign` | Build and sign executable |
 | `poly build --installer` | Create installer |
 | `poly build --ci` | Generate GitHub Actions |
 | `poly add <package>` | Add npm package |
@@ -147,6 +155,7 @@ version = "1.0.0"
 width = 1024
 height = 768
 decorations = true  # false for frameless window (requires custom titlebar)
+single_instance = true  # prevent multiple instances
 
 [tray]
 enabled = true
@@ -163,12 +172,13 @@ alpinejs = "3.14.3"
 | Binary Size | ~7MB | ~150MB | ~5MB |
 | Memory | Low | High | Low |
 | Package Manager | Built-in | npm | npm |
-| Multi-Window | ✅ | ✅ | ✅ |
-| Clipboard | ✅ | ✅ | Plugin |
-| Notifications | ✅ | ✅ | Plugin |
-| Deep Links | ✅ | ✅ | Plugin |
-| System Tray | ✅ | Plugin | Plugin |
-| AI/LLM | ✅ | ❌ | ❌ |
+| Multi-Window | Built-in | Built-in | Built-in |
+| Clipboard | Built-in | Built-in | Plugin |
+| Notifications | Built-in | Built-in | Plugin |
+| Deep Links | Built-in | Built-in | Plugin |
+| System Tray | Built-in | Plugin | Plugin |
+| Code Signing | Built-in | External | External |
+| AI/LLM | Built-in | - | - |
 | Setup | Simple | Complex | Medium |
 
 ## License

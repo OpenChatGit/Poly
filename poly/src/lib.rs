@@ -12,6 +12,7 @@ pub mod window;
 pub mod notification;
 pub mod deeplink;
 pub mod templates;
+pub mod single_instance;
 
 use lexer::Lexer;
 use parser::Parser;
@@ -21,6 +22,7 @@ pub use native::{NativeConfig, run_native_window, run_native_url, generate_nativ
 pub use updater::{UpdateConfig, UpdateInfo, check_github_updates, check_custom_updates, download_update, install_update};
 pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
 pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, MessageRole, check_ollama, list_ollama_models, chat as ai_chat};
+pub use single_instance::{SingleInstanceConfig, try_acquire_instance, release_instance, is_primary_instance, check_single_instance};
 
 /// Run Poly source code and return the output
 pub fn run(source: &str) -> Result<Vec<String>, String> {

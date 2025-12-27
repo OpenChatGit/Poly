@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.6";
+const VERSION: &str = "0.2.7";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -97,6 +97,10 @@ enum Commands {
         #[arg(long)]
         installer: bool,
         
+        /// Sign the executable (requires certificate)
+        #[arg(long)]
+        sign: bool,
+        
         /// Generate GitHub Actions CI workflow
         #[arg(long)]
         ci: bool,
@@ -158,14 +162,14 @@ fn main() {
     let result = match cli.command {
         Some(Commands::Dev { path, port, open }) => { run_dev_server(&path, port, open); Ok(()) },
         Some(Commands::Run { path, release, native }) => run_app_result(&path, release, native),
-        Some(Commands::Build { path, target, release, installer, ci }) => { 
+        Some(Commands::Build { path, target, release, installer, sign, ci }) => { 
             if ci {
                 if let Err(e) = build::generate_ci_workflow(Path::new(&path)) {
                     eprintln!("{}error{}: {}", RED, RESET, e);
                     std::process::exit(1);
                 }
             } else {
-                build_app(&path, &target, release, installer); 
+                build_app(&path, &target, release, installer, sign); 
             }
             Ok(()) 
         },
@@ -176,6 +180,36 @@ fn main() {
         Some(Commands::Remove { package }) => packages::remove_package(&package),
         Some(Commands::Install { verify }) => packages::install_packages(verify),
         None => {
+            // Check if we're running as a bundled app (bundle folder or poly.toml next to exe)
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(exe_dir) = exe_path.parent() {
+                    let bundle_dir = exe_dir.join("bundle");
+                    let poly_toml = exe_dir.join("poly.toml");
+                    let bundle_poly_toml = bundle_dir.join("poly.toml");
+                    
+                    // If bundle exists, run as native app
+                    if bundle_dir.exists() && (bundle_poly_toml.exists() || poly_toml.exists()) {
+                        // Hide console window on Windows when running as bundled app
+                        #[cfg(all(target_os = "windows", feature = "native"))]
+                        {
+                            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
+                            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                            unsafe {
+                                let console = GetConsoleWindow();
+                                if !console.0.is_null() {
+                                    let _ = ShowWindow(console, SW_HIDE);
+                                    FreeConsole().ok();
+                                }
+                            }
+                        }
+                        
+                        // Run native app from bundle
+                        run_native_app(exe_dir, false);
+                        return;
+                    }
+                }
+            }
+            
             if let Some(expr) = cli.eval {
                 match poly::eval(&expr) {
                     Ok(result) => { println!("{}", result); Ok(()) },
@@ -1571,13 +1605,18 @@ fn run_native_app(project_path: &Path, _release: bool) {
     use std::sync::Arc;
     use std::thread;
     
+    // Check if running from bundle (bundle folder exists)
+    let bundle_dir = project_path.join("bundle");
+    let is_bundled = bundle_dir.exists();
+    let effective_path = if is_bundled { &bundle_dir } else { project_path };
+    
     // Find web directory
-    let web_dir = if project_path.is_file() {
-        project_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+    let web_dir = if effective_path.is_file() {
+        effective_path.parent().unwrap_or(Path::new(".")).to_path_buf()
     } else {
-        let web_path = project_path.join("web");
+        let web_path = effective_path.join("web");
         if web_path.exists() { web_path }
-        else if project_path.join("index.html").exists() { project_path.to_path_buf() }
+        else if effective_path.join("index.html").exists() { effective_path.to_path_buf() }
         else {
             eprintln!("{}error{}: No web directory found", RED, RESET);
             std::process::exit(1);
@@ -1590,12 +1629,34 @@ fn run_native_app(project_path: &Path, _release: bool) {
         std::process::exit(1);
     }
     
-    let title = project_path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("Poly App");
+    // Get title from poly.toml or folder name
+    let poly_toml_path = if is_bundled {
+        bundle_dir.join("poly.toml")
+    } else {
+        project_path.join("poly.toml")
+    };
     
-    // Parse poly.toml for configuration
-    let poly_toml_path = project_path.join("poly.toml");
+    let title = if poly_toml_path.exists() {
+        if let Ok(content) = fs::read_to_string(&poly_toml_path) {
+            extract_toml_value(&content, "name")
+                .unwrap_or_else(|| project_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Poly App")
+                    .to_string())
+        } else {
+            project_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Poly App")
+                .to_string()
+        }
+    } else {
+        project_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Poly App")
+            .to_string()
+    };
+    
+    // Window config defaults
     
     // Window config defaults
     let mut window_width: u32 = 1024;
@@ -1603,6 +1664,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let mut window_decorations = true; // Native titlebar by default
     let mut window_resizable = true;
     let mut window_transparent = false; // Transparent background for frameless
+    let mut single_instance = false;
     
     // Parse window section from poly.toml
     if poly_toml_path.exists() {
@@ -1625,9 +1687,19 @@ fn run_native_app(project_path: &Path, _release: bool) {
                         window_resizable = val.trim() == "true";
                     } else if let Some(val) = line.strip_prefix("transparent").and_then(|s| s.trim().strip_prefix('=')) {
                         window_transparent = val.trim() == "true";
+                    } else if let Some(val) = line.strip_prefix("single_instance").and_then(|s| s.trim().strip_prefix('=')) {
+                        single_instance = val.trim() == "true";
                     }
                 }
             }
+        }
+    }
+    
+    // Check single instance before starting
+    if single_instance {
+        if !poly::check_single_instance(&title) {
+            println!("  {}>{} Another instance is already running", YELLOW, RESET);
+            std::process::exit(0);
         }
     }
     
@@ -1708,10 +1780,19 @@ fn run_native_app(project_path: &Path, _release: bool) {
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
     
     // Look for window icon file (PNG for taskbar/dock)
-    let icon_candidates = [
-        project_path.join("assets/icon.png"),
-        project_path.join("icon.png"),
-    ];
+    // Check bundle/assets first, then project assets
+    let icon_candidates = if is_bundled {
+        vec![
+            bundle_dir.join("assets/icon.png"),
+            project_path.join("assets/icon.png"),
+            project_path.join("icon.png"),
+        ]
+    } else {
+        vec![
+            project_path.join("assets/icon.png"),
+            project_path.join("icon.png"),
+        ]
+    };
     let icon_path = icon_candidates.iter().find(|p| p.exists())
         .cloned()
         .or_else(|| {
@@ -1730,14 +1811,15 @@ fn run_native_app(project_path: &Path, _release: bool) {
             None
         });
     
-    let mut config = poly::NativeConfig::new(title)
+    let mut config = poly::NativeConfig::new(&title)
         .with_size(window_width, window_height)
         .with_decorations(window_decorations)
         .with_transparent(window_transparent)
         .with_dev_tools(true)
         .with_tray(tray_enabled)
         .with_minimize_to_tray(minimize_to_tray)
-        .with_close_to_tray(close_to_tray);
+        .with_close_to_tray(close_to_tray)
+        .with_single_instance(single_instance);
     
     config.resizable = window_resizable;
     
@@ -1762,6 +1844,10 @@ fn run_native_app(project_path: &Path, _release: bool) {
         if close_to_tray {
             println!("  {}>{} Close to tray: yes", DIM, RESET);
         }
+    }
+    
+    if single_instance {
+        println!("  {}>{} Single instance: enabled", DIM, RESET);
     }
     
     // Hot reload watcher info
@@ -2238,7 +2324,7 @@ if (typeof lucide !== 'undefined') {
     }
 }
 
-fn build_app(path: &str, target: &str, release: bool, installer: bool) {
+fn build_app(path: &str, target: &str, release: bool, installer: bool, sign: bool) {
     let project_path = Path::new(path);
     
     // Check if it's the old-style target (web, native, all)
@@ -2271,6 +2357,7 @@ fn build_app(path: &str, target: &str, release: bool, installer: bool) {
         release,
         bundle: true,
         installer,
+        sign,
     };
     
     if let Err(e) = build::build(&config) {
@@ -2304,6 +2391,18 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         else { fs::copy(&entry.path(), &dest)?; }
     }
     Ok(())
+}
+
+fn extract_toml_value(content: &str, key: &str) -> Option<String> {
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with(&format!("{} =", key)) || line.starts_with(&format!("{}=", key)) {
+            if let Some(value) = line.split('=').nth(1) {
+                return Some(value.trim().trim_matches('"').to_string());
+            }
+        }
+    }
+    None
 }
 
 

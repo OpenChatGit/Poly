@@ -81,6 +81,23 @@ pub struct BuildConfig {
     pub release: bool,
     pub bundle: bool,
     pub installer: bool,
+    pub sign: bool,
+}
+
+/// Signing configuration (from poly.toml or environment)
+#[derive(Debug, Clone, Default)]
+pub struct SigningConfig {
+    // Windows
+    pub windows_certificate: Option<String>,      // Path to .pfx file
+    pub windows_certificate_password: Option<String>,
+    pub windows_timestamp_url: Option<String>,
+    
+    // macOS
+    pub macos_identity: Option<String>,           // Developer ID Application: Name
+    pub macos_entitlements: Option<String>,       // Path to entitlements.plist
+    pub macos_notarize_apple_id: Option<String>,
+    pub macos_notarize_password: Option<String>,  // App-specific password
+    pub macos_notarize_team_id: Option<String>,
 }
 
 /// Build result
@@ -115,6 +132,9 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
     println!("  {}>{} Version:  {}", DIM, RESET, app_version);
     println!("  {}>{} Platform: {}", DIM, RESET, config.platform.name());
     println!("  {}>{} Mode:     {}", DIM, RESET, if config.release { "release" } else { "debug" });
+    if config.sign {
+        println!("  {}>{} Signing:  enabled", DIM, RESET);
+    }
     println!();
     
     let start = std::time::Instant::now();
@@ -144,7 +164,23 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
     let size = fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
     println!("\r  {}✓{} Created {} ({:.1} MB)          ", GREEN, RESET, exe_name, size as f64 / 1_000_000.0);
     
-    // Step 3: Create installer (optional)
+    // Step 3: Sign executable (optional)
+    if config.sign {
+        print!("  {}Signing executable...{}", DIM, RESET);
+        io::stdout().flush().ok();
+        
+        let signing_config = load_signing_config(&config.project_path);
+        match sign_executable(&exe_path, &signing_config) {
+            Ok(()) => {
+                println!("\r  {}✓{} Signed executable          ", GREEN, RESET);
+            }
+            Err(e) => {
+                println!("\r  {}!{} Signing failed: {}          ", YELLOW, RESET, e);
+            }
+        }
+    }
+    
+    // Step 4: Create installer (optional)
     if config.installer {
         print!("  {}Creating installer...{}", DIM, RESET);
         io::stdout().flush().ok();
@@ -221,21 +257,50 @@ fn create_launcher(
     _bundle_dir: &Path,
     config: &BuildConfig,
 ) -> Result<(), String> {
-    // For now, we create a self-contained bundle
-    // The Poly runtime will be copied alongside the bundle
-    
-    // Find the poly executable
-    let poly_exe = std::env::current_exe()
-        .map_err(|e| format!("Failed to find poly executable: {}", e))?;
-    
-    // For current platform, just copy poly and bundle together
+    // For current platform, build a GUI version of poly (no console window)
     if config.platform == Platform::Current || config.platform == Platform::current() {
-        // Copy poly executable
-        fs::copy(&poly_exe, exe_path)
-            .map_err(|e| format!("Failed to copy executable: {}", e))?;
+        // Build poly with gui feature to hide console on Windows
+        let cargo_path = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
         
-        // The bundle is already created, it will be loaded at runtime
-        // We need to embed the bundle path or use a relative path
+        // Find the poly crate directory (relative to current exe or workspace)
+        let poly_crate = find_poly_crate()?;
+        
+        let mut cmd = Command::new(&cargo_path);
+        cmd.current_dir(&poly_crate);
+        cmd.arg("build")
+            .arg("-p").arg("poly")
+            .arg("--features").arg("native,gui");  // Add gui feature for no-console
+        
+        if config.release {
+            cmd.arg("--release");
+        }
+        
+        let output = cmd.output()
+            .map_err(|e| format!("Failed to run cargo build: {}", e))?;
+        
+        if !output.status.success() {
+            // If gui build fails, fall back to copying current exe
+            let poly_exe = std::env::current_exe()
+                .map_err(|e| format!("Failed to find poly executable: {}", e))?;
+            fs::copy(&poly_exe, exe_path)
+                .map_err(|e| format!("Failed to copy executable: {}", e))?;
+        } else {
+            // Copy the built GUI executable
+            let target_dir = poly_crate.join("target");
+            let profile = if config.release { "release" } else { "debug" };
+            let built_exe = target_dir.join(profile).join(format!("poly{}", Platform::current().exe_extension()));
+            
+            if built_exe.exists() {
+                fs::copy(&built_exe, exe_path)
+                    .map_err(|e| format!("Failed to copy built executable: {}", e))?;
+            } else {
+                // Fallback: copy current exe
+                let poly_exe = std::env::current_exe()
+                    .map_err(|e| format!("Failed to find poly executable: {}", e))?;
+                fs::copy(&poly_exe, exe_path)
+                    .map_err(|e| format!("Failed to copy executable: {}", e))?;
+            }
+        }
         
         Ok(())
     } else {
@@ -246,6 +311,49 @@ fn create_launcher(
             config.platform.name()
         ))
     }
+}
+
+/// Find the poly crate directory
+fn find_poly_crate() -> Result<std::path::PathBuf, String> {
+    // Try relative to current exe
+    if let Ok(exe_path) = std::env::current_exe() {
+        // Check if we're in target/release or target/debug
+        if let Some(target_dir) = exe_path.parent() {
+            if let Some(parent) = target_dir.parent() {
+                // We might be in workspace/target/release
+                let poly_crate = parent.parent().map(|p| p.join("poly"));
+                if let Some(ref p) = poly_crate {
+                    if p.join("Cargo.toml").exists() {
+                        return Ok(p.clone());
+                    }
+                }
+                // Or workspace root
+                if let Some(workspace) = parent.parent() {
+                    let poly_crate = workspace.join("poly");
+                    if poly_crate.join("Cargo.toml").exists() {
+                        return Ok(poly_crate);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Try current directory
+    let cwd = std::env::current_dir().map_err(|e| format!("Failed to get cwd: {}", e))?;
+    let poly_crate = cwd.join("poly");
+    if poly_crate.join("Cargo.toml").exists() {
+        return Ok(poly_crate);
+    }
+    
+    // Check if we're in the poly crate itself
+    if cwd.join("Cargo.toml").exists() {
+        let content = fs::read_to_string(cwd.join("Cargo.toml")).unwrap_or_default();
+        if content.contains("name = \"poly\"") {
+            return Ok(cwd);
+        }
+    }
+    
+    Err("Could not find poly crate. Make sure you're in the Poly workspace.".to_string())
 }
 
 /// Create platform-specific installer
@@ -260,6 +368,264 @@ fn create_installer(
         Platform::MacOS => create_macos_app_bundle(dist_dir, app_name, app_version),
         Platform::Linux => create_linux_appimage(dist_dir, app_name, app_version),
         Platform::Current => unreachable!(),
+    }
+}
+
+// ============================================
+// Code Signing
+// ============================================
+
+/// Load signing configuration from poly.toml and environment variables
+pub fn load_signing_config(project_path: &Path) -> SigningConfig {
+    let mut config = SigningConfig::default();
+    
+    // Try to load from poly.toml
+    let poly_toml = project_path.join("poly.toml");
+    if poly_toml.exists() {
+        if let Ok(content) = fs::read_to_string(&poly_toml) {
+            let mut in_signing_section = false;
+            let mut in_windows_section = false;
+            let mut in_macos_section = false;
+            
+            for line in content.lines() {
+                let line = line.trim();
+                
+                if line == "[signing]" {
+                    in_signing_section = true;
+                    in_windows_section = false;
+                    in_macos_section = false;
+                } else if line == "[signing.windows]" {
+                    in_signing_section = false;
+                    in_windows_section = true;
+                    in_macos_section = false;
+                } else if line == "[signing.macos]" {
+                    in_signing_section = false;
+                    in_windows_section = false;
+                    in_macos_section = true;
+                } else if line.starts_with('[') {
+                    in_signing_section = false;
+                    in_windows_section = false;
+                    in_macos_section = false;
+                } else if in_windows_section {
+                    if let Some(val) = extract_toml_value_line(line, "certificate") {
+                        config.windows_certificate = Some(val);
+                    } else if let Some(val) = extract_toml_value_line(line, "timestamp_url") {
+                        config.windows_timestamp_url = Some(val);
+                    }
+                } else if in_macos_section {
+                    if let Some(val) = extract_toml_value_line(line, "identity") {
+                        config.macos_identity = Some(val);
+                    } else if let Some(val) = extract_toml_value_line(line, "entitlements") {
+                        config.macos_entitlements = Some(val);
+                    } else if let Some(val) = extract_toml_value_line(line, "team_id") {
+                        config.macos_notarize_team_id = Some(val);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Override with environment variables (for CI/CD)
+    if let Ok(val) = std::env::var("POLY_WINDOWS_CERTIFICATE") {
+        config.windows_certificate = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_WINDOWS_CERTIFICATE_PASSWORD") {
+        config.windows_certificate_password = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_WINDOWS_TIMESTAMP_URL") {
+        config.windows_timestamp_url = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_MACOS_IDENTITY") {
+        config.macos_identity = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_MACOS_ENTITLEMENTS") {
+        config.macos_entitlements = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_MACOS_APPLE_ID") {
+        config.macos_notarize_apple_id = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_MACOS_APP_PASSWORD") {
+        config.macos_notarize_password = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_MACOS_TEAM_ID") {
+        config.macos_notarize_team_id = Some(val);
+    }
+    
+    config
+}
+
+fn extract_toml_value_line(line: &str, key: &str) -> Option<String> {
+    if line.starts_with(&format!("{} =", key)) || line.starts_with(&format!("{}=", key)) {
+        if let Some(value) = line.split('=').nth(1) {
+            return Some(value.trim().trim_matches('"').to_string());
+        }
+    }
+    None
+}
+
+/// Sign an executable for the current platform
+pub fn sign_executable(exe_path: &Path, signing_config: &SigningConfig) -> Result<(), String> {
+    match Platform::current() {
+        Platform::Windows => sign_windows(exe_path, signing_config),
+        Platform::MacOS => sign_macos(exe_path, signing_config),
+        Platform::Linux => {
+            // Linux doesn't have a standard code signing mechanism
+            // GPG signing could be added later
+            println!("  {}!{} Linux code signing not implemented (GPG signing planned)", YELLOW, RESET);
+            Ok(())
+        }
+        Platform::Current => unreachable!(),
+    }
+}
+
+/// Sign Windows executable using signtool
+fn sign_windows(exe_path: &Path, config: &SigningConfig) -> Result<(), String> {
+    let cert_path = config.windows_certificate.as_ref()
+        .ok_or("No Windows certificate configured. Set POLY_WINDOWS_CERTIFICATE or [signing.windows] certificate in poly.toml")?;
+    
+    let password = config.windows_certificate_password.as_ref()
+        .ok_or("No certificate password. Set POLY_WINDOWS_CERTIFICATE_PASSWORD environment variable")?;
+    
+    // Find signtool.exe
+    let signtool = find_signtool()
+        .ok_or("signtool.exe not found. Install Windows SDK or Visual Studio.")?;
+    
+    let mut cmd = Command::new(&signtool);
+    cmd.arg("sign")
+        .arg("/f").arg(cert_path)
+        .arg("/p").arg(password)
+        .arg("/fd").arg("SHA256");
+    
+    // Add timestamp if configured
+    if let Some(ref ts_url) = config.windows_timestamp_url {
+        cmd.arg("/tr").arg(ts_url)
+            .arg("/td").arg("SHA256");
+    } else {
+        // Default timestamp server
+        cmd.arg("/tr").arg("http://timestamp.digicert.com")
+            .arg("/td").arg("SHA256");
+    }
+    
+    cmd.arg(exe_path);
+    
+    let output = cmd.output()
+        .map_err(|e| format!("Failed to run signtool: {}", e))?;
+    
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("signtool failed: {}", String::from_utf8_lossy(&output.stderr)))
+    }
+}
+
+/// Find signtool.exe on Windows
+fn find_signtool() -> Option<std::path::PathBuf> {
+    // Common locations for signtool
+    let program_files = std::env::var("ProgramFiles(x86)")
+        .or_else(|_| std::env::var("ProgramFiles"))
+        .unwrap_or_else(|_| "C:\\Program Files (x86)".to_string());
+    
+    let sdk_paths = [
+        format!("{}\\Windows Kits\\10\\bin\\10.0.22621.0\\x64\\signtool.exe", program_files),
+        format!("{}\\Windows Kits\\10\\bin\\10.0.22000.0\\x64\\signtool.exe", program_files),
+        format!("{}\\Windows Kits\\10\\bin\\10.0.19041.0\\x64\\signtool.exe", program_files),
+        format!("{}\\Windows Kits\\10\\bin\\x64\\signtool.exe", program_files),
+        format!("{}\\Windows Kits\\8.1\\bin\\x64\\signtool.exe", program_files),
+    ];
+    
+    for path in &sdk_paths {
+        let p = std::path::PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    
+    // Try PATH
+    if Command::new("signtool").arg("/?").output().is_ok() {
+        return Some(std::path::PathBuf::from("signtool"));
+    }
+    
+    None
+}
+
+/// Sign macOS executable/app bundle using codesign
+fn sign_macos(exe_path: &Path, config: &SigningConfig) -> Result<(), String> {
+    let identity = config.macos_identity.as_ref()
+        .ok_or("No macOS signing identity configured. Set POLY_MACOS_IDENTITY or [signing.macos] identity in poly.toml")?;
+    
+    let mut cmd = Command::new("codesign");
+    cmd.arg("--force")
+        .arg("--options").arg("runtime")  // Hardened runtime for notarization
+        .arg("--sign").arg(identity);
+    
+    // Add entitlements if configured
+    if let Some(ref entitlements) = config.macos_entitlements {
+        cmd.arg("--entitlements").arg(entitlements);
+    }
+    
+    cmd.arg(exe_path);
+    
+    let output = cmd.output()
+        .map_err(|e| format!("Failed to run codesign: {}", e))?;
+    
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("codesign failed: {}", String::from_utf8_lossy(&output.stderr)))
+    }
+}
+
+/// Notarize macOS app bundle with Apple
+pub fn notarize_macos(app_path: &Path, config: &SigningConfig) -> Result<(), String> {
+    let apple_id = config.macos_notarize_apple_id.as_ref()
+        .ok_or("No Apple ID for notarization. Set POLY_MACOS_APPLE_ID")?;
+    let password = config.macos_notarize_password.as_ref()
+        .ok_or("No app-specific password for notarization. Set POLY_MACOS_APP_PASSWORD")?;
+    let team_id = config.macos_notarize_team_id.as_ref()
+        .ok_or("No Team ID for notarization. Set POLY_MACOS_TEAM_ID")?;
+    
+    // Create a zip for notarization
+    let zip_path = app_path.with_extension("zip");
+    let status = Command::new("ditto")
+        .args(["-c", "-k", "--keepParent"])
+        .arg(app_path)
+        .arg(&zip_path)
+        .status()
+        .map_err(|e| format!("Failed to create zip: {}", e))?;
+    
+    if !status.success() {
+        return Err("Failed to create zip for notarization".to_string());
+    }
+    
+    // Submit for notarization
+    let output = Command::new("xcrun")
+        .args(["notarytool", "submit"])
+        .arg(&zip_path)
+        .arg("--apple-id").arg(apple_id)
+        .arg("--password").arg(password)
+        .arg("--team-id").arg(team_id)
+        .arg("--wait")
+        .output()
+        .map_err(|e| format!("Failed to run notarytool: {}", e))?;
+    
+    // Clean up zip
+    fs::remove_file(&zip_path).ok();
+    
+    if output.status.success() {
+        // Staple the notarization ticket
+        let staple_status = Command::new("xcrun")
+            .args(["stapler", "staple"])
+            .arg(app_path)
+            .status()
+            .map_err(|e| format!("Failed to staple: {}", e))?;
+        
+        if staple_status.success() {
+            Ok(())
+        } else {
+            Err("Failed to staple notarization ticket".to_string())
+        }
+    } else {
+        Err(format!("Notarization failed: {}", String::from_utf8_lossy(&output.stderr)))
     }
 }
 

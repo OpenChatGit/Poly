@@ -6,6 +6,9 @@ Complete reference for all Poly JavaScript APIs.
 
 - [Window Control](#window-control)
 - [Multi-Window](#multi-window)
+- [Single Instance](#single-instance)
+- [Building Apps](#building-apps)
+- [Code Signing](#code-signing)
 - [System Tray](#system-tray)
 - [Clipboard](#clipboard)
 - [Notifications](#notifications)
@@ -188,6 +191,156 @@ Get number of open windows.
 ```javascript
 const count = await poly.windows.count();
 ```
+
+---
+
+## Single Instance
+
+Prevent multiple instances of your app from running simultaneously. When enabled, launching a second instance will exit immediately.
+
+### Configuration
+
+```toml
+[window]
+single_instance = true
+```
+
+When a second instance is launched:
+- It detects the existing instance via a lock file
+- Exits immediately with a message
+- The first instance continues running
+
+This is useful for apps that should only have one window open at a time, like system utilities or tray apps.
+
+---
+
+## Building Apps
+
+Build your Poly app into a standalone executable.
+
+### Basic Build
+
+```bash
+# Development build
+poly build demo-app
+
+# Release build (optimized, no console window)
+poly build --release demo-app
+
+# Build for specific platform
+poly build --release --target windows demo-app
+poly build --release --target macos demo-app
+poly build --release --target linux demo-app
+
+# Build and sign
+poly build --release --sign demo-app
+
+# Create installer
+poly build --release --installer demo-app
+```
+
+### Target Platforms
+
+| Target | Alias | Description |
+|--------|-------|-------------|
+| `current` | - | Build for current OS (default) |
+| `windows` | `win`, `win64` | Windows x64 |
+| `macos` | `mac`, `darwin`, `osx` | macOS x64 |
+| `linux` | - | Linux x64 |
+
+Note: Cross-compilation (e.g., building Windows on macOS) requires building on the target platform or using GitHub Actions.
+
+### Build Output
+
+```
+demo-app/
+└── dist/
+    └── windows/
+        ├── demo-app.exe    # Standalone executable
+        └── bundle/         # Bundled web assets
+            ├── web/
+            ├── assets/
+            └── poly.toml
+```
+
+### No Console Window
+
+Built apps automatically run as GUI applications without a console window. This is achieved by:
+- Building with the `gui` feature which sets the Windows subsystem to "windows"
+- The executable detects the `bundle/` folder and runs as a native app
+
+### Cross-Platform Builds
+
+For building on multiple platforms, use GitHub Actions:
+
+```bash
+poly build --ci
+```
+
+This generates `.github/workflows/build.yml` that builds for Windows, macOS, and Linux automatically.
+
+### Build Features
+
+| Flag | Description |
+|------|-------------|
+| `--release` | Optimized build, no console window |
+| `--target <platform>` | Target platform (windows/macos/linux/current) |
+| `--sign` | Sign executable (requires certificate) |
+| `--installer` | Create installer/package |
+| `--ci` | Generate GitHub Actions workflow |
+
+---
+
+## Code Signing
+
+Sign your executables to avoid security warnings on Windows and macOS.
+
+### Usage
+
+```bash
+poly build --release --sign
+```
+
+### Configuration
+
+Configure signing in `poly.toml` or via environment variables:
+
+```toml
+[signing.windows]
+certificate = "path/to/certificate.pfx"
+timestamp_url = "http://timestamp.digicert.com"  # optional
+
+[signing.macos]
+identity = "Developer ID Application: Your Name (TEAMID)"
+entitlements = "entitlements.plist"  # optional
+team_id = "YOURTEAMID"  # for notarization
+```
+
+### Environment Variables
+
+For CI/CD, use environment variables instead of storing secrets in poly.toml:
+
+| Variable | Description |
+|----------|-------------|
+| `POLY_WINDOWS_CERTIFICATE` | Path to .pfx certificate file |
+| `POLY_WINDOWS_CERTIFICATE_PASSWORD` | Certificate password |
+| `POLY_WINDOWS_TIMESTAMP_URL` | Timestamp server URL |
+| `POLY_MACOS_IDENTITY` | Signing identity |
+| `POLY_MACOS_ENTITLEMENTS` | Path to entitlements.plist |
+| `POLY_MACOS_APPLE_ID` | Apple ID for notarization |
+| `POLY_MACOS_APP_PASSWORD` | App-specific password |
+| `POLY_MACOS_TEAM_ID` | Team ID for notarization |
+
+### Windows Requirements
+
+- Windows SDK installed (for signtool.exe)
+- Code signing certificate (.pfx file)
+
+### macOS Requirements
+
+- Xcode Command Line Tools
+- Developer ID certificate in Keychain
+- For notarization: Apple Developer account
 
 ---
 

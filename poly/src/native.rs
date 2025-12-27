@@ -23,6 +23,7 @@ pub struct NativeConfig {
     pub minimize_to_tray: bool,
     pub close_to_tray: bool,
     pub tray_menu_items: Vec<(String, String)>,
+    pub single_instance: bool,
 }
 
 impl Default for NativeConfig {
@@ -44,6 +45,7 @@ impl Default for NativeConfig {
             minimize_to_tray: false,
             close_to_tray: false,
             tray_menu_items: Vec::new(),
+            single_instance: false,
         }
     }
 }
@@ -87,6 +89,10 @@ impl NativeConfig {
     
     pub fn with_transparent(mut self, enabled: bool) -> Self {
         self.transparent = enabled; self
+    }
+    
+    pub fn with_single_instance(mut self, enabled: bool) -> Self {
+        self.single_instance = enabled; self
     }
 }
 
