@@ -1,0 +1,10 @@
+[package]
+name = "Poly Browser"
+version = "1.0.0"
+
+[window]
+width = 1280
+height = 800
+decorations = false
+resizable = true
+devtools = true

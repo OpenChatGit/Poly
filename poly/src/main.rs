@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+﻿use clap::{Parser, Subcommand};
 use std::fs;
 use std::io::{self, Write, BufRead};
 use std::path::Path;
@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.7";
+const VERSION: &str = "0.2.9";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -148,6 +148,53 @@ enum Commands {
         #[arg(long)]
         verify: bool,
     },
+    
+    /// Open a URL in a new Poly WebView window (internal use)
+    #[command(hide = true)]
+    OpenUrl {
+        /// URL to open
+        url: String,
+        
+        /// Window title
+        #[arg(long, default_value = "Poly Browser")]
+        title: String,
+        
+        /// Window width
+        #[arg(long, default_value = "1024")]
+        width: u32,
+        
+        /// Window height
+        #[arg(long, default_value = "768")]
+        height: u32,
+    },
+    
+    /// Open browser mode with separate UI and content WebViews (internal use)
+    #[command(hide = true)]
+    Browser {
+        /// Start URL
+        #[arg(default_value = "about:blank")]
+        url: String,
+        
+        /// Window title
+        #[arg(long, default_value = "Poly Browser")]
+        title: String,
+        
+        /// Window width
+        #[arg(long, default_value = "1024")]
+        width: u32,
+        
+        /// Window height
+        #[arg(long, default_value = "768")]
+        height: u32,
+        
+        /// UI height (titlebar + nav bar)
+        #[arg(long, default_value = "80")]
+        ui_height: u32,
+        
+        /// Path to UI HTML file
+        #[arg(long)]
+        ui_html: Option<String>,
+    },
 }
 
 fn main() {
@@ -179,6 +226,14 @@ fn main() {
         Some(Commands::Add { package, version }) => packages::add_package(&package, version.as_deref()),
         Some(Commands::Remove { package }) => packages::remove_package(&package),
         Some(Commands::Install { verify }) => packages::install_packages(verify),
+        Some(Commands::OpenUrl { url, title, width, height }) => {
+            open_url_window(&url, &title, width, height);
+            Ok(())
+        },
+        Some(Commands::Browser { url, title, width, height, ui_height, ui_html }) => {
+            run_browser_mode(&url, &title, width, height, ui_height, ui_html);
+            Ok(())
+        },
         None => {
             // Check if we're running as a bundled app (bundle folder or poly.toml next to exe)
             if let Ok(exe_path) = std::env::current_exe() {
@@ -418,7 +473,7 @@ fn run_file_result(file: &str) -> Result<(), String> {
 
 fn run_repl() {
     println!();
-    println!("  {}POLY{} v0.2.5", CYAN, RESET);
+    println!("  {}POLY{} v{}", CYAN, RESET, VERSION);
     println!("  {}Type 'exit' to quit{}", DIM, RESET);
     println!();
     
@@ -458,6 +513,9 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
     use std::thread;
     
+    // Disable SovereigntyEngine in development mode
+    poly::sovereignty::set_development_mode();
+    
     let project_path = Path::new(path);
     let project_path_owned = project_path.to_path_buf();
     
@@ -469,7 +527,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry = entry.unwrap();
     
     println!();
-    println!("  {}POLY{} v0.2.5  {}dev server{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} v{}  {}dev server{}", CYAN, RESET, VERSION, DIM, RESET);
     println!();
     println!("  {}>{} Local:   {}http://localhost:{}{}", GREEN, RESET, CYAN, port, RESET);
     println!("  {}>{} Entry:   {}{}{}", DIM, RESET, DIM, entry.display(), RESET);
@@ -673,7 +731,21 @@ window.poly = {{
     maximize() {{ if (window.ipc) window.ipc.postMessage('maximize'); }},
     close() {{ if (window.ipc) window.ipc.postMessage('close'); }},
     hide() {{ if (window.ipc) window.ipc.postMessage('hide'); }},
-    show() {{ if (window.ipc) window.ipc.postMessage('show'); }}
+    show() {{ if (window.ipc) window.ipc.postMessage('show'); }},
+    async setTitle(title) {{ return poly.invoke('__poly_window_set_title', {{ title }}); }},
+    async getTitle() {{ return poly.invoke('__poly_window_get_title', {{}}); }},
+    async center() {{ return poly.invoke('__poly_window_center', {{}}); }},
+    async setSize(width, height) {{ return poly.invoke('__poly_window_set_size', {{ width, height }}); }},
+    async getSize() {{ return poly.invoke('__poly_window_get_size', {{}}); }},
+    async setPosition(x, y) {{ return poly.invoke('__poly_window_set_position', {{ x, y }}); }},
+    async getPosition() {{ return poly.invoke('__poly_window_get_position', {{}}); }},
+    async setMinSize(width, height) {{ return poly.invoke('__poly_window_set_min_size', {{ width, height }}); }},
+    async setMaxSize(width, height) {{ return poly.invoke('__poly_window_set_max_size', {{ width, height }}); }},
+    async setAlwaysOnTop(value) {{ return poly.invoke('__poly_window_set_always_on_top', {{ value }}); }},
+    async setFullscreen(value) {{ return poly.invoke('__poly_window_set_fullscreen', {{ value }}); }},
+    async isFullscreen() {{ return poly.invoke('__poly_window_is_fullscreen', {{}}); }},
+    async isMaximized() {{ return poly.invoke('__poly_window_is_maximized', {{}}); }},
+    async isMinimized() {{ return poly.invoke('__poly_window_is_minimized', {{}}); }}
   }},
   clipboard: {{
     async read() {{ return poly.invoke('__poly_clipboard_read', {{}}); }},
@@ -705,6 +777,182 @@ window.poly = {{
     }},
     // Check if tray is enabled (from poly.toml config)
     async isEnabled() {{ return poly.invoke('__poly_tray_is_enabled', {{}}); }}
+  }},
+  shell: {{
+    async open(url) {{ return poly.invoke('__poly_shell_open', {{ url }}); }},
+    async openPath(path) {{ return poly.invoke('__poly_shell_open_path', {{ path }}); }},
+    async openWith(path, app) {{ return poly.invoke('__poly_shell_open_with', {{ path, app }}); }}
+  }},
+  app: {{
+    async getVersion() {{ return poly.invoke('__poly_app_get_version', {{}}); }},
+    async getName() {{ return poly.invoke('__poly_app_get_name', {{}}); }},
+    async getPath(name) {{ return poly.invoke('__poly_app_get_path', {{ name }}); }},
+    async exit(code = 0) {{ return poly.invoke('__poly_app_exit', {{ code }}); }},
+    async relaunch() {{ return poly.invoke('__poly_app_relaunch', {{}}); }}
+  }},
+  os: {{
+    async platform() {{ return poly.invoke('__poly_os_platform', {{}}); }},
+    async arch() {{ return poly.invoke('__poly_os_arch', {{}}); }},
+    async version() {{ return poly.invoke('__poly_os_version', {{}}); }},
+    async hostname() {{ return poly.invoke('__poly_os_hostname', {{}}); }},
+    async homedir() {{ return poly.invoke('__poly_os_homedir', {{}}); }},
+    async tempdir() {{ return poly.invoke('__poly_os_tempdir', {{}}); }}
+  }},
+  // Network API - HTTP requests
+  http: {{
+    async get(url, options = {{}}) {{ return poly.invoke('__poly_http_get', {{ url, ...options }}); }},
+    async post(url, body, options = {{}}) {{ return poly.invoke('__poly_http_post', {{ url, body, ...options }}); }},
+    async put(url, body, options = {{}}) {{ return poly.invoke('__poly_http_put', {{ url, body, ...options }}); }},
+    async patch(url, body, options = {{}}) {{ return poly.invoke('__poly_http_patch', {{ url, body, ...options }}); }},
+    async delete(url, options = {{}}) {{ return poly.invoke('__poly_http_delete', {{ url, ...options }}); }},
+    async request(options) {{ return poly.invoke('__poly_http_request', options); }}
+  }},
+  // SQLite Database API
+  db: {{
+    async open(path) {{ return poly.invoke('__poly_db_open', {{ path }}); }},
+    async close(id) {{ return poly.invoke('__poly_db_close', {{ id }}); }},
+    async execute(id, sql, params = []) {{ return poly.invoke('__poly_db_execute', {{ id, sql, params }}); }},
+    async query(id, sql, params = []) {{ return poly.invoke('__poly_db_query', {{ id, sql, params }}); }},
+    async queryOne(id, sql, params = []) {{ return poly.invoke('__poly_db_query_one', {{ id, sql, params }}); }}
+  }},
+  // Browser API - Build browsers with Poly
+  browser: {{
+    async createTab(url) {{ return poly.invoke('__poly_browser_create_tab', {{ url }}); }},
+    async closeTab(id) {{ return poly.invoke('__poly_browser_close_tab', {{ id }}); }},
+    async getTab(id) {{ return poly.invoke('__poly_browser_get_tab', {{ id }}); }},
+    async listTabs() {{ return poly.invoke('__poly_browser_list_tabs', {{}}); }},
+    async navigate(id, url) {{ return poly.invoke('__poly_browser_navigate', {{ id, url }}); }},
+    async back(id) {{ return poly.invoke('__poly_browser_back', {{ id }}); }},
+    async forward(id) {{ return poly.invoke('__poly_browser_forward', {{ id }}); }},
+    async setTitle(id, title) {{ return poly.invoke('__poly_browser_set_title', {{ id, title }}); }},
+    async setLoading(id, loading) {{ return poly.invoke('__poly_browser_set_loading', {{ id, loading }}); }},
+    async getHistory(id) {{ return poly.invoke('__poly_browser_get_history', {{ id }}); }},
+    async clearHistory(id) {{ return poly.invoke('__poly_browser_clear_history', {{ id }}); }},
+    async fetch(url) {{ return poly.invoke('__poly_browser_fetch', {{ url }}); }},
+    // Proxy URL - use this to load external resources through the local server
+    proxyUrl(url) {{ return '/__poly_proxy?url=' + encodeURIComponent(url); }},
+    // Navigate the current WebView to a URL (replaces current page)
+    loadUrl(url) {{ window.location.href = url; }},
+    // Go back in browser history
+    goBack() {{ window.history.back(); }},
+    // Go forward in browser history  
+    goForward() {{ window.history.forward(); }},
+    // Open a real WebView window (full browser functionality)
+    async openWindow(url, options = {{}}) {{ return poly.invoke('__poly_browser_open_window', {{ url, ...options }}); }},
+    async windowNavigate(id, url) {{ return poly.invoke('__poly_browser_window_navigate', {{ id, url }}); }},
+    async windowClose(id) {{ return poly.invoke('__poly_browser_window_close', {{ id }}); }}
+  }},
+  // Titlebar API - Custom persistent titlebar for browser apps
+  titlebar: {{
+    // Set custom titlebar (persists across navigation)
+    async set(config) {{ return poly.invoke('__poly_titlebar_set', config); }},
+    // Get current titlebar config
+    async get() {{ return poly.invoke('__poly_titlebar_get', {{}}); }},
+    // Enable/disable titlebar
+    async setEnabled(enabled) {{ return poly.invoke('__poly_titlebar_set_enabled', {{ enabled }}); }},
+    // Set titlebar height
+    async setHeight(height) {{ return poly.invoke('__poly_titlebar_set_height', {{ height }}); }},
+    // Update titlebar HTML
+    async setHtml(html) {{ return poly.invoke('__poly_titlebar_set_html', {{ html }}); }},
+    // Update titlebar CSS
+    async setCss(css) {{ return poly.invoke('__poly_titlebar_set_css', {{ css }}); }},
+    // Update titlebar JavaScript
+    async setJs(js) {{ return poly.invoke('__poly_titlebar_set_js', {{ js }}); }},
+    // Navigate the main content area to a URL (keeps titlebar)
+    async navigate(url) {{ return poly.invoke('__poly_titlebar_navigate', {{ url }}); }}
+  }},
+  // WebView API - Multi-WebView management for browser apps
+  webview: {{
+    // Create a new WebView
+    async create(id, options = {{}}) {{ return poly.invoke('__poly_webview_create', {{ id, ...options }}); }},
+    // Navigate a WebView to URL
+    async navigate(id, url) {{ return poly.invoke('__poly_webview_navigate', {{ id, url }}); }},
+    // Load HTML content directly
+    async loadHtml(id, html) {{ return poly.invoke('__poly_webview_load_html', {{ id, html }}); }},
+    // Go back in history
+    async goBack(id) {{ return poly.invoke('__poly_webview_go_back', {{ id }}); }},
+    // Go forward in history
+    async goForward(id) {{ return poly.invoke('__poly_webview_go_forward', {{ id }}); }},
+    // Reload the page
+    async reload(id) {{ return poly.invoke('__poly_webview_reload', {{ id }}); }},
+    // Stop loading
+    async stop(id) {{ return poly.invoke('__poly_webview_stop', {{ id }}); }},
+    // Set WebView bounds (position and size)
+    async setBounds(id, bounds) {{ return poly.invoke('__poly_webview_set_bounds', {{ id, ...bounds }}); }},
+    // Get WebView bounds
+    async getBounds(id) {{ return poly.invoke('__poly_webview_get_bounds', {{ id }}); }},
+    // Execute JavaScript in a WebView
+    async eval(id, script) {{ return poly.invoke('__poly_webview_eval', {{ id, script }}); }},
+    // Destroy a WebView
+    async destroy(id) {{ return poly.invoke('__poly_webview_destroy', {{ id }}); }},
+    // List all WebViews
+    async list() {{ return poly.invoke('__poly_webview_list', {{}}); }},
+    // Get WebView info (includes isLoading, canGoBack, canGoForward)
+    async get(id) {{ return poly.invoke('__poly_webview_get', {{ id }}); }},
+    // Show/hide a WebView
+    async setVisible(id, visible) {{ return poly.invoke('__poly_webview_set_visible', {{ id, visible }}); }},
+    // Focus a WebView
+    async focus(id) {{ return poly.invoke('__poly_webview_focus', {{ id }}); }},
+    // Set zoom level (1.0 = 100%)
+    async setZoom(id, level) {{ return poly.invoke('__poly_webview_set_zoom', {{ id, level }}); }},
+    // Set main WebView bounds (the app's original WebView)
+    async setMainBounds(bounds) {{ return poly.invoke('__poly_webview_set_main_bounds', bounds); }},
+    // Poll for events (navigation, title change, etc.)
+    async pollEvents() {{ return poly.invoke('__poly_webview_poll_events', {{}}); }},
+    // Grant or deny a permission request
+    async respondToPermission(id, permission, granted) {{ return poly.invoke('__poly_webview_respond_permission', {{ id, permission, granted }}); }},
+    // Event listeners (client-side convenience)
+    _listeners: {{}},
+    on(event, id, callback) {{
+      const key = `${{event}}:${{id}}`;
+      if (!this._listeners[key]) this._listeners[key] = [];
+      this._listeners[key].push(callback);
+    }},
+    off(event, id, callback) {{
+      const key = `${{event}}:${{id}}`;
+      if (this._listeners[key]) {{
+        this._listeners[key] = this._listeners[key].filter(cb => cb !== callback);
+      }}
+    }},
+    _emit(event, id, data) {{
+      const key = `${{event}}:${{id}}`;
+      if (this._listeners[key]) {{
+        this._listeners[key].forEach(cb => cb(data));
+      }}
+      // Also emit to wildcard listeners
+      const wildcardKey = `${{event}}:*`;
+      if (this._listeners[wildcardKey]) {{
+        this._listeners[wildcardKey].forEach(cb => cb(id, data));
+      }}
+    }},
+    // Convenience event registration
+    onNavigate(id, cb) {{ this.on('navigate', id, cb); }},
+    onTitleChange(id, cb) {{ this.on('titleChange', id, cb); }},
+    onLoadStart(id, cb) {{ this.on('loadStart', id, cb); }},
+    onLoadFinish(id, cb) {{ this.on('loadFinish', id, cb); }},
+    onNewWindow(id, cb) {{ this.on('newWindow', id, cb); }},
+    onDownload(id, cb) {{ this.on('download', id, cb); }},
+    onClose(id, cb) {{ this.on('close', id, cb); }},
+    onHistoryChange(id, cb) {{ this.on('historyChange', id, cb); }}
+  }},
+  // MultiView API - Create windows with multiple WebViews
+  multiview: {{
+    // Create a new multi-view window
+    // views: array of {{ id, url, x, y, width, height }}
+    // Views are stacked: first in array = bottom, last = top (for UI)
+    async create(options) {{ return poly.invoke('__poly_multiview_create', options); }},
+    // Navigate a view to URL
+    async navigate(windowId, viewId, url) {{ return poly.invoke('__poly_multiview_navigate', {{ windowId, viewId, url }}); }},
+    // Send message to a view (triggers 'polymessage' event)
+    async postMessage(windowId, viewId, message) {{ return poly.invoke('__poly_multiview_post_message', {{ windowId, viewId, message: JSON.stringify(message) }}); }},
+    // Set view bounds
+    async setBounds(windowId, viewId, bounds) {{ return poly.invoke('__poly_multiview_set_bounds', {{ windowId, viewId, ...bounds }}); }},
+    // Close a multi-view window
+    async close(windowId) {{ return poly.invoke('__poly_multiview_close', {{ windowId }}); }},
+    // List all multi-view windows
+    async list() {{ return poly.invoke('__poly_multiview_list', {{}}); }},
+    // Get window info
+    async get(windowId) {{ return poly.invoke('__poly_multiview_get', {{ windowId }}); }}
   }}
 }};
 // Initialize Lucide Icons
@@ -716,7 +964,7 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
     if (!document.hidden) {{
       try {{ const r = await fetch('/__poly_reload'); const d = await r.json(); if (d.version > v) {{ v = d.version; location.reload(); }} }} catch(e) {{}}
     }}
-    if (polling) setTimeout(check, 1000);
+    if (polling) setTimeout(check, 2000);
   }}
   function start() {{ if (!polling) {{ polling = true; check(); }} }}
   function stop() {{ polling = false; }}
@@ -1378,8 +1626,1099 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             // In native mode, the actual tray state is managed by the window
             serde_json::json!({"result": false}).to_string()
         }
+        // Shell APIs
+        "__poly_shell_open" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "start", "", url])
+                    .spawn();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("open")
+                    .arg(url)
+                    .spawn();
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(url)
+                    .spawn();
+            }
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_shell_open_path" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new("explorer")
+                    .arg(path)
+                    .spawn();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("open")
+                    .arg(path)
+                    .spawn();
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(path)
+                    .spawn();
+            }
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_shell_open_with" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let app = args.get("app").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(target_os = "windows")]
+            {
+                let _ = std::process::Command::new(app)
+                    .arg(path)
+                    .spawn();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = std::process::Command::new(app)
+                    .arg(path)
+                    .spawn();
+            }
+            serde_json::json!({"result": true}).to_string()
+        }
+        // App APIs
+        "__poly_app_get_version" => {
+            serde_json::json!({"result": VERSION}).to_string()
+        }
+        "__poly_app_get_name" => {
+            let name = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "Poly App".to_string());
+            serde_json::json!({"result": name}).to_string()
+        }
+        "__poly_app_get_path" => {
+            let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("data");
+            let path = match name {
+                "exe" => std::env::current_exe().ok().map(|p| p.to_string_lossy().to_string()),
+                "data" | "appData" => dirs_path("data"),
+                "config" => dirs_path("config"),
+                "cache" => dirs_path("cache"),
+                "temp" => Some(std::env::temp_dir().to_string_lossy().to_string()),
+                "home" => dirs_path("home"),
+                "desktop" => dirs_path("desktop"),
+                "documents" => dirs_path("documents"),
+                "downloads" => dirs_path("downloads"),
+                _ => None,
+            };
+            match path {
+                Some(p) => serde_json::json!({"result": p}).to_string(),
+                None => serde_json::json!({"result": null}).to_string(),
+            }
+        }
+        "__poly_app_exit" => {
+            let code = args.get("code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            std::process::exit(code);
+        }
+        "__poly_app_relaunch" => {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe)
+                    .args(std::env::args().skip(1))
+                    .spawn();
+            }
+            std::process::exit(0);
+        }
+        // OS APIs
+        "__poly_os_platform" => {
+            let platform = if cfg!(target_os = "windows") { "windows" }
+                else if cfg!(target_os = "macos") { "macos" }
+                else if cfg!(target_os = "linux") { "linux" }
+                else { "unknown" };
+            serde_json::json!({"result": platform}).to_string()
+        }
+        "__poly_os_arch" => {
+            let arch = if cfg!(target_arch = "x86_64") { "x64" }
+                else if cfg!(target_arch = "aarch64") { "arm64" }
+                else if cfg!(target_arch = "x86") { "x86" }
+                else { "unknown" };
+            serde_json::json!({"result": arch}).to_string()
+        }
+        "__poly_os_version" => {
+            serde_json::json!({"result": std::env::consts::OS}).to_string()
+        }
+        "__poly_os_hostname" => {
+            #[cfg(target_os = "windows")]
+            let hostname = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "unknown".to_string());
+            #[cfg(not(target_os = "windows"))]
+            let hostname = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("HOST"))
+                .unwrap_or_else(|_| "unknown".to_string());
+            serde_json::json!({"result": hostname}).to_string()
+        }
+        "__poly_os_homedir" => {
+            let home = dirs_path("home").unwrap_or_default();
+            serde_json::json!({"result": home}).to_string()
+        }
+        "__poly_os_tempdir" => {
+            let temp = std::env::temp_dir().to_string_lossy().to_string();
+            serde_json::json!({"result": temp}).to_string()
+        }
+        // HTTP API
+        "__poly_http_get" | "__poly_http_post" | "__poly_http_put" | "__poly_http_patch" | "__poly_http_delete" | "__poly_http_request" => {
+            handle_http_request(fn_name, args)
+        }
+        // Database API
+        "__poly_db_open" | "__poly_db_close" | "__poly_db_execute" | "__poly_db_query" | "__poly_db_query_one" => {
+            handle_db_request(fn_name, args)
+        }
+        // Browser API - Tab Management
+        "__poly_browser_create_tab" => {
+            let url = args.get("url").and_then(|v| v.as_str());
+            let id = poly::browser::create_tab(url);
+            serde_json::json!({"result": id}).to_string()
+        }
+        "__poly_browser_close_tab" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let success = poly::browser::close_tab(id);
+            serde_json::json!({"result": success}).to_string()
+        }
+        "__poly_browser_get_tab" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            match poly::browser::get_tab(id) {
+                Some(tab) => serde_json::json!({
+                    "result": {
+                        "id": tab.id,
+                        "url": tab.url,
+                        "title": tab.title,
+                        "canGoBack": tab.can_go_back,
+                        "canGoForward": tab.can_go_forward,
+                        "isLoading": tab.is_loading
+                    }
+                }).to_string(),
+                None => serde_json::json!({"result": null}).to_string(),
+            }
+        }
+        "__poly_browser_list_tabs" => {
+            let tabs: Vec<serde_json::Value> = poly::browser::list_tabs().iter().map(|tab| {
+                serde_json::json!({
+                    "id": tab.id,
+                    "url": tab.url,
+                    "title": tab.title,
+                    "canGoBack": tab.can_go_back,
+                    "canGoForward": tab.can_go_forward,
+                    "isLoading": tab.is_loading
+                })
+            }).collect();
+            serde_json::json!({"result": tabs}).to_string()
+        }
+        "__poly_browser_navigate" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::browser::navigate(id, url) {
+                Ok(_) => serde_json::json!({"result": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_browser_back" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            match poly::browser::go_back(id) {
+                Ok(url) => serde_json::json!({"result": url}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_browser_forward" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            match poly::browser::go_forward(id) {
+                Ok(url) => serde_json::json!({"result": url}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_browser_set_title" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            poly::browser::set_tab_title(id, title);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_browser_set_loading" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let loading = args.get("loading").and_then(|v| v.as_bool()).unwrap_or(false);
+            poly::browser::set_tab_loading(id, loading);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_browser_get_history" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let history = poly::browser::get_history(id);
+            serde_json::json!({"result": history}).to_string()
+        }
+        "__poly_browser_clear_history" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            poly::browser::clear_history(id);
+            serde_json::json!({"result": true}).to_string()
+        }
+        // Browser API - Fetch URL content (bypasses iframe restrictions)
+        "__poly_browser_fetch" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            
+            // Check sovereignty - extract domain from URL
+            if poly::sovereignty_enabled() {
+                let domain = url.split("://")
+                    .nth(1)
+                    .and_then(|s| s.split('/').next())
+                    .unwrap_or(url);
+                let perm = poly::Permission::HttpConnect(poly::sovereignty::DomainScope::Domain(domain.to_string()));
+                if let Err(e) = poly::check_permission(&perm) {
+                    return serde_json::json!({"error": e}).to_string();
+                }
+            }
+            
+            match reqwest::blocking::get(url) {
+                Ok(response) => {
+                    let status = response.status().as_u16();
+                    let headers: std::collections::HashMap<String, String> = response.headers()
+                        .iter()
+                        .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.to_string(), v.to_string())))
+                        .collect();
+                    
+                    match response.text() {
+                        Ok(body) => serde_json::json!({
+                            "result": {
+                                "status": status,
+                                "headers": headers,
+                                "body": body
+                            }
+                        }).to_string(),
+                        Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
+                    }
+                }
+                Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
+            }
+        }
+        // Browser API - Open real WebView window
+        "__poly_browser_open_window" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("about:blank");
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Browser");
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(768) as u32;
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::browser::open_webview(url, title, width, height) {
+                    Ok(id) => serde_json::json!({"result": id}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "WebView requires native feature"}).to_string()
+            }
+        }
+        "__poly_browser_window_navigate" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::browser::webview_navigate(id, url) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "WebView requires native feature"}).to_string()
+            }
+        }
+        "__poly_browser_window_close" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            
+            #[cfg(feature = "native")]
+            {
+                match poly::browser::webview_close(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "WebView requires native feature"}).to_string()
+            }
+        }
+        // Titlebar API
+        "__poly_titlebar_set" => {
+            let config = poly::titlebar::TitlebarConfig {
+                enabled: args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
+                height: args.get("height").and_then(|v| v.as_u64()).unwrap_or(40) as u32,
+                html: args.get("html").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                css: args.get("css").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                js: args.get("js").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                background: args.get("background").and_then(|v| v.as_str()).unwrap_or("#1a1a1f").to_string(),
+            };
+            poly::titlebar::set_titlebar(config);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_titlebar_get" => {
+            let config = poly::titlebar::get_titlebar();
+            serde_json::json!({
+                "result": {
+                    "enabled": config.enabled,
+                    "height": config.height,
+                    "html": config.html,
+                    "css": config.css,
+                    "js": config.js,
+                    "background": config.background
+                }
+            }).to_string()
+        }
+        "__poly_titlebar_set_enabled" => {
+            let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            poly::titlebar::set_enabled(enabled);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_titlebar_set_height" => {
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(40) as u32;
+            poly::titlebar::set_height(height);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_titlebar_set_html" => {
+            let html = args.get("html").and_then(|v| v.as_str()).unwrap_or("");
+            poly::titlebar::set_html(html);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_titlebar_set_css" => {
+            let css = args.get("css").and_then(|v| v.as_str()).unwrap_or("");
+            poly::titlebar::set_css(css);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_titlebar_set_js" => {
+            let js = args.get("js").and_then(|v| v.as_str()).unwrap_or("");
+            poly::titlebar::set_js(js);
+            serde_json::json!({"result": true}).to_string()
+        }
+        "__poly_titlebar_navigate" => {
+            // This will be handled specially - it navigates the WebView but injects titlebar
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            // Store the URL for the WebView to navigate to
+            // The actual navigation happens in the native code
+            serde_json::json!({"result": url, "action": "navigate"}).to_string()
+        }
+        // WebView API - Multi-WebView management
+        "__poly_webview_create" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("about:blank");
+            let html = args.get("html").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+            let visible = args.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
+            let transparent = args.get("transparent").and_then(|v| v.as_bool()).unwrap_or(false);
+            let devtools = args.get("devtools").and_then(|v| v.as_bool()).unwrap_or(false);
+            let user_agent = args.get("userAgent").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let zoom_level = args.get("zoomLevel").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let autoplay = args.get("autoplay").and_then(|v| v.as_bool()).unwrap_or(true);
+            
+            let config = poly::webview::WebViewConfig {
+                id: id.to_string(),
+                url: url.to_string(),
+                html,
+                bounds: poly::webview::WebViewBounds { x, y, width, height },
+                visible,
+                transparent,
+                devtools,
+                user_agent,
+                zoom_level,
+                autoplay,
+            };
+            
+            match poly::webview::create(config) {
+                Ok(_) => serde_json::json!({"success": true, "id": id}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_navigate" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("about:blank");
+            match poly::webview::navigate(id, url) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_load_html" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let html = args.get("html").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::load_html(id, html) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_go_back" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::go_back(id) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_go_forward" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::go_forward(id) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_reload" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::reload(id) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_stop" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::stop(id) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_set_bounds" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+            match poly::webview::set_bounds(id, poly::webview::WebViewBounds { x, y, width, height }) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_get_bounds" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::get_bounds(id) {
+                Ok(b) => serde_json::json!({"x": b.x, "y": b.y, "width": b.width, "height": b.height}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_eval" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let script = args.get("script").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::eval(id, script) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_destroy" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::destroy(id) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_list" => {
+            let list: Vec<_> = poly::webview::list().iter().map(|s| {
+                serde_json::json!({
+                    "id": s.id,
+                    "url": s.url,
+                    "title": s.title,
+                    "visible": s.visible,
+                    "isLoading": s.is_loading,
+                    "canGoBack": s.can_go_back,
+                    "canGoForward": s.can_go_forward,
+                    "zoomLevel": s.zoom_level,
+                    "bounds": { "x": s.bounds.x, "y": s.bounds.y, "width": s.bounds.width, "height": s.bounds.height }
+                })
+            }).collect();
+            serde_json::json!(list).to_string()
+        }
+        "__poly_webview_get" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::get(id) {
+                Some(s) => serde_json::json!({
+                    "id": s.id,
+                    "url": s.url,
+                    "title": s.title,
+                    "visible": s.visible,
+                    "isLoading": s.is_loading,
+                    "canGoBack": s.can_go_back,
+                    "canGoForward": s.can_go_forward,
+                    "zoomLevel": s.zoom_level,
+                    "bounds": { "x": s.bounds.x, "y": s.bounds.y, "width": s.bounds.width, "height": s.bounds.height }
+                }).to_string(),
+                None => serde_json::json!({"error": format!("WebView '{}' not found", id)}).to_string(),
+            }
+        }
+        "__poly_webview_set_zoom" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let level = args.get("level").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            match poly::webview::set_zoom(id, level) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_poll_events" => {
+            let events = poly::webview::take_events();
+            let json_events: Vec<_> = events.iter().map(|e| {
+                match e {
+                    poly::webview::WebViewEvent::NavigationStarted { id, url } => 
+                        serde_json::json!({"type": "navigate", "id": id, "url": url}),
+                    poly::webview::WebViewEvent::NavigationFinished { id, url } => 
+                        serde_json::json!({"type": "navigateFinish", "id": id, "url": url}),
+                    poly::webview::WebViewEvent::TitleChanged { id, title } => 
+                        serde_json::json!({"type": "titleChange", "id": id, "title": title}),
+                    poly::webview::WebViewEvent::LoadStarted { id } => 
+                        serde_json::json!({"type": "loadStart", "id": id}),
+                    poly::webview::WebViewEvent::LoadFinished { id } => 
+                        serde_json::json!({"type": "loadFinish", "id": id}),
+                    poly::webview::WebViewEvent::NewWindowRequested { id, url, target } => 
+                        serde_json::json!({"type": "newWindow", "id": id, "url": url, "target": target}),
+                    poly::webview::WebViewEvent::DownloadRequested { id, url, filename } => 
+                        serde_json::json!({"type": "download", "id": id, "url": url, "filename": filename}),
+                    poly::webview::WebViewEvent::Closed { id } => 
+                        serde_json::json!({"type": "close", "id": id}),
+                    poly::webview::WebViewEvent::Error { id, error } => 
+                        serde_json::json!({"type": "error", "id": id, "error": error}),
+                    poly::webview::WebViewEvent::FaviconChanged { id, url } => 
+                        serde_json::json!({"type": "favicon", "id": id, "url": url}),
+                    poly::webview::WebViewEvent::HistoryChanged { id, can_go_back, can_go_forward } => 
+                        serde_json::json!({"type": "historyChange", "id": id, "canGoBack": can_go_back, "canGoForward": can_go_forward}),
+                    poly::webview::WebViewEvent::FullscreenRequested { id, enter } => 
+                        serde_json::json!({"type": "fullscreen", "id": id, "enter": enter}),
+                    poly::webview::WebViewEvent::PermissionRequested { id, permission, origin } => 
+                        serde_json::json!({"type": "permission", "id": id, "permission": permission, "origin": origin}),
+                }
+            }).collect();
+            serde_json::json!({"events": json_events}).to_string()
+        }
+        "__poly_webview_respond_permission" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let permission = args.get("permission").and_then(|v| v.as_str()).unwrap_or("");
+            let granted = args.get("granted").and_then(|v| v.as_bool()).unwrap_or(false);
+            match poly::webview::respond_to_permission(id, permission, granted) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_set_visible" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let visible = args.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
+            match poly::webview::set_visible(id, visible) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_focus" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::webview::focus(id) {
+                Ok(_) => serde_json::json!({"success": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_webview_set_main_bounds" => {
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+            poly::webview::set_main_bounds(poly::webview::WebViewBounds { x, y, width, height });
+            serde_json::json!({"success": true}).to_string()
+        }
+        // MultiView API - Create windows with multiple WebViews
+        "__poly_multiview_create" => {
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Poly MultiView").to_string();
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(768) as u32;
+            let decorations = args.get("decorations").and_then(|v| v.as_bool()).unwrap_or(false);
+            let resizable = args.get("resizable").and_then(|v| v.as_bool()).unwrap_or(true);
+            let icon_path = args.get("icon").and_then(|v| v.as_str()).map(|s| s.to_string());
+            
+            let views_arr = args.get("views").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let views: Vec<poly::multiview::ViewConfig> = views_arr.iter().map(|v| {
+                poly::multiview::ViewConfig {
+                    id: v.get("id").and_then(|x| x.as_str()).unwrap_or("view").to_string(),
+                    url: v.get("url").and_then(|x| x.as_str()).unwrap_or("about:blank").to_string(),
+                    html: v.get("html").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                    x: v.get("x").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+                    y: v.get("y").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+                    width: v.get("width").and_then(|x| x.as_u64()).unwrap_or(800) as u32,
+                    height: v.get("height").and_then(|x| x.as_u64()).unwrap_or(600) as u32,
+                    transparent: v.get("transparent").and_then(|x| x.as_bool()).unwrap_or(false),
+                    devtools: v.get("devtools").and_then(|x| x.as_bool()).unwrap_or(false),
+                }
+            }).collect();
+            
+            let config = poly::multiview::MultiViewWindowConfig {
+                title,
+                width,
+                height,
+                decorations,
+                resizable,
+                views,
+                icon_path,
+            };
+            
+            let window_id = poly::multiview::create_window(config.clone());
+            
+            // In native mode, actually create the window
+            #[cfg(feature = "native")]
+            {
+                if let Err(e) = poly::multiview_native::create_multiview_window(window_id, config) {
+                    return serde_json::json!({"error": e}).to_string();
+                }
+            }
+            
+            serde_json::json!({"id": window_id}).to_string()
+        }
+        "__poly_multiview_navigate" => {
+            let window_id = args.get("windowId").and_then(|v| v.as_u64()).unwrap_or(0);
+            let view_id = args.get("viewId").and_then(|v| v.as_str()).unwrap_or("");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            
+            poly::multiview::navigate(window_id, view_id, url);
+            
+            #[cfg(feature = "native")]
+            poly::multiview_native::queue_navigation(window_id, view_id, url);
+            
+            serde_json::json!({"success": true}).to_string()
+        }
+        "__poly_multiview_post_message" => {
+            let window_id = args.get("windowId").and_then(|v| v.as_u64()).unwrap_or(0);
+            let view_id = args.get("viewId").and_then(|v| v.as_str()).unwrap_or("");
+            let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("{}");
+            
+            poly::multiview::post_message(window_id, view_id, message);
+            serde_json::json!({"success": true}).to_string()
+        }
+        "__poly_multiview_set_bounds" => {
+            let window_id = args.get("windowId").and_then(|v| v.as_u64()).unwrap_or(0);
+            let view_id = args.get("viewId").and_then(|v| v.as_str()).unwrap_or("");
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+            
+            poly::multiview::set_view_bounds(window_id, view_id, x, y, width, height);
+            serde_json::json!({"success": true}).to_string()
+        }
+        "__poly_multiview_close" => {
+            let window_id = args.get("windowId").and_then(|v| v.as_u64()).unwrap_or(0);
+            poly::multiview::close_window(window_id);
+            serde_json::json!({"success": true}).to_string()
+        }
+        "__poly_multiview_list" => {
+            let windows = poly::multiview::list_windows();
+            let list: Vec<serde_json::Value> = windows.iter().map(|w| {
+                serde_json::json!({
+                    "id": w.id,
+                    "title": w.title,
+                    "views": w.views
+                })
+            }).collect();
+            serde_json::json!({"windows": list}).to_string()
+        }
+        "__poly_multiview_get" => {
+            let window_id = args.get("windowId").and_then(|v| v.as_u64()).unwrap_or(0);
+            match poly::multiview::get_window(window_id) {
+                Some(w) => serde_json::json!({
+                    "id": w.id,
+                    "title": w.title,
+                    "views": w.views
+                }).to_string(),
+                None => serde_json::json!({"error": "Window not found"}).to_string(),
+            }
+        }
+        // Window APIs (these need window handle, return placeholder in dev server)
+        "__poly_window_set_title" | "__poly_window_get_title" | "__poly_window_center" |
+        "__poly_window_set_size" | "__poly_window_get_size" | "__poly_window_set_position" |
+        "__poly_window_get_position" | "__poly_window_set_min_size" | "__poly_window_set_max_size" |
+        "__poly_window_set_always_on_top" | "__poly_window_set_fullscreen" |
+        "__poly_window_is_fullscreen" | "__poly_window_is_maximized" | "__poly_window_is_minimized" => {
+            // These require native window handle, not available in dev server
+            serde_json::json!({"error": "Window APIs only available in native mode (poly run --native)"}).to_string()
+        }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
     }
+}
+
+/// Get common directory paths
+fn dirs_path(name: &str) -> Option<String> {
+    match name {
+        "home" => std::env::var("HOME").ok()
+            .or_else(|| std::env::var("USERPROFILE").ok()),
+        "data" | "appData" => {
+            #[cfg(target_os = "windows")]
+            { std::env::var("APPDATA").ok() }
+            #[cfg(target_os = "macos")]
+            { std::env::var("HOME").ok().map(|h| format!("{}/Library/Application Support", h)) }
+            #[cfg(target_os = "linux")]
+            { std::env::var("XDG_DATA_HOME").ok().or_else(|| std::env::var("HOME").ok().map(|h| format!("{}/.local/share", h))) }
+        }
+        "config" => {
+            #[cfg(target_os = "windows")]
+            { std::env::var("APPDATA").ok() }
+            #[cfg(target_os = "macos")]
+            { std::env::var("HOME").ok().map(|h| format!("{}/Library/Preferences", h)) }
+            #[cfg(target_os = "linux")]
+            { std::env::var("XDG_CONFIG_HOME").ok().or_else(|| std::env::var("HOME").ok().map(|h| format!("{}/.config", h))) }
+        }
+        "cache" => {
+            #[cfg(target_os = "windows")]
+            { std::env::var("LOCALAPPDATA").ok().map(|p| format!("{}\\Temp", p)) }
+            #[cfg(target_os = "macos")]
+            { std::env::var("HOME").ok().map(|h| format!("{}/Library/Caches", h)) }
+            #[cfg(target_os = "linux")]
+            { std::env::var("XDG_CACHE_HOME").ok().or_else(|| std::env::var("HOME").ok().map(|h| format!("{}/.cache", h))) }
+        }
+        "desktop" => {
+            #[cfg(target_os = "windows")]
+            { std::env::var("USERPROFILE").ok().map(|h| format!("{}\\Desktop", h)) }
+            #[cfg(not(target_os = "windows"))]
+            { std::env::var("HOME").ok().map(|h| format!("{}/Desktop", h)) }
+        }
+        "documents" => {
+            #[cfg(target_os = "windows")]
+            { std::env::var("USERPROFILE").ok().map(|h| format!("{}\\Documents", h)) }
+            #[cfg(not(target_os = "windows"))]
+            { std::env::var("HOME").ok().map(|h| format!("{}/Documents", h)) }
+        }
+        "downloads" => {
+            #[cfg(target_os = "windows")]
+            { std::env::var("USERPROFILE").ok().map(|h| format!("{}\\Downloads", h)) }
+            #[cfg(not(target_os = "windows"))]
+            { std::env::var("HOME").ok().map(|h| format!("{}/Downloads", h)) }
+        }
+        _ => None,
+    }
+}
+
+/// Handle HTTP requests
+fn handle_http_request(fn_name: &str, args: &serde_json::Value) -> String {
+    #[cfg(feature = "native")]
+    {
+        use reqwest::blocking::Client;
+        use std::time::Duration;
+        
+        let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        if url.is_empty() {
+            return serde_json::json!({"error": "URL is required"}).to_string();
+        }
+        
+        // Sovereignty check - verify HTTP permission for this domain
+        if let Err(e) = poly::sovereignty::checks::http(url) {
+            return serde_json::json!({"error": e}).to_string();
+        }
+        
+        let client = Client::builder()
+            .timeout(Duration::from_secs(args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30)))
+            .build();
+        
+        let client = match client {
+            Ok(c) => c,
+            Err(e) => return serde_json::json!({"error": format!("Failed to create HTTP client: {}", e)}).to_string(),
+        };
+        
+        // Build headers
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(h) = args.get("headers").and_then(|v| v.as_object()) {
+            for (key, value) in h {
+                if let Some(val) = value.as_str() {
+                    if let (Ok(name), Ok(val)) = (
+                        reqwest::header::HeaderName::from_bytes(key.as_bytes()),
+                        reqwest::header::HeaderValue::from_str(val)
+                    ) {
+                        headers.insert(name, val);
+                    }
+                }
+            }
+        }
+        
+        let method = match fn_name {
+            "__poly_http_get" => "GET",
+            "__poly_http_post" => "POST",
+            "__poly_http_put" => "PUT",
+            "__poly_http_patch" => "PATCH",
+            "__poly_http_delete" => "DELETE",
+            "__poly_http_request" => args.get("method").and_then(|v| v.as_str()).unwrap_or("GET"),
+            _ => "GET",
+        };
+        
+        let mut request = match method.to_uppercase().as_str() {
+            "GET" => client.get(url),
+            "POST" => client.post(url),
+            "PUT" => client.put(url),
+            "PATCH" => client.patch(url),
+            "DELETE" => client.delete(url),
+            "HEAD" => client.head(url),
+            _ => client.get(url),
+        };
+        
+        request = request.headers(headers);
+        
+        // Add body for POST/PUT/PATCH
+        if let Some(body) = args.get("body") {
+            if body.is_string() {
+                request = request.body(body.as_str().unwrap_or("").to_string());
+            } else {
+                request = request.json(body);
+            }
+        }
+        
+        match request.send() {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                let headers: std::collections::HashMap<String, String> = response.headers()
+                    .iter()
+                    .filter_map(|(k, v)| v.to_str().ok().map(|val| (k.to_string(), val.to_string())))
+                    .collect();
+                
+                let body = response.text().unwrap_or_default();
+                
+                // Try to parse as JSON
+                let data: serde_json::Value = serde_json::from_str(&body)
+                    .unwrap_or_else(|_| serde_json::Value::String(body));
+                
+                serde_json::json!({
+                    "result": {
+                        "status": status,
+                        "headers": headers,
+                        "data": data
+                    }
+                }).to_string()
+            }
+            Err(e) => serde_json::json!({"error": format!("HTTP request failed: {}", e)}).to_string(),
+        }
+    }
+    
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = (fn_name, args);
+        serde_json::json!({"error": "HTTP API requires native feature"}).to_string()
+    }
+}
+
+/// Database connection storage
+#[cfg(feature = "native")]
+static DB_CONNECTIONS: once_cell::sync::Lazy<std::sync::Mutex<std::collections::HashMap<u64, rusqlite::Connection>>> = 
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(feature = "native")]
+static DB_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Handle database requests
+fn handle_db_request(fn_name: &str, args: &serde_json::Value) -> String {
+    #[cfg(feature = "native")]
+    {
+        use std::sync::atomic::Ordering;
+        
+        // Sovereignty check - verify database permission
+        if let Err(e) = poly::sovereignty::checks::database() {
+            return serde_json::json!({"error": e}).to_string();
+        }
+        
+        match fn_name {
+            "__poly_db_open" => {
+                let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(":memory:");
+                
+                // Additional check for file path if not in-memory
+                if path != ":memory:" {
+                    if let Err(e) = poly::sovereignty::checks::fs_write(path) {
+                        return serde_json::json!({"error": e}).to_string();
+                    }
+                }
+                
+                match rusqlite::Connection::open(path) {
+                    Ok(conn) => {
+                        let id = DB_COUNTER.fetch_add(1, Ordering::SeqCst);
+                        DB_CONNECTIONS.lock().unwrap().insert(id, conn);
+                        serde_json::json!({"result": {"id": id}}).to_string()
+                    }
+                    Err(e) => serde_json::json!({"error": format!("Failed to open database: {}", e)}).to_string(),
+                }
+            }
+            "__poly_db_close" => {
+                let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                
+                if DB_CONNECTIONS.lock().unwrap().remove(&id).is_some() {
+                    serde_json::json!({"result": true}).to_string()
+                } else {
+                    serde_json::json!({"error": "Database connection not found"}).to_string()
+                }
+            }
+            "__poly_db_execute" => {
+                let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let sql = args.get("sql").and_then(|v| v.as_str()).unwrap_or("");
+                let params = args.get("params").and_then(|v| v.as_array());
+                
+                let connections = DB_CONNECTIONS.lock().unwrap();
+                if let Some(conn) = connections.get(&id) {
+                    let params_vec: Vec<Box<dyn rusqlite::ToSql>> = params
+                        .map(|arr| arr.iter().map(json_to_sql_param).collect())
+                        .unwrap_or_default();
+                    
+                    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+                    
+                    match conn.execute(sql, params_refs.as_slice()) {
+                        Ok(rows) => serde_json::json!({"result": {"changes": rows}}).to_string(),
+                        Err(e) => serde_json::json!({"error": format!("SQL error: {}", e)}).to_string(),
+                    }
+                } else {
+                    serde_json::json!({"error": "Database connection not found"}).to_string()
+                }
+            }
+            "__poly_db_query" => {
+                let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let sql = args.get("sql").and_then(|v| v.as_str()).unwrap_or("");
+                let params = args.get("params").and_then(|v| v.as_array());
+                
+                let connections = DB_CONNECTIONS.lock().unwrap();
+                if let Some(conn) = connections.get(&id) {
+                    let params_vec: Vec<Box<dyn rusqlite::ToSql>> = params
+                        .map(|arr| arr.iter().map(json_to_sql_param).collect())
+                        .unwrap_or_default();
+                    
+                    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+                    
+                    match conn.prepare(sql) {
+                        Ok(mut stmt) => {
+                            let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                            
+                            match stmt.query(params_refs.as_slice()) {
+                                Ok(mut rows) => {
+                                    let mut results: Vec<serde_json::Value> = Vec::new();
+                                    
+                                    while let Ok(Some(row)) = rows.next() {
+                                        let mut obj = serde_json::Map::new();
+                                        for (i, name) in column_names.iter().enumerate() {
+                                            let value = sql_value_to_json(row, i);
+                                            obj.insert(name.clone(), value);
+                                        }
+                                        results.push(serde_json::Value::Object(obj));
+                                    }
+                                    
+                                    serde_json::json!({"result": results}).to_string()
+                                }
+                                Err(e) => serde_json::json!({"error": format!("Query error: {}", e)}).to_string(),
+                            }
+                        }
+                        Err(e) => serde_json::json!({"error": format!("Prepare error: {}", e)}).to_string(),
+                    }
+                } else {
+                    serde_json::json!({"error": "Database connection not found"}).to_string()
+                }
+            }
+            "__poly_db_query_one" => {
+                let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let sql = args.get("sql").and_then(|v| v.as_str()).unwrap_or("");
+                let params = args.get("params").and_then(|v| v.as_array());
+                
+                let connections = DB_CONNECTIONS.lock().unwrap();
+                if let Some(conn) = connections.get(&id) {
+                    let params_vec: Vec<Box<dyn rusqlite::ToSql>> = params
+                        .map(|arr| arr.iter().map(json_to_sql_param).collect())
+                        .unwrap_or_default();
+                    
+                    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+                    
+                    match conn.prepare(sql) {
+                        Ok(mut stmt) => {
+                            let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+                            
+                            match stmt.query_row(params_refs.as_slice(), |row| {
+                                let mut obj = serde_json::Map::new();
+                                for (i, name) in column_names.iter().enumerate() {
+                                    let value = sql_value_to_json(row, i);
+                                    obj.insert(name.clone(), value);
+                                }
+                                Ok(serde_json::Value::Object(obj))
+                            }) {
+                                Ok(result) => serde_json::json!({"result": result}).to_string(),
+                                Err(rusqlite::Error::QueryReturnedNoRows) => serde_json::json!({"result": null}).to_string(),
+                                Err(e) => serde_json::json!({"error": format!("Query error: {}", e)}).to_string(),
+                            }
+                        }
+                        Err(e) => serde_json::json!({"error": format!("Prepare error: {}", e)}).to_string(),
+                    }
+                } else {
+                    serde_json::json!({"error": "Database connection not found"}).to_string()
+                }
+            }
+            _ => serde_json::json!({"error": "Unknown database operation"}).to_string(),
+        }
+    }
+    
+    #[cfg(not(feature = "native"))]
+    {
+        let _ = (fn_name, args);
+        serde_json::json!({"error": "Database API requires native feature"}).to_string()
+    }
+}
+
+/// Convert JSON value to SQL parameter
+#[cfg(feature = "native")]
+fn json_to_sql_param(value: &serde_json::Value) -> Box<dyn rusqlite::ToSql> {
+    match value {
+        serde_json::Value::Null => Box::new(rusqlite::types::Null),
+        serde_json::Value::Bool(b) => Box::new(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Box::new(i)
+            } else if let Some(f) = n.as_f64() {
+                Box::new(f)
+            } else {
+                Box::new(n.to_string())
+            }
+        }
+        serde_json::Value::String(s) => Box::new(s.clone()),
+        _ => Box::new(value.to_string()),
+    }
+}
+
+/// Convert SQL value to JSON
+#[cfg(feature = "native")]
+fn sql_value_to_json(row: &rusqlite::Row, idx: usize) -> serde_json::Value {
+    // Try different types
+    if let Ok(v) = row.get::<_, i64>(idx) {
+        return serde_json::Value::Number(v.into());
+    }
+    if let Ok(v) = row.get::<_, f64>(idx) {
+        return serde_json::json!(v);
+    }
+    if let Ok(v) = row.get::<_, String>(idx) {
+        return serde_json::Value::String(v);
+    }
+    if let Ok(v) = row.get::<_, Vec<u8>>(idx) {
+        return serde_json::Value::String(base64_encode(&v));
+    }
+    if let Ok(v) = row.get::<_, bool>(idx) {
+        return serde_json::Value::Bool(v);
+    }
+    serde_json::Value::Null
+}
+
+/// Simple base64 encoding for blob data
+#[cfg(feature = "native")]
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+        
+        result.push(CHARS[b0 >> 2] as char);
+        result.push(CHARS[((b0 & 0x03) << 4) | (b1 >> 4)] as char);
+        
+        if chunk.len() > 1 {
+            result.push(CHARS[((b1 & 0x0f) << 2) | (b2 >> 6)] as char);
+        } else {
+            result.push('=');
+        }
+        
+        if chunk.len() > 2 {
+            result.push(CHARS[b2 & 0x3f] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }
 
 /// Parse filter array from JSON: [["Images", ["png", "jpg"]], ["All", ["*"]]]
@@ -1508,7 +2847,7 @@ fn generate_dev_html(project_path: &Path, entry: &Path, version: u64) -> String 
                     if (d.version > ver) {{ ver = d.version; document.getElementById('toast').classList.add('show'); await runCode(); setTimeout(() => document.getElementById('toast').classList.remove('show'), 800); }}
                 }} catch(e) {{}}
             }}
-            if (polling) setTimeout(check, 1000);
+            if (polling) setTimeout(check, 2000);
         }}
         function start() {{ if (!polling) {{ polling = true; check(); }} }}
         function stop() {{ polling = false; }}
@@ -1590,7 +2929,7 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
         .ok_or_else(|| "No entry point found".to_string())?;
     
     println!();
-    println!("  {}POLY{} v0.2.5  {}{}{}", CYAN, RESET, DIM, if release { "release" } else { "debug" }, RESET);
+    println!("  {}POLY{} v{}  {}{}{}", CYAN, RESET, VERSION, DIM, if release { "release" } else { "debug" }, RESET);
     println!();
     
     let start = std::time::Instant::now();
@@ -1599,6 +2938,106 @@ fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String>
     poly::run(&source)?;
     println!("\n  {}done{} in {}ms", GREEN, RESET, start.elapsed().as_millis());
     Ok(())
+}
+
+/// Open a URL in a standalone Poly WebView window
+fn open_url_window(url: &str, title: &str, width: u32, height: u32) {
+    #[cfg(feature = "native")]
+    {
+        // Hide console window on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            unsafe {
+                let console = GetConsoleWindow();
+                if !console.0.is_null() {
+                    let _ = ShowWindow(console, SW_HIDE);
+                    FreeConsole().ok();
+                }
+            }
+        }
+        
+        let config = poly::NativeConfig::new(title)
+            .with_size(width, height)
+            .with_decorations(true)
+            .with_dev_tools(true);
+        
+        if let Err(e) = poly::run_native_url(url, config) {
+            eprintln!("{}error{}: Failed to open URL window: {}", RED, RESET, e);
+        }
+    }
+    
+    #[cfg(not(feature = "native"))]
+    {
+        eprintln!("{}error{}: Native feature not enabled", RED, RESET);
+        let _ = (url, title, width, height); // Suppress unused warnings
+    }
+}
+
+/// Run browser mode with separate UI and content WebViews
+fn run_browser_mode(url: &str, title: &str, width: u32, height: u32, ui_height: u32, ui_html_path: Option<String>) {
+    #[cfg(feature = "native")]
+    {
+        // Hide console window on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            unsafe {
+                let console = GetConsoleWindow();
+                if !console.0.is_null() {
+                    let _ = ShowWindow(console, SW_HIDE);
+                    FreeConsole().ok();
+                }
+            }
+        }
+        
+        // Load UI HTML from file or use default
+        let ui_html = if let Some(path) = ui_html_path {
+            std::fs::read_to_string(&path).unwrap_or_else(|_| default_browser_ui())
+        } else {
+            default_browser_ui()
+        };
+        
+        let config = poly::BrowserConfig {
+            title: title.to_string(),
+            width,
+            height,
+            ui_height,
+            ui_html,
+            start_url: url.to_string(),
+            devtools: true,
+            icon_path: None,
+            decorations: false,
+        };
+        
+        if let Err(e) = poly::run_browser_window(config) {
+            eprintln!("{}error{}: Failed to run browser mode: {}", RED, RESET, e);
+        }
+    }
+    
+    #[cfg(not(feature = "native"))]
+    {
+        eprintln!("{}error{}: Native feature not enabled", RED, RESET);
+        let _ = (url, title, width, height, ui_height, ui_html_path);
+    }
+}
+
+/// Default browser UI HTML
+fn default_browser_ui() -> String {
+    // Minimal default - apps should provide their own UI via --ui-html
+    r#"<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a1f; height: 100%; display: flex; align-items: center; justify-content: center; -webkit-app-region: drag; }
+.msg { color: #666; font-family: system-ui; font-size: 12px; }
+</style>
+</head>
+<body><div class="msg">No UI provided. Use --ui-html to specify custom UI.</div></body>
+</html>"#.to_string()
 }
 
 fn run_native_app(project_path: &Path, _release: bool) {
@@ -1656,6 +3095,181 @@ fn run_native_app(project_path: &Path, _release: bool) {
             .to_string()
     };
     
+    // Check for [browser] section in poly.toml - if present, use browser mode
+    let browser_mode = if poly_toml_path.exists() {
+        if let Ok(content) = fs::read_to_string(&poly_toml_path) {
+            content.contains("[browser]")
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    
+    // If browser mode is enabled, use the dual-WebView browser window
+    #[cfg(feature = "native")]
+    if browser_mode {
+        // Parse browser config
+        let mut ui_height: u32 = 80;
+        let mut browser_width: u32 = 1200;
+        let mut browser_height: u32 = 800;
+        let mut dev_port: u16 = 0;
+        
+        if let Ok(content) = fs::read_to_string(&poly_toml_path) {
+            let mut in_browser_section = false;
+            let mut in_window_section = false;
+            let mut in_dev_section = false;
+            for line in content.lines() {
+                let line = line.trim();
+                if line == "[browser]" {
+                    in_browser_section = true;
+                    in_window_section = false;
+                    in_dev_section = false;
+                } else if line == "[window]" {
+                    in_window_section = true;
+                    in_browser_section = false;
+                    in_dev_section = false;
+                } else if line == "[dev]" {
+                    in_dev_section = true;
+                    in_browser_section = false;
+                    in_window_section = false;
+                } else if line.starts_with('[') {
+                    in_browser_section = false;
+                    in_window_section = false;
+                    in_dev_section = false;
+                } else if in_browser_section {
+                    if let Some(val) = line.strip_prefix("ui_height").and_then(|s| s.trim().strip_prefix('=')) {
+                        ui_height = val.trim().parse().unwrap_or(80);
+                    }
+                } else if in_window_section {
+                    if let Some(val) = line.strip_prefix("width").and_then(|s| s.trim().strip_prefix('=')) {
+                        browser_width = val.trim().parse().unwrap_or(1200);
+                    } else if let Some(val) = line.strip_prefix("height").and_then(|s| s.trim().strip_prefix('=')) {
+                        browser_height = val.trim().parse().unwrap_or(800);
+                    }
+                } else if in_dev_section {
+                    if let Some(val) = line.strip_prefix("port").and_then(|s| s.trim().strip_prefix('=')) {
+                        dev_port = val.trim().parse().unwrap_or(0);
+                    }
+                }
+            }
+        }
+        
+        // Hide console window on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
+            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+            unsafe {
+                let console = GetConsoleWindow();
+                if !console.0.is_null() {
+                    let _ = ShowWindow(console, SW_HIDE);
+                    FreeConsole().ok();
+                }
+            }
+        }
+        
+        // Find a free port
+        let port = if dev_port > 0 { dev_port } else { find_free_port().unwrap_or(9473) };
+        
+        println!();
+        println!("  {}POLY{} {}  {}browser mode{}", CYAN, RESET, VERSION, DIM, RESET);
+        println!();
+        println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
+        println!("  {}>{} UI height: {}px", DIM, RESET, ui_height);
+        println!("  {}>{} Window: {}x{}", DIM, RESET, browser_width, browser_height);
+        println!();
+        
+        // Start local HTTP server for UI assets
+        let web_dir_clone = web_dir.clone();
+        thread::spawn(move || {
+            let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
+                .expect("Failed to start HTTP server");
+            
+            for request in server.incoming_requests() {
+                let url = request.url().to_string();
+                let url_path = url.trim_start_matches('/');
+                
+                // Try to find the file
+                let file_path = if url_path.is_empty() || url_path == "index.html" {
+                    web_dir_clone.join("index.html")
+                } else {
+                    web_dir_clone.join(url_path)
+                };
+                
+                let response = if file_path.exists() && file_path.is_file() {
+                    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let content_type = match ext {
+                        "html" => "text/html; charset=utf-8",
+                        "css" => "text/css; charset=utf-8",
+                        "js" => "application/javascript; charset=utf-8",
+                        "png" => "image/png",
+                        "jpg" | "jpeg" => "image/jpeg",
+                        "svg" => "image/svg+xml",
+                        "json" => "application/json",
+                        _ => "text/plain",
+                    };
+                    
+                    if matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "ico") {
+                        match fs::read(&file_path) {
+                            Ok(content) => tiny_http::Response::from_data(content)
+                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()),
+                            Err(_) => tiny_http::Response::from_string("Read Error").with_status_code(500),
+                        }
+                    } else {
+                        match fs::read_to_string(&file_path) {
+                            Ok(content) => tiny_http::Response::from_string(content)
+                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()),
+                            Err(_) => tiny_http::Response::from_string("Read Error").with_status_code(500),
+                        }
+                    }
+                } else {
+                    tiny_http::Response::from_string("Not Found").with_status_code(404)
+                };
+                
+                let _ = request.respond(response);
+            }
+        });
+        
+        // Give server time to start
+        thread::sleep(std::time::Duration::from_millis(100));
+        
+        // Look for icon
+        let icon_path = project_path.join("assets/icon.png");
+        let icon = if icon_path.exists() { Some(icon_path.to_string_lossy().to_string()) } else { None };
+        
+        // Use URL instead of HTML content
+        let ui_url = format!("http://localhost:{}/index.html", port);
+        
+        let config = poly::BrowserConfig {
+            title: title.clone(),
+            width: browser_width,
+            height: browser_height,
+            ui_height,
+            ui_html: ui_url, // This is now a URL, not HTML content
+            start_url: "about:blank".to_string(),
+            devtools: true,
+            icon_path: icon,
+            decorations: false,
+        };
+        
+        if let Err(e) = poly::run_browser_window(config) {
+            eprintln!("{}error{}: Failed to run browser mode: {}", RED, RESET, e);
+        }
+        return;
+    }
+    
+    // Initialize SovereigntyEngine from poly.toml
+    if poly_toml_path.exists() {
+        poly::sovereignty::init_from_toml(&poly_toml_path, &title);
+        if poly::sovereignty::is_enabled() {
+            println!("  {}>{} SovereigntyEngine: {}enabled{}", DIM, RESET, GREEN, RESET);
+        }
+    } else {
+        // No poly.toml = development mode, sovereignty disabled
+        poly::sovereignty::set_development_mode();
+    }
+    
     // Window config defaults
     
     // Window config defaults
@@ -1666,16 +3280,25 @@ fn run_native_app(project_path: &Path, _release: bool) {
     let mut window_transparent = false; // Transparent background for frameless
     let mut single_instance = false;
     
+    // Dev/Server config
+    let mut dev_port: u16 = 0; // 0 = auto-find free port
+    
     // Parse window section from poly.toml
     if poly_toml_path.exists() {
         if let Ok(content) = fs::read_to_string(&poly_toml_path) {
             let mut in_window_section = false;
+            let mut in_dev_section = false;
             for line in content.lines() {
                 let line = line.trim();
                 if line == "[window]" {
                     in_window_section = true;
-                } else if line.starts_with('[') && line != "[window]" {
+                    in_dev_section = false;
+                } else if line == "[dev]" {
+                    in_dev_section = true;
                     in_window_section = false;
+                } else if line.starts_with('[') && line != "[window]" && line != "[dev]" {
+                    in_window_section = false;
+                    in_dev_section = false;
                 } else if in_window_section {
                     if let Some(val) = line.strip_prefix("width").and_then(|s| s.trim().strip_prefix('=')) {
                         window_width = val.trim().parse().unwrap_or(1024);
@@ -1689,6 +3312,10 @@ fn run_native_app(project_path: &Path, _release: bool) {
                         window_transparent = val.trim() == "true";
                     } else if let Some(val) = line.strip_prefix("single_instance").and_then(|s| s.trim().strip_prefix('=')) {
                         single_instance = val.trim() == "true";
+                    }
+                } else if in_dev_section {
+                    if let Some(val) = line.strip_prefix("port").and_then(|s| s.trim().strip_prefix('=')) {
+                        dev_port = val.trim().parse().unwrap_or(0);
                     }
                 }
             }
@@ -1770,11 +3397,15 @@ fn run_native_app(project_path: &Path, _release: bool) {
         (false, title.to_string(), false, false, Vec::new())
     };
     
-    // Find a free port
-    let port = 9473u16;
+    // Find a free port or use configured port
+    let port = if dev_port > 0 {
+        dev_port
+    } else {
+        find_free_port().unwrap_or(9473)
+    };
     
     println!();
-    println!("  {}POLY{} v0.2.5  {}native{}", CYAN, RESET, DIM, RESET);
+    println!("  {}POLY{} {}  {}native{}", CYAN, RESET, VERSION, DIM, RESET);
     println!();
     println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
     println!("  {}>{} Web dir: {}", DIM, RESET, web_dir.display());
@@ -1824,7 +3455,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
     config.resizable = window_resizable;
     
     // Debug: show window config
-    println!("  {}>{} Window: {}x{}, decorations={}, transparent={}", DIM, RESET, window_width, window_height, window_decorations, window_transparent);
+    println!("  {}>{} Window: {}x{}, decorations={}", DIM, RESET, window_width, window_height, window_decorations);
     
     config.tray_tooltip = Some(tray_tooltip.clone());
     config.tray_menu_items = tray_menu_items;
@@ -1900,6 +3531,74 @@ fn run_native_app(project_path: &Path, _release: bool) {
                 let current = reload_counter_server.load(Ordering::Relaxed);
                 tiny_http::Response::from_string(format!(r#"{{"version":{}}}"#, current))
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+            }
+            // Proxy endpoint - fetches external URLs and returns content
+            // Usage: /__poly_proxy?url=https://example.com/path
+            else if url.starts_with("/__poly_proxy") {
+                let target_url = url.strip_prefix("/__poly_proxy?url=")
+                    .or_else(|| url.strip_prefix("/__poly_proxy/?url="))
+                    .unwrap_or("");
+                
+                // URL decode
+                let target_url = urlencoding::decode(target_url).unwrap_or_default().to_string();
+                
+                if target_url.is_empty() {
+                    tiny_http::Response::from_string(r#"{"error":"Missing url parameter"}"#)
+                        .with_status_code(400)
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                } else {
+                    // Check sovereignty
+                    let allowed = if poly::sovereignty_enabled() {
+                        let domain = target_url.split("://")
+                            .nth(1)
+                            .and_then(|s| s.split('/').next())
+                            .unwrap_or(&target_url);
+                        let perm = poly::Permission::HttpConnect(poly::sovereignty::DomainScope::Domain(domain.to_string()));
+                        poly::check_permission(&perm).is_ok()
+                    } else {
+                        true
+                    };
+                    
+                    if !allowed {
+                        tiny_http::Response::from_string(r#"{"error":"Domain not allowed"}"#)
+                            .with_status_code(403)
+                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                    } else {
+                        match reqwest::blocking::get(&target_url) {
+                            Ok(resp) => {
+                                let content_type = resp.headers()
+                                    .get("content-type")
+                                    .and_then(|v| v.to_str().ok())
+                                    .unwrap_or("application/octet-stream")
+                                    .to_string();
+                                
+                                match resp.bytes() {
+                                    Ok(body) => {
+                                        let mut response = tiny_http::Response::from_data(body.to_vec());
+                                        response = response.with_header(
+                                            tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()
+                                        );
+                                        // Add CORS headers
+                                        response = response.with_header(
+                                            tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap()
+                                        );
+                                        response
+                                    }
+                                    Err(e) => {
+                                        tiny_http::Response::from_string(format!(r#"{{"error":"{}"}}"#, e))
+                                            .with_status_code(500)
+                                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tiny_http::Response::from_string(format!(r#"{{"error":"{}"}}"#, e))
+                                    .with_status_code(500)
+                                    .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                            }
+                        }
+                    }
+                }
             }
             // Serve window config (decorations, etc.)
             else if url == "/__poly_config" {
@@ -2161,7 +3860,21 @@ window.poly = {
     maximize() { if (window.ipc) window.ipc.postMessage('maximize'); },
     close() { if (window.ipc) window.ipc.postMessage('close'); },
     hide() { if (window.ipc) window.ipc.postMessage('hide'); },
-    show() { if (window.ipc) window.ipc.postMessage('show'); }
+    show() { if (window.ipc) window.ipc.postMessage('show'); },
+    async setTitle(title) { return poly.invoke('__poly_window_set_title', { title }); },
+    async getTitle() { return poly.invoke('__poly_window_get_title', {}); },
+    async center() { return poly.invoke('__poly_window_center', {}); },
+    async setSize(width, height) { return poly.invoke('__poly_window_set_size', { width, height }); },
+    async getSize() { return poly.invoke('__poly_window_get_size', {}); },
+    async setPosition(x, y) { return poly.invoke('__poly_window_set_position', { x, y }); },
+    async getPosition() { return poly.invoke('__poly_window_get_position', {}); },
+    async setMinSize(width, height) { return poly.invoke('__poly_window_set_min_size', { width, height }); },
+    async setMaxSize(width, height) { return poly.invoke('__poly_window_set_max_size', { width, height }); },
+    async setAlwaysOnTop(value) { return poly.invoke('__poly_window_set_always_on_top', { value }); },
+    async setFullscreen(value) { return poly.invoke('__poly_window_set_fullscreen', { value }); },
+    async isFullscreen() { return poly.invoke('__poly_window_is_fullscreen', {}); },
+    async isMaximized() { return poly.invoke('__poly_window_is_maximized', {}); },
+    async isMinimized() { return poly.invoke('__poly_window_is_minimized', {}); }
   },
   clipboard: {
     async read() { return poly.invoke('__poly_clipboard_read', {}); },
@@ -2193,6 +3906,182 @@ window.poly = {
     },
     // Check if tray is enabled (from poly.toml config)
     async isEnabled() { return poly.invoke('__poly_tray_is_enabled', {}); }
+  },
+  shell: {
+    async open(url) { return poly.invoke('__poly_shell_open', { url }); },
+    async openPath(path) { return poly.invoke('__poly_shell_open_path', { path }); },
+    async openWith(path, app) { return poly.invoke('__poly_shell_open_with', { path, app }); }
+  },
+  app: {
+    async getVersion() { return poly.invoke('__poly_app_get_version', {}); },
+    async getName() { return poly.invoke('__poly_app_get_name', {}); },
+    async getPath(name) { return poly.invoke('__poly_app_get_path', { name }); },
+    async exit(code = 0) { return poly.invoke('__poly_app_exit', { code }); },
+    async relaunch() { return poly.invoke('__poly_app_relaunch', {}); }
+  },
+  os: {
+    async platform() { return poly.invoke('__poly_os_platform', {}); },
+    async arch() { return poly.invoke('__poly_os_arch', {}); },
+    async version() { return poly.invoke('__poly_os_version', {}); },
+    async hostname() { return poly.invoke('__poly_os_hostname', {}); },
+    async homedir() { return poly.invoke('__poly_os_homedir', {}); },
+    async tempdir() { return poly.invoke('__poly_os_tempdir', {}); }
+  },
+  // Network API - HTTP requests
+  http: {
+    async get(url, options = {}) { return poly.invoke('__poly_http_get', { url, ...options }); },
+    async post(url, body, options = {}) { return poly.invoke('__poly_http_post', { url, body, ...options }); },
+    async put(url, body, options = {}) { return poly.invoke('__poly_http_put', { url, body, ...options }); },
+    async patch(url, body, options = {}) { return poly.invoke('__poly_http_patch', { url, body, ...options }); },
+    async delete(url, options = {}) { return poly.invoke('__poly_http_delete', { url, ...options }); },
+    async request(options) { return poly.invoke('__poly_http_request', options); }
+  },
+  // SQLite Database API
+  db: {
+    async open(path) { return poly.invoke('__poly_db_open', { path }); },
+    async close(id) { return poly.invoke('__poly_db_close', { id }); },
+    async execute(id, sql, params = []) { return poly.invoke('__poly_db_execute', { id, sql, params }); },
+    async query(id, sql, params = []) { return poly.invoke('__poly_db_query', { id, sql, params }); },
+    async queryOne(id, sql, params = []) { return poly.invoke('__poly_db_query_one', { id, sql, params }); }
+  },
+  // Browser API - Build browsers with Poly
+  browser: {
+    async createTab(url) { return poly.invoke('__poly_browser_create_tab', { url }); },
+    async closeTab(id) { return poly.invoke('__poly_browser_close_tab', { id }); },
+    async getTab(id) { return poly.invoke('__poly_browser_get_tab', { id }); },
+    async listTabs() { return poly.invoke('__poly_browser_list_tabs', {}); },
+    async navigate(id, url) { return poly.invoke('__poly_browser_navigate', { id, url }); },
+    async back(id) { return poly.invoke('__poly_browser_back', { id }); },
+    async forward(id) { return poly.invoke('__poly_browser_forward', { id }); },
+    async setTitle(id, title) { return poly.invoke('__poly_browser_set_title', { id, title }); },
+    async setLoading(id, loading) { return poly.invoke('__poly_browser_set_loading', { id, loading }); },
+    async getHistory(id) { return poly.invoke('__poly_browser_get_history', { id }); },
+    async clearHistory(id) { return poly.invoke('__poly_browser_clear_history', { id }); },
+    async fetch(url) { return poly.invoke('__poly_browser_fetch', { url }); },
+    // Proxy URL - use this to load external resources through the local server
+    proxyUrl(url) { return '/__poly_proxy?url=' + encodeURIComponent(url); },
+    // Navigate the current WebView to a URL (replaces current page)
+    loadUrl(url) { window.location.href = url; },
+    // Go back in browser history
+    goBack() { window.history.back(); },
+    // Go forward in browser history
+    goForward() { window.history.forward(); },
+    // Open a real WebView window (full browser functionality)
+    async openWindow(url, options = {}) { return poly.invoke('__poly_browser_open_window', { url, ...options }); },
+    async windowNavigate(id, url) { return poly.invoke('__poly_browser_window_navigate', { id, url }); },
+    async windowClose(id) { return poly.invoke('__poly_browser_window_close', { id }); }
+  },
+  // Titlebar API - Custom persistent titlebar for browser apps
+  titlebar: {
+    // Set custom titlebar (persists across navigation)
+    async set(config) { return poly.invoke('__poly_titlebar_set', config); },
+    // Get current titlebar config
+    async get() { return poly.invoke('__poly_titlebar_get', {}); },
+    // Enable/disable titlebar
+    async setEnabled(enabled) { return poly.invoke('__poly_titlebar_set_enabled', { enabled }); },
+    // Set titlebar height
+    async setHeight(height) { return poly.invoke('__poly_titlebar_set_height', { height }); },
+    // Update titlebar HTML
+    async setHtml(html) { return poly.invoke('__poly_titlebar_set_html', { html }); },
+    // Update titlebar CSS
+    async setCss(css) { return poly.invoke('__poly_titlebar_set_css', { css }); },
+    // Update titlebar JavaScript
+    async setJs(js) { return poly.invoke('__poly_titlebar_set_js', { js }); },
+    // Navigate the main content area to a URL (keeps titlebar)
+    async navigate(url) { return poly.invoke('__poly_titlebar_navigate', { url }); }
+  },
+  // WebView API - Multi-WebView management for browser apps
+  webview: {
+    // Create a new WebView
+    async create(id, options = {}) { return poly.invoke('__poly_webview_create', { id, ...options }); },
+    // Navigate a WebView to URL
+    async navigate(id, url) { return poly.invoke('__poly_webview_navigate', { id, url }); },
+    // Load HTML content directly
+    async loadHtml(id, html) { return poly.invoke('__poly_webview_load_html', { id, html }); },
+    // Go back in history
+    async goBack(id) { return poly.invoke('__poly_webview_go_back', { id }); },
+    // Go forward in history
+    async goForward(id) { return poly.invoke('__poly_webview_go_forward', { id }); },
+    // Reload the page
+    async reload(id) { return poly.invoke('__poly_webview_reload', { id }); },
+    // Stop loading
+    async stop(id) { return poly.invoke('__poly_webview_stop', { id }); },
+    // Set WebView bounds (position and size)
+    async setBounds(id, bounds) { return poly.invoke('__poly_webview_set_bounds', { id, ...bounds }); },
+    // Get WebView bounds
+    async getBounds(id) { return poly.invoke('__poly_webview_get_bounds', { id }); },
+    // Execute JavaScript in a WebView
+    async eval(id, script) { return poly.invoke('__poly_webview_eval', { id, script }); },
+    // Destroy a WebView
+    async destroy(id) { return poly.invoke('__poly_webview_destroy', { id }); },
+    // List all WebViews
+    async list() { return poly.invoke('__poly_webview_list', {}); },
+    // Get WebView info (includes isLoading, canGoBack, canGoForward)
+    async get(id) { return poly.invoke('__poly_webview_get', { id }); },
+    // Show/hide a WebView
+    async setVisible(id, visible) { return poly.invoke('__poly_webview_set_visible', { id, visible }); },
+    // Focus a WebView
+    async focus(id) { return poly.invoke('__poly_webview_focus', { id }); },
+    // Set zoom level (1.0 = 100%)
+    async setZoom(id, level) { return poly.invoke('__poly_webview_set_zoom', { id, level }); },
+    // Set main WebView bounds (the app's original WebView)
+    async setMainBounds(bounds) { return poly.invoke('__poly_webview_set_main_bounds', bounds); },
+    // Poll for events (navigation, title change, etc.)
+    async pollEvents() { return poly.invoke('__poly_webview_poll_events', {}); },
+    // Grant or deny a permission request
+    async respondToPermission(id, permission, granted) { return poly.invoke('__poly_webview_respond_permission', { id, permission, granted }); },
+    // Event listeners (client-side convenience)
+    _listeners: {},
+    on(event, id, callback) {
+      const key = `${event}:${id}`;
+      if (!this._listeners[key]) this._listeners[key] = [];
+      this._listeners[key].push(callback);
+    },
+    off(event, id, callback) {
+      const key = `${event}:${id}`;
+      if (this._listeners[key]) {
+        this._listeners[key] = this._listeners[key].filter(cb => cb !== callback);
+      }
+    },
+    _emit(event, id, data) {
+      const key = `${event}:${id}`;
+      if (this._listeners[key]) {
+        this._listeners[key].forEach(cb => cb(data));
+      }
+      // Also emit to wildcard listeners
+      const wildcardKey = `${event}:*`;
+      if (this._listeners[wildcardKey]) {
+        this._listeners[wildcardKey].forEach(cb => cb(id, data));
+      }
+    },
+    // Convenience event registration
+    onNavigate(id, cb) { this.on('navigate', id, cb); },
+    onTitleChange(id, cb) { this.on('titleChange', id, cb); },
+    onLoadStart(id, cb) { this.on('loadStart', id, cb); },
+    onLoadFinish(id, cb) { this.on('loadFinish', id, cb); },
+    onNewWindow(id, cb) { this.on('newWindow', id, cb); },
+    onDownload(id, cb) { this.on('download', id, cb); },
+    onClose(id, cb) { this.on('close', id, cb); },
+    onHistoryChange(id, cb) { this.on('historyChange', id, cb); }
+  },
+  // MultiView API - Create windows with multiple WebViews
+  multiview: {
+    // Create a new multi-view window
+    // views: array of { id, url, x, y, width, height }
+    // Views are stacked: first in array = bottom, last = top (for UI)
+    async create(options) { return poly.invoke('__poly_multiview_create', options); },
+    // Navigate a view to URL
+    async navigate(windowId, viewId, url) { return poly.invoke('__poly_multiview_navigate', { windowId, viewId, url }); },
+    // Send message to a view (triggers 'polymessage' event)
+    async postMessage(windowId, viewId, message) { return poly.invoke('__poly_multiview_post_message', { windowId, viewId, message: JSON.stringify(message) }); },
+    // Set view bounds
+    async setBounds(windowId, viewId, bounds) { return poly.invoke('__poly_multiview_set_bounds', { windowId, viewId, ...bounds }); },
+    // Close a multi-view window
+    async close(windowId) { return poly.invoke('__poly_multiview_close', { windowId }); },
+    // List all multi-view windows
+    async list() { return poly.invoke('__poly_multiview_list', {}); },
+    // Get window info
+    async get(windowId) { return poly.invoke('__poly_multiview_get', { windowId }); }
   }
 };
 // Initialize Lucide Icons
@@ -2200,27 +4089,8 @@ if (typeof lucide !== 'undefined') {
   lucide.createIcons();
   document.addEventListener('alpine:initialized', () => lucide.createIcons());
 }
-// Hot Reload for Native Mode
-(function() {
-  let v = 0, polling = false;
-  async function check() {
-    if (!document.hidden) {
-      try { 
-        const r = await fetch('/__poly_reload'); 
-        const d = await r.json(); 
-        if (v > 0 && d.version > v) { 
-          location.reload(); 
-        }
-        v = d.version;
-      } catch(e) {}
-    }
-    if (polling) setTimeout(check, 500);
-  }
-  function start() { if (!polling) { polling = true; check(); } }
-  function stop() { polling = false; }
-  document.addEventListener('visibilitychange', () => document.hidden ? stop() : start());
-  start();
-})();
+// Hot Reload for Native Mode (disabled in production builds)
+// Note: Hot reload is only active during development
 </script>"##;
                         if html.contains("</body>") {
                             html = html.replace("</body>", &format!("{}</body>", body_script));
@@ -2313,8 +4183,9 @@ if (typeof lucide !== 'undefined') {
     // Give server time to start
     std::thread::sleep(std::time::Duration::from_millis(100));
     
-    // Run native window with URL instead of HTML content
+    // Standard mode: Single WebView - App handles everything via APIs
     let url = format!("http://localhost:{}", port);
+    
     if let Err(e) = poly::run_native_url(&url, config) {
         eprintln!("{}error{}: {}", RED, RESET, e);
         eprintln!();
@@ -2405,10 +4276,31 @@ fn extract_toml_value(content: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Find a free port to use for the local server
+fn find_free_port() -> Option<u16> {
+    use std::net::TcpListener;
+    
+    // Try to bind to port 0 to get a random free port
+    if let Ok(listener) = TcpListener::bind("127.0.0.1:0") {
+        if let Ok(addr) = listener.local_addr() {
+            return Some(addr.port());
+        }
+    }
+    
+    // Fallback: try common ports
+    for port in [9473, 9474, 9475, 9476, 9477, 9478, 9479, 9480] {
+        if TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
+            return Some(port);
+        }
+    }
+    
+    None
+}
+
 
 fn create_project(name: &str, template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.5", CYAN, RESET);
+    println!("  {}POLY{} v{}", CYAN, RESET, VERSION);
     println!();
     
     let project_path = Path::new(name);
@@ -2509,7 +4401,7 @@ fn add(a, b):
 
 fn init_project(_template: &str) {
     println!();
-    println!("  {}POLY{} v0.2.5", CYAN, RESET);
+    println!("  {}POLY{} v{}", CYAN, RESET, VERSION);
     println!();
     
     let cwd = std::env::current_dir().expect("Failed to get current directory");

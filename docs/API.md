@@ -2,22 +2,61 @@
 
 Complete reference for all Poly JavaScript APIs.
 
+**Version:** 0.2.9
+
+---
+
 ## Table of Contents
 
+- [Overview](#overview)
 - [Window Control](#window-control)
 - [Multi-Window](#multi-window)
-- [Single Instance](#single-instance)
-- [Building Apps](#building-apps)
-- [Code Signing](#code-signing)
-- [System Tray](#system-tray)
+- [Shell API](#shell-api)
+- [App API](#app-api)
+- [OS API](#os-api)
 - [Clipboard](#clipboard)
 - [Notifications](#notifications)
-- [Deep Links](#deep-links)
 - [Dialogs](#dialogs)
 - [File System](#file-system)
+- [Deep Links](#deep-links)
+- [System Tray](#system-tray)
 - [Auto-Updater](#auto-updater)
 - [AI/LLM Integration](#aillm-integration)
 - [IPC (Backend Functions)](#ipc-backend-functions)
+- [Configuration (poly.toml)](#configuration-polytoml)
+- [Building Apps](#building-apps)
+- [Code Signing](#code-signing)
+
+---
+
+## Overview
+
+Poly provides all APIs through the global `poly` object. All API methods are asynchronous and return Promises.
+
+```javascript
+// Example: Combining multiple APIs
+const platform = await poly.os.platform();
+const home = await poly.os.homedir();
+await poly.notification.show('System Info', `${platform} - ${home}`);
+```
+
+### Availability
+
+| API | Dev Server | Native Mode |
+|-----|------------|-------------|
+| `poly.dialog.*` | ✅ | ✅ |
+| `poly.fs.*` | ✅ | ✅ |
+| `poly.clipboard.*` | ✅ | ✅ |
+| `poly.notification.*` | ✅ | ✅ |
+| `poly.shell.*` | ✅ | ✅ |
+| `poly.app.*` | ✅ | ✅ |
+| `poly.os.*` | ✅ | ✅ |
+| `poly.windows.*` | ✅ | ✅ |
+| `poly.deeplink.*` | ✅ | ✅ |
+| `poly.updater.*` | ✅ | ✅ |
+| `poly.tray.*` | ❌ | ✅ |
+| `poly.window.*` (setTitle, center, etc.) | ❌ | ✅ |
+| `polyWindow.*` (minimize, maximize, etc.) | ❌ | ✅ |
 
 ---
 
@@ -25,11 +64,11 @@ Complete reference for all Poly JavaScript APIs.
 
 Control the current window. Only available in native mode (`poly run --native`).
 
-> **Note:** Poly does NOT inject a titlebar automatically. When using `decorations = false` (frameless mode), you must build your own titlebar using the `polyWindow` API.
+> **Important:** Poly does NOT inject a titlebar automatically. When using `decorations = false` (frameless), you must build your own titlebar using the `polyWindow` API.
 
 ### `polyWindow.minimize()`
 
-Minimize the window.
+Minimizes the window.
 
 ```javascript
 polyWindow.minimize();
@@ -37,7 +76,7 @@ polyWindow.minimize();
 
 ### `polyWindow.maximize()`
 
-Toggle maximize/restore.
+Toggles between maximized and normal state.
 
 ```javascript
 polyWindow.maximize();
@@ -45,7 +84,7 @@ polyWindow.maximize();
 
 ### `polyWindow.close()`
 
-Close the window.
+Closes the window.
 
 ```javascript
 polyWindow.close();
@@ -53,15 +92,18 @@ polyWindow.close();
 
 ### `polyWindow.drag()`
 
-Start window drag. Call this on mousedown for custom titlebar.
+Starts window dragging. Call this on `mousedown` for a custom titlebar.
 
 ```javascript
-polyWindow.drag();
+// In your custom titlebar
+<div class="titlebar" onmousedown="polyWindow.drag()">
+  <span>My App</span>
+</div>
 ```
 
 ### `polyWindow.isFrameless()`
 
-Check if the window is running in frameless mode (no native titlebar).
+Checks if the window is running in frameless mode.
 
 **Returns:** `Promise<boolean>`
 
@@ -69,18 +111,93 @@ Check if the window is running in frameless mode (no native titlebar).
 const frameless = await polyWindow.isFrameless();
 if (frameless) {
   // Show custom titlebar
+  document.getElementById('custom-titlebar').style.display = 'flex';
 }
+```
+
+### Extended Window API
+
+These APIs require Native Mode and are not available in the Dev Server.
+
+| Method | Parameters | Returns | Description |
+|--------|------------|---------|-------------|
+| `poly.window.setTitle(title)` | `string` | `Promise<void>` | Sets the window title |
+| `poly.window.getTitle()` | - | `Promise<string>` | Gets the window title |
+| `poly.window.center()` | - | `Promise<void>` | Centers the window |
+| `poly.window.setSize(w, h)` | `number, number` | `Promise<void>` | Sets window size |
+| `poly.window.getSize()` | - | `Promise<{width, height}>` | Gets window size |
+| `poly.window.setPosition(x, y)` | `number, number` | `Promise<void>` | Sets window position |
+| `poly.window.getPosition()` | - | `Promise<{x, y}>` | Gets window position |
+| `poly.window.setMinSize(w, h)` | `number, number` | `Promise<void>` | Sets minimum size |
+| `poly.window.setMaxSize(w, h)` | `number, number` | `Promise<void>` | Sets maximum size |
+| `poly.window.setAlwaysOnTop(v)` | `boolean` | `Promise<void>` | Window always on top |
+| `poly.window.setFullscreen(v)` | `boolean` | `Promise<void>` | Fullscreen mode on/off |
+| `poly.window.isFullscreen()` | - | `Promise<boolean>` | Checks fullscreen mode |
+| `poly.window.isMaximized()` | - | `Promise<boolean>` | Checks if maximized |
+| `poly.window.isMinimized()` | - | `Promise<boolean>` | Checks if minimized |
+
+```javascript
+// Example: Configure window
+await poly.window.setTitle('My App - Document.txt');
+await poly.window.setSize(1200, 800);
+await poly.window.center();
+await poly.window.setMinSize(800, 600);
 ```
 
 ### Custom Titlebar Example
 
+Complete example of a custom titlebar for frameless windows:
+
 ```html
-<div class="titlebar" onmousedown="polyWindow.drag()">
-  <span>My App</span>
-  <button onclick="polyWindow.minimize()">─</button>
-  <button onclick="polyWindow.maximize()">□</button>
-  <button onclick="polyWindow.close()">✕</button>
-</div>
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a1f; color: #fff; font-family: system-ui; }
+    
+    .titlebar {
+      height: 32px;
+      background: #0f0f1a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 12px;
+      user-select: none;
+      -webkit-app-region: drag;
+    }
+    
+    .titlebar-title { font-size: 12px; color: #888; }
+    .titlebar-buttons { display: flex; gap: 4px; -webkit-app-region: no-drag; }
+    
+    .titlebar-btn {
+      width: 28px; height: 24px;
+      border: none; background: transparent;
+      color: #888; cursor: pointer;
+      font-size: 12px; border-radius: 4px;
+    }
+    .titlebar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .titlebar-btn.close:hover { background: #e81123; }
+    
+    .content { padding: 20px; }
+  </style>
+</head>
+<body>
+  <div class="titlebar" onmousedown="polyWindow.drag()">
+    <div class="titlebar-title">My App</div>
+    <div class="titlebar-buttons">
+      <button class="titlebar-btn" onclick="polyWindow.minimize()">─</button>
+      <button class="titlebar-btn" onclick="polyWindow.maximize()">□</button>
+      <button class="titlebar-btn close" onclick="polyWindow.close()">✕</button>
+    </div>
+  </div>
+  
+  <div class="content">
+    <h1>Welcome</h1>
+    <p>Your app content here</p>
+  </div>
+</body>
+</html>
 ```
 
 ---
@@ -91,20 +208,21 @@ Create and manage multiple windows.
 
 ### `poly.windows.create(options)`
 
-Create a new window.
+Creates a new window.
 
 **Parameters:**
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `title` | string | "Poly Window" | Window title |
-| `width` | number | 800 | Window width |
-| `height` | number | 600 | Window height |
+| `width` | number | 800 | Window width in pixels |
+| `height` | number | 600 | Window height in pixels |
 | `url` | string | - | URL to load |
-| `html` | string | - | HTML content |
-| `resizable` | boolean | true | Allow resize |
+| `html` | string | - | HTML content directly |
+| `resizable` | boolean | true | Allow resizing |
 | `decorations` | boolean | true | Show native titlebar |
 
-**Returns:** `{ id: number }` - Window handle
+**Returns:** `Promise<{ id: number }>` - Window handle
 
 ```javascript
 // Create window with URL
@@ -115,8 +233,8 @@ const win = await poly.windows.create({
   url: 'http://localhost:3000/settings.html'
 });
 
-// Create frameless window with custom titlebar
-const win2 = await poly.windows.create({
+// Frameless window with HTML content
+const aboutWin = await poly.windows.create({
   title: 'About',
   width: 400,
   height: 300,
@@ -131,26 +249,17 @@ const win2 = await poly.windows.create({
           height: 32px; background: #0f0f1a; display: flex;
           justify-content: space-between; align-items: center; padding: 0 12px;
         }
-        .titlebar-btn { 
-          background: none; border: none; color: #888; 
-          width: 28px; height: 24px; cursor: pointer; 
-        }
-        .titlebar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-        .titlebar-btn.close:hover { background: #e81123; }
-        .content { padding: 20px; }
+        .content { padding: 20px; text-align: center; }
       </style>
     </head>
     <body>
       <div class="titlebar" onmousedown="polyWindow.drag()">
         <span>About</span>
-        <div>
-          <button class="titlebar-btn" onclick="polyWindow.minimize()">─</button>
-          <button class="titlebar-btn" onclick="polyWindow.maximize()">□</button>
-          <button class="titlebar-btn close" onclick="polyWindow.close()">✕</button>
-        </div>
+        <button onclick="polyWindow.close()" style="background:none;border:none;color:#888;cursor:pointer">✕</button>
       </div>
       <div class="content">
-        <h1>My App v1.0.0</h1>
+        <h2>My App</h2>
+        <p>Version 1.0.0</p>
         <p>Built with Poly</p>
       </div>
     </body>
@@ -161,7 +270,7 @@ const win2 = await poly.windows.create({
 
 ### `poly.windows.close(id)`
 
-Close a window by ID.
+Closes a window by its ID.
 
 ```javascript
 await poly.windows.close(win.id);
@@ -169,7 +278,7 @@ await poly.windows.close(win.id);
 
 ### `poly.windows.closeAll()`
 
-Close all created windows.
+Closes all created windows.
 
 ```javascript
 await poly.windows.closeAll();
@@ -177,40 +286,1409 @@ await poly.windows.closeAll();
 
 ### `poly.windows.list()`
 
-Get array of all window IDs.
+Returns an array of all window IDs.
+
+**Returns:** `Promise<number[]>`
 
 ```javascript
 const ids = await poly.windows.list();
-// [1, 2, 3]
+console.log('Open windows:', ids); // [1, 2, 3]
 ```
 
 ### `poly.windows.count()`
 
-Get number of open windows.
+Returns the number of open windows.
+
+**Returns:** `Promise<number>`
 
 ```javascript
 const count = await poly.windows.count();
+console.log(`${count} windows open`);
 ```
 
 ---
 
-## Single Instance
+## Shell API
 
-Prevent multiple instances of your app from running simultaneously. When enabled, launching a second instance will exit immediately.
+Open URLs, files, and folders with the system default application.
+
+### `poly.shell.open(url)`
+
+Opens a URL in the default browser.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `url` | string | The URL to open |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Open website
+await poly.shell.open('https://github.com/OpenChatGit/Poly');
+
+// Open email
+await poly.shell.open('mailto:support@example.com');
+
+// Tel link
+await poly.shell.open('tel:+1234567890');
+```
+
+### `poly.shell.openPath(path)`
+
+Opens a file path or folder with the default application.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Path to file or folder |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Open folder in Explorer/Finder
+const home = await poly.os.homedir();
+await poly.shell.openPath(home);
+
+// Open file with default application
+await poly.shell.openPath('C:\\Users\\User\\Documents\\report.pdf');
+
+// Open downloads folder
+const downloads = await poly.app.getPath('downloads');
+await poly.shell.openPath(downloads);
+```
+
+### `poly.shell.openWith(path, app)`
+
+Opens a file with a specific application.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Path to file |
+| `app` | string | Path to application or application name |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Open file with specific editor
+await poly.shell.openWith('document.txt', 'notepad.exe');
+
+// Open image with specific program
+await poly.shell.openWith('image.png', 'C:\\Program Files\\GIMP\\gimp.exe');
+```
+
+---
+
+## App API
+
+Information about the application and system paths.
+
+### `poly.app.getVersion()`
+
+Returns the Poly version.
+
+**Returns:** `Promise<string>`
+
+```javascript
+const version = await poly.app.getVersion();
+console.log('Poly Version:', version); // "0.2.9"
+```
+
+### `poly.app.getName()`
+
+Returns the application name (from the executable name).
+
+**Returns:** `Promise<string>`
+
+```javascript
+const name = await poly.app.getName();
+console.log('App Name:', name); // "demo-app" or "poly"
+```
+
+### `poly.app.getPath(name)`
+
+Returns system paths.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `name` | string | Path name (see table) |
+
+**Available Paths:**
+
+| Name | Windows | macOS | Linux |
+|------|---------|-------|-------|
+| `exe` | Path to .exe | Path to binary | Path to binary |
+| `home` | `C:\Users\User` | `/Users/user` | `/home/user` |
+| `data` / `appData` | `%APPDATA%` | `~/Library/Application Support` | `~/.local/share` |
+| `config` | `%APPDATA%` | `~/Library/Preferences` | `~/.config` |
+| `cache` | `%LOCALAPPDATA%\Temp` | `~/Library/Caches` | `~/.cache` |
+| `temp` | `%TEMP%` | `/tmp` | `/tmp` |
+| `desktop` | `%USERPROFILE%\Desktop` | `~/Desktop` | `~/Desktop` |
+| `documents` | `%USERPROFILE%\Documents` | `~/Documents` | `~/Documents` |
+| `downloads` | `%USERPROFILE%\Downloads` | `~/Downloads` | `~/Downloads` |
+
+**Returns:** `Promise<string | null>`
+
+```javascript
+// Get all important paths
+const paths = {
+  home: await poly.app.getPath('home'),
+  data: await poly.app.getPath('data'),
+  config: await poly.app.getPath('config'),
+  cache: await poly.app.getPath('cache'),
+  desktop: await poly.app.getPath('desktop'),
+  documents: await poly.app.getPath('documents'),
+  downloads: await poly.app.getPath('downloads'),
+  temp: await poly.app.getPath('temp')
+};
+
+console.log(paths);
+```
+
+### `poly.app.exit(code?)`
+
+Exits the application.
+
+**Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `code` | number | 0 | Exit code (0 = success) |
+
+```javascript
+// Normal exit
+await poly.app.exit();
+
+// Exit with error code
+await poly.app.exit(1);
+```
+
+### `poly.app.relaunch()`
+
+Restarts the application.
+
+```javascript
+// Restart after update
+await poly.app.relaunch();
+```
+
+---
+
+## OS API
+
+Information about the operating system.
+
+### `poly.os.platform()`
+
+Returns the operating system.
+
+**Returns:** `Promise<string>` - `"windows"`, `"macos"`, `"linux"`, or `"unknown"`
+
+```javascript
+const platform = await poly.os.platform();
+
+switch (platform) {
+  case 'windows':
+    console.log('Windows-specific logic');
+    break;
+  case 'macos':
+    console.log('macOS-specific logic');
+    break;
+  case 'linux':
+    console.log('Linux-specific logic');
+    break;
+}
+```
+
+### `poly.os.arch()`
+
+Returns the CPU architecture.
+
+**Returns:** `Promise<string>` - `"x64"`, `"arm64"`, `"x86"`, or `"unknown"`
+
+```javascript
+const arch = await poly.os.arch();
+console.log('Architecture:', arch); // "x64" or "arm64"
+```
+
+### `poly.os.version()`
+
+Returns the OS version.
+
+**Returns:** `Promise<string>`
+
+```javascript
+const version = await poly.os.version();
+console.log('OS Version:', version);
+```
+
+### `poly.os.hostname()`
+
+Returns the computer name.
+
+**Returns:** `Promise<string>`
+
+```javascript
+const hostname = await poly.os.hostname();
+console.log('Computer:', hostname); // "DESKTOP-ABC123"
+```
+
+### `poly.os.homedir()`
+
+Returns the home directory.
+
+**Returns:** `Promise<string>`
+
+```javascript
+const home = await poly.os.homedir();
+console.log('Home:', home); // "C:\\Users\\User" or "/home/user"
+```
+
+### `poly.os.tempdir()`
+
+Returns the temporary directory.
+
+**Returns:** `Promise<string>`
+
+```javascript
+const temp = await poly.os.tempdir();
+console.log('Temp:', temp);
+```
+
+### Complete Example
+
+```javascript
+async function getSystemInfo() {
+  const info = {
+    platform: await poly.os.platform(),
+    arch: await poly.os.arch(),
+    hostname: await poly.os.hostname(),
+    homedir: await poly.os.homedir(),
+    tempdir: await poly.os.tempdir()
+  };
+  
+  console.log('System Information:');
+  console.log(JSON.stringify(info, null, 2));
+  
+  return info;
+}
+```
+
+---
+
+## Clipboard
+
+Read and write the system clipboard.
+
+### `poly.clipboard.read()`
+
+Reads text from the clipboard.
+
+**Returns:** `Promise<string>`
+
+```javascript
+const text = await poly.clipboard.read();
+console.log('Clipboard:', text);
+```
+
+### `poly.clipboard.write(text)`
+
+Writes text to the clipboard.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `text` | string | The text to copy |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+await poly.clipboard.write('Hello World');
+console.log('Text copied!');
+```
+
+### `poly.clipboard.clear()`
+
+Clears the clipboard.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+await poly.clipboard.clear();
+```
+
+### Practical Example
+
+```javascript
+// Copy button implementation
+async function copyToClipboard(text) {
+  try {
+    await poly.clipboard.write(text);
+    await poly.notification.show('Copied!', 'Text has been copied to clipboard.');
+  } catch (e) {
+    await poly.dialog.message('Error', 'Copy failed: ' + e.message, 'error');
+  }
+}
+
+// Paste button implementation
+async function pasteFromClipboard() {
+  const text = await poly.clipboard.read();
+  document.getElementById('input').value = text;
+}
+```
+
+---
+
+## Notifications
+
+Display native operating system notifications.
+
+### `poly.notification.show(title, body, icon?)`
+
+Shows a notification.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `title` | string | Notification title |
+| `body` | string | Message text |
+| `icon` | string | (Optional) Path to icon |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Simple notification
+await poly.notification.show('Download complete', 'Your file has been downloaded');
+
+// With icon
+await poly.notification.show(
+  'New message',
+  'You have received a new message',
+  './assets/icon.png'
+);
+```
+
+### `poly.notification.showWithTimeout(title, body, timeout)`
+
+Shows a notification that automatically dismisses.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `title` | string | Notification title |
+| `body` | string | Message text |
+| `timeout` | number | Auto-dismiss time in milliseconds |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Show notification for 5 seconds
+await poly.notification.showWithTimeout('Saved', 'Changes have been saved', 5000);
+
+// Short confirmation (3 seconds)
+await poly.notification.showWithTimeout('✓', 'Action successful', 3000);
+```
+
+---
+
+## Dialogs
+
+Native file dialogs and custom in-app dialogs.
+
+### Native File Dialogs
+
+#### `poly.dialog.open(options?)`
+
+Opens a file picker dialog.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `title` | string | Dialog title |
+| `filters` | array | File type filters |
+
+**Returns:** `Promise<string | null>` - Selected file path or null if cancelled
+
+```javascript
+// Simple file dialog
+const file = await poly.dialog.open();
+
+// With title and filters
+const image = await poly.dialog.open({
+  title: 'Select Image',
+  filters: [['Images', ['png', 'jpg', 'gif']]]
+});
+
+if (image) {
+  console.log('Selected:', image);
+}
+```
+
+#### `poly.dialog.openMultiple(options?)`
+
+Opens a dialog for multiple files.
+
+**Returns:** `Promise<string[]>` - Array of selected file paths
+
+```javascript
+const files = await poly.dialog.openMultiple({
+  title: 'Select Files'
+});
+
+console.log(`${files.length} files selected`);
+```
+
+#### `poly.dialog.save(options?)`
+
+Opens a save dialog.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `title` | string | Dialog title |
+| `defaultName` | string | Suggested filename |
+| `filters` | array | File type filters |
+
+**Returns:** `Promise<string | null>` - Selected save path or null
+
+```javascript
+const path = await poly.dialog.save({
+  title: 'Save Document',
+  defaultName: 'document.txt'
+});
+
+if (path) {
+  await poly.fs.write(path, documentContent);
+}
+```
+
+#### `poly.dialog.folder(options?)`
+
+Opens a folder picker dialog.
+
+**Returns:** `Promise<string | null>` - Selected folder path or null
+
+```javascript
+const folder = await poly.dialog.folder({
+  title: 'Select Output Folder'
+});
+
+if (folder) {
+  console.log('Folder:', folder);
+}
+```
+
+### In-App Dialogs
+
+Poly also provides beautiful in-app dialogs that match your app's style.
+
+#### `poly.dialog.message(title, message, level?)`
+
+Shows a message dialog.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `title` | string | Dialog title |
+| `message` | string | Message text |
+| `level` | string | `'info'`, `'warning'`, or `'error'` |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Info dialog
+await poly.dialog.message('Success', 'File has been saved!', 'info');
+
+// Warning
+await poly.dialog.message('Warning', 'This action cannot be undone', 'warning');
+
+// Error
+await poly.dialog.message('Error', 'Could not load file', 'error');
+```
+
+#### `poly.dialog.confirm(title, message)`
+
+Shows a confirmation dialog.
+
+**Returns:** `Promise<boolean>` - true if confirmed, false if cancelled
+
+```javascript
+const confirmed = await poly.dialog.confirm(
+  'Delete file?',
+  'Do you really want to delete this file?'
+);
+
+if (confirmed) {
+  // Delete file
+}
+```
+
+#### `poly.dialog.custom(options)`
+
+Shows a fully customizable dialog.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `type` | string | `'info'`, `'warning'`, `'error'`, `'confirm'` |
+| `title` | string | Dialog title |
+| `message` | string | Message text |
+| `buttons` | array | Button definitions |
+
+**Button Definition:**
+| Property | Type | Description |
+|----------|------|-------------|
+| `text` | string | Button text |
+| `value` | any | Return value when clicked |
+| `primary` | boolean | Primary button style |
+
+**Returns:** `Promise<any>` - Button value or null if closed
+
+```javascript
+const result = await poly.dialog.custom({
+  type: 'warning',
+  title: 'Unsaved Changes',
+  message: 'Do you want to save before closing?',
+  buttons: [
+    { text: 'Discard', value: 'discard' },
+    { text: 'Cancel', value: 'cancel' },
+    { text: 'Save', value: 'save', primary: true }
+  ]
+});
+
+switch (result) {
+  case 'save':
+    await saveFile();
+    closeWindow();
+    break;
+  case 'discard':
+    closeWindow();
+    break;
+  case 'cancel':
+    // Do nothing
+    break;
+}
+```
+
+---
+
+## File System
+
+Read and write files.
+
+### `poly.fs.read(path)`
+
+Reads file contents as a string.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Path to file |
+
+**Returns:** `Promise<string>`
+
+```javascript
+// Read text file
+const content = await poly.fs.read('config.json');
+const config = JSON.parse(content);
+
+// Relative paths
+const readme = await poly.fs.read('./README.md');
+
+// Absolute paths
+const home = await poly.os.homedir();
+const notes = await poly.fs.read(`${home}/notes.txt`);
+```
+
+### `poly.fs.write(path, content)`
+
+Writes string content to a file.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Path to file |
+| `content` | string | Content to write |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Save JSON
+const config = { theme: 'dark', language: 'en' };
+await poly.fs.write('config.json', JSON.stringify(config, null, 2));
+
+// Save text
+await poly.fs.write('notes.txt', 'My notes...');
+```
+
+### `poly.fs.exists(path)`
+
+Checks if a file or directory exists.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+if (await poly.fs.exists('config.json')) {
+  const config = JSON.parse(await poly.fs.read('config.json'));
+} else {
+  // Create default config
+  await poly.fs.write('config.json', '{}');
+}
+```
+
+### `poly.fs.readDir(path)`
+
+Lists directory contents.
+
+**Returns:** `Promise<Array<{name, path, isDir}>>`
+
+```javascript
+const entries = await poly.fs.readDir('./documents');
+
+for (const entry of entries) {
+  console.log(`${entry.isDir ? '📁' : '📄'} ${entry.name}`);
+}
+
+// Output:
+// 📁 Projects
+// 📄 notes.txt
+// 📄 todo.md
+```
+
+### Practical Example: Save Settings
+
+```javascript
+const SETTINGS_FILE = 'app-settings.json';
+
+// Load settings
+async function loadSettings() {
+  if (await poly.fs.exists(SETTINGS_FILE)) {
+    const content = await poly.fs.read(SETTINGS_FILE);
+    return JSON.parse(content);
+  }
+  return { theme: 'light', fontSize: 14 }; // Defaults
+}
+
+// Save settings
+async function saveSettings(settings) {
+  await poly.fs.write(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+}
+
+// Usage
+const settings = await loadSettings();
+settings.theme = 'dark';
+await saveSettings(settings);
+```
+
+---
+
+## Deep Links
+
+Register and handle custom URL protocols (e.g., `myapp://action`).
+
+### `poly.deeplink.register(protocol, appName)`
+
+Registers a custom URL protocol in the system registry.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `protocol` | string | Protocol name (e.g., 'myapp' for myapp://) |
+| `appName` | string | Display name for the protocol |
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+// Register myapp:// protocol
+await poly.deeplink.register('myapp', 'My Application');
+
+// Now myapp://anything will open your app
+```
+
+### `poly.deeplink.unregister(protocol)`
+
+Removes a URL protocol from the system registry.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+await poly.deeplink.unregister('myapp');
+```
+
+### `poly.deeplink.isRegistered(protocol)`
+
+Checks if a protocol is registered.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+const registered = await poly.deeplink.isRegistered('myapp');
+if (!registered) {
+  await poly.deeplink.register('myapp', 'My App');
+}
+```
+
+### `poly.deeplink.get()`
+
+Returns the deep link URL that launched the app.
+
+**Returns:** `Promise<string | null>` - The full URL or null
+
+```javascript
+const link = await poly.deeplink.get();
+if (link) {
+  // e.g., myapp://open/document/123
+  const url = new URL(link);
+  console.log(url.pathname); // /open/document/123
+  console.log(url.searchParams.get('id')); // Query parameters
+}
+```
+
+### `poly.deeplink.has()`
+
+Checks if the app was launched via a deep link.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+if (await poly.deeplink.has()) {
+  const link = await poly.deeplink.get();
+  handleDeepLink(link);
+}
+```
+
+### Complete Example
+
+```javascript
+// On app startup
+async function initDeepLinks() {
+  // Register protocol if needed
+  if (!await poly.deeplink.isRegistered('myapp')) {
+    await poly.deeplink.register('myapp', 'My App');
+    console.log('Protocol myapp:// registered');
+  }
+  
+  // Handle deep link if present
+  if (await poly.deeplink.has()) {
+    const link = await poly.deeplink.get();
+    handleDeepLink(link);
+  }
+}
+
+function handleDeepLink(link) {
+  // myapp://action/param1/param2?key=value
+  const url = new URL(link);
+  
+  switch (url.pathname) {
+    case '/open':
+      const docId = url.searchParams.get('id');
+      openDocument(docId);
+      break;
+      
+    case '/settings':
+      showSettings();
+      break;
+      
+    case '/share':
+      const data = url.searchParams.get('data');
+      handleShare(data);
+      break;
+      
+    default:
+      console.log('Unknown deep link:', link);
+  }
+}
+
+// Example URLs:
+// myapp://open?id=123
+// myapp://settings
+// myapp://share?data=hello
+```
+
+---
+
+## System Tray
+
+Display an icon in the system tray with a context menu. Configuration is done in `poly.toml`.
 
 ### Configuration
 
 ```toml
-[window]
-single_instance = true
+[tray]
+enabled = true
+tooltip = "My App"
+minimize_to_tray = false  # Minimize button hides to tray
+close_to_tray = true      # Close button hides to tray instead of exiting
+
+[[tray.menu]]
+id = "show"
+label = "Show Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "settings"
+label = "Settings"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
 ```
 
-When a second instance is launched:
-- It detects the existing instance via a lock file
-- Exits immediately with a message
-- The first instance continues running
+### Special Menu IDs
 
-This is useful for apps that should only have one window open at a time, like system utilities or tray apps.
+| ID | Behavior |
+|----|----------|
+| `show` | Shows and focuses the window |
+| `quit` or `exit` | Exits the application |
+| `separator` | Adds a separator line |
+
+All other IDs trigger a `polytray` event that you can handle in JavaScript.
+
+### `poly.tray.onMenuClick(callback)`
+
+Listens for clicks on custom tray menu items.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `callback` | function | Callback with the menu ID |
+
+```javascript
+poly.tray.onMenuClick((id) => {
+  switch (id) {
+    case 'settings':
+      openSettingsWindow();
+      break;
+    case 'about':
+      showAboutDialog();
+      break;
+    case 'check-updates':
+      checkForUpdates();
+      break;
+  }
+});
+```
+
+### `poly.tray.isEnabled()`
+
+Checks if the system tray is enabled.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+if (await poly.tray.isEnabled()) {
+  console.log('Tray is active');
+}
+```
+
+### Tray Behavior
+
+- **`close_to_tray = true`**: Clicking the close button hides the window to tray instead of exiting the app
+- **`minimize_to_tray = true`**: Clicking minimize hides to tray instead of minimizing
+- **Tray icon click**: Shows and focuses the window
+- **Icon**: Uses `assets/icon.png` if available
+
+### Complete Example
+
+```toml
+# poly.toml
+[package]
+name = "My App"
+version = "1.0.0"
+
+[window]
+width = 1024
+height = 768
+
+[tray]
+enabled = true
+tooltip = "My App - Running in background"
+close_to_tray = true
+minimize_to_tray = false
+
+[[tray.menu]]
+id = "show"
+label = "Open Window"
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "pause"
+label = "Pause"
+
+[[tray.menu]]
+id = "settings"
+label = "Settings..."
+
+[[tray.menu]]
+id = "separator"
+
+[[tray.menu]]
+id = "quit"
+label = "Exit"
+```
+
+```javascript
+// JavaScript
+let isPaused = false;
+
+poly.tray.onMenuClick((id) => {
+  switch (id) {
+    case 'pause':
+      isPaused = !isPaused;
+      updateTrayMenu();
+      break;
+    case 'settings':
+      poly.windows.create({
+        title: 'Settings',
+        width: 500,
+        height: 400,
+        url: 'settings.html'
+      });
+      break;
+  }
+});
+```
+
+---
+
+## Auto-Updater
+
+Check for updates and install them from GitHub Releases.
+
+### `poly.updater.checkGithub(repo, currentVersion)`
+
+Checks GitHub for new releases.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `repo` | string | GitHub repository (e.g., 'user/repo') |
+| `currentVersion` | string | Current app version |
+
+**Returns:**
+```javascript
+{
+  update_available: boolean,
+  latest_version: string,
+  current_version: string,
+  download_url: string | null,
+  release_notes: string | null
+}
+```
+
+```javascript
+const info = await poly.updater.checkGithub('OpenChatGit/Poly', '0.2.6');
+
+if (info.update_available) {
+  console.log('New version available:', info.latest_version);
+  console.log('Release Notes:', info.release_notes);
+}
+```
+
+### `poly.updater.checkUrl(url, currentVersion)`
+
+Checks a custom URL for updates.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `url` | string | URL to update info JSON |
+| `currentVersion` | string | Current app version |
+
+```javascript
+// Custom update server
+const info = await poly.updater.checkUrl(
+  'https://myapp.com/updates/latest.json',
+  '1.0.0'
+);
+```
+
+### `poly.updater.download(url)`
+
+Downloads an update file.
+
+**Returns:** `Promise<string>` - Path to downloaded file
+
+```javascript
+const path = await poly.updater.download(info.download_url);
+console.log('Downloaded to:', path);
+```
+
+### `poly.updater.install(path)`
+
+Installs a downloaded update.
+
+```javascript
+await poly.updater.install(path);
+// App will restart
+```
+
+### `poly.updater.checkAndPrompt(options)`
+
+Convenience method: Checks, prompts user, downloads, and installs.
+
+**Parameters:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `repo` | string | GitHub repository |
+| `currentVersion` | string | Current version |
+
+```javascript
+// Simplest usage
+await poly.updater.checkAndPrompt({
+  repo: 'myuser/myapp',
+  currentVersion: '1.0.0'
+});
+```
+
+### Complete Update Example
+
+```javascript
+async function checkForUpdates() {
+  const currentVersion = await poly.app.getVersion();
+  
+  try {
+    const info = await poly.updater.checkGithub('myuser/myapp', currentVersion);
+    
+    if (info.update_available) {
+      // Ask user
+      const shouldUpdate = await poly.dialog.confirm(
+        'Update Available',
+        `Version ${info.latest_version} is available.\n\n` +
+        `Current version: ${currentVersion}\n\n` +
+        `${info.release_notes || ''}\n\n` +
+        `Download and install now?`
+      );
+      
+      if (shouldUpdate) {
+        await poly.notification.show('Update', 'Download starting...');
+        
+        const downloadPath = await poly.updater.download(info.download_url);
+        
+        await poly.notification.show('Update', 'Installing...');
+        await poly.updater.install(downloadPath);
+        // App restarts automatically
+      }
+    } else {
+      await poly.dialog.message(
+        'No Update',
+        `You are already on the latest version (${currentVersion}).`,
+        'info'
+      );
+    }
+  } catch (e) {
+    await poly.dialog.message(
+      'Update Error',
+      'Could not check for updates: ' + e.message,
+      'error'
+    );
+  }
+}
+```
+
+---
+
+## AI/LLM Integration
+
+Built-in support for AI chat APIs.
+
+### `poly.ai.ollama(model, messages)`
+
+Chat with local Ollama.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model name (e.g., 'llama3', 'codellama') |
+| `messages` | array | Chat messages |
+
+```javascript
+const response = await poly.ai.ollama('llama3', [
+  { role: 'user', content: 'Explain recursion in one sentence.' }
+]);
+
+console.log(response.content);
+```
+
+### `poly.ai.openai(model, messages, apiKey)`
+
+Chat with OpenAI.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model name (e.g., 'gpt-4', 'gpt-3.5-turbo') |
+| `messages` | array | Chat messages |
+| `apiKey` | string | OpenAI API key |
+
+```javascript
+const response = await poly.ai.openai('gpt-4', [
+  { role: 'system', content: 'You are a helpful assistant.' },
+  { role: 'user', content: 'What is the capital of Germany?' }
+], 'sk-your-api-key');
+
+console.log(response.content);
+```
+
+### `poly.ai.anthropic(model, messages, apiKey, options?)`
+
+Chat with Anthropic Claude.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `model` | string | Model name (e.g., 'claude-3-5-sonnet-20241022') |
+| `messages` | array | Chat messages |
+| `apiKey` | string | Anthropic API key |
+| `options` | object | Optional settings |
+
+**Options:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `enableThinking` | boolean | Enable extended thinking |
+| `thinkingBudget` | number | Token budget for thinking |
+
+```javascript
+const response = await poly.ai.anthropic(
+  'claude-3-5-sonnet-20241022',
+  [{ role: 'user', content: 'Explain quantum computing' }],
+  'your-api-key',
+  { enableThinking: true, thinkingBudget: 10000 }
+);
+
+console.log(response.thinking); // Thinking process
+console.log(response.content);  // Final answer
+```
+
+### `poly.ai.custom(baseUrl, model, messages)`
+
+Chat with OpenAI-compatible APIs (LM Studio, LocalAI, etc).
+
+```javascript
+const response = await poly.ai.custom(
+  'http://localhost:1234/v1',
+  'local-model',
+  [{ role: 'user', content: 'Hello!' }]
+);
+```
+
+### `poly.ai.checkOllama()`
+
+Checks if Ollama is running.
+
+**Returns:** `Promise<boolean>`
+
+```javascript
+if (await poly.ai.checkOllama()) {
+  console.log('Ollama is available');
+}
+```
+
+### `poly.ai.listModels()`
+
+Lists available Ollama models.
+
+**Returns:** `Promise<string[]>`
+
+```javascript
+const models = await poly.ai.listModels();
+console.log('Available models:', models);
+// ['llama3', 'codellama', 'mistral']
+```
+
+---
+
+## IPC (Backend Functions)
+
+Call functions defined in `main.poly`.
+
+### `poly.invoke(functionName, args?)`
+
+Calls a backend function.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `functionName` | string | Function name |
+| `args` | object | Arguments as object |
+
+```poly
+// In main.poly:
+fn greet(name) {
+  return "Hello, " + name + "!"
+}
+
+fn calculate(a, b) {
+  return a + b
+}
+
+fn getUser(id) {
+  // Simulate database query
+  return {
+    "id": id,
+    "name": "John Doe",
+    "email": "john@example.com"
+  }
+}
+```
+
+```javascript
+// In JavaScript:
+const greeting = await poly.invoke('greet', { name: 'World' });
+console.log(greeting); // "Hello, World!"
+
+const sum = await poly.invoke('calculate', { a: 5, b: 3 });
+console.log(sum); // 8
+
+const user = await poly.invoke('getUser', { id: 123 });
+console.log(user.name); // "John Doe"
+```
+
+### Stateful Interpreter
+
+The Poly interpreter maintains its state between calls:
+
+```poly
+// main.poly
+let counter = 0
+
+fn increment() {
+  counter = counter + 1
+  return counter
+}
+
+fn getCounter() {
+  return counter
+}
+```
+
+```javascript
+await poly.invoke('increment'); // 1
+await poly.invoke('increment'); // 2
+await poly.invoke('increment'); // 3
+const count = await poly.invoke('getCounter'); // 3
+```
+
+---
+
+## Configuration (poly.toml)
+
+Complete reference for all configuration options.
+
+### Basic Structure
+
+```toml
+[package]
+name = "My App"
+version = "1.0.0"
+description = "An awesome app"
+author = "Your Name"
+
+[window]
+width = 1024
+height = 768
+decorations = true
+resizable = true
+transparent = false
+single_instance = false
+
+[dev]
+port = 3000
+
+[tray]
+enabled = false
+tooltip = "My App"
+minimize_to_tray = false
+close_to_tray = false
+
+[signing.windows]
+certificate = "path/to/cert.pfx"
+timestamp_url = "http://timestamp.digicert.com"
+
+[signing.macos]
+identity = "Developer ID Application: Name (TEAMID)"
+team_id = "YOURTEAMID"
+
+[dependencies]
+alpinejs = "3.14.3"
+lodash = "4.17.21"
+```
+
+### [package] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `name` | string | Folder name | App name |
+| `version` | string | "1.0.0" | App version |
+| `description` | string | - | Description |
+| `author` | string | - | Author |
+
+### [window] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `width` | number | 1024 | Window width |
+| `height` | number | 768 | Window height |
+| `decorations` | boolean | true | Show native titlebar |
+| `resizable` | boolean | true | Allow resizing |
+| `transparent` | boolean | false | Transparent background |
+| `single_instance` | boolean | false | Allow only one instance |
+
+### [dev] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `port` | number | 0 (auto) | Port for dev server |
+
+### [tray] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | false | Enable system tray |
+| `tooltip` | string | App name | Tooltip on hover |
+| `minimize_to_tray` | boolean | false | Minimize to tray |
+| `close_to_tray` | boolean | false | Close to tray |
+
+### [[tray.menu]] Entries
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `id` | string | Unique ID (or 'show', 'quit', 'separator') |
+| `label` | string | Displayed text |
+
+### [signing.windows] Section
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `certificate` | string | Path to .pfx file |
+| `timestamp_url` | string | Timestamp server URL |
+
+### [signing.macos] Section
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `identity` | string | Signing identity |
+| `entitlements` | string | Path to entitlements.plist |
+| `team_id` | string | Team ID for notarization |
+
+### [dependencies] Section
+
+NPM packages with versions:
+
+```toml
+[dependencies]
+alpinejs = "3.14.3"
+lodash = "4.17.21"
+chart.js = "4.4.1"
+```
 
 ---
 
@@ -218,7 +1696,7 @@ This is useful for apps that should only have one window open at a time, like sy
 
 Build your Poly app into a standalone executable.
 
-### Basic Build
+### Basic Commands
 
 ```bash
 # Development build
@@ -227,7 +1705,7 @@ poly build demo-app
 # Release build (optimized, no console window)
 poly build --release demo-app
 
-# Build for specific platform
+# For specific platform
 poly build --release --target windows demo-app
 poly build --release --target macos demo-app
 poly build --release --target linux demo-app
@@ -237,18 +1715,21 @@ poly build --release --sign demo-app
 
 # Create installer
 poly build --release --installer demo-app
+
+# Generate GitHub Actions workflow
+poly build --ci demo-app
 ```
 
 ### Target Platforms
 
-| Target | Alias | Description |
-|--------|-------|-------------|
+| Target | Aliases | Description |
+|--------|---------|-------------|
 | `current` | - | Build for current OS (default) |
 | `windows` | `win`, `win64` | Windows x64 |
 | `macos` | `mac`, `darwin`, `osx` | macOS x64 |
 | `linux` | - | Linux x64 |
 
-Note: Cross-compilation (e.g., building Windows on macOS) requires building on the target platform or using GitHub Actions.
+> **Note:** Cross-compilation (e.g., building Windows on macOS) requires building on the target platform or using GitHub Actions.
 
 ### Build Output
 
@@ -269,17 +1750,7 @@ Built apps automatically run as GUI applications without a console window. This 
 - Building with the `gui` feature which sets the Windows subsystem to "windows"
 - The executable detects the `bundle/` folder and runs as a native app
 
-### Cross-Platform Builds
-
-For building on multiple platforms, use GitHub Actions:
-
-```bash
-poly build --ci
-```
-
-This generates `.github/workflows/build.yml` that builds for Windows, macOS, and Linux automatically.
-
-### Build Features
+### Build Flags
 
 | Flag | Description |
 |------|-------------|
@@ -288,6 +1759,14 @@ This generates `.github/workflows/build.yml` that builds for Windows, macOS, and
 | `--sign` | Sign executable (requires certificate) |
 | `--installer` | Create installer/package |
 | `--ci` | Generate GitHub Actions workflow |
+
+### Cross-Platform Builds with GitHub Actions
+
+```bash
+poly build --ci demo-app
+```
+
+This generates `.github/workflows/build.yml` that automatically builds for Windows, macOS, and Linux.
 
 ---
 
@@ -298,22 +1777,20 @@ Sign your executables to avoid security warnings on Windows and macOS.
 ### Usage
 
 ```bash
-poly build --release --sign
+poly build --release --sign demo-app
 ```
 
-### Configuration
-
-Configure signing in `poly.toml` or via environment variables:
+### Configuration in poly.toml
 
 ```toml
 [signing.windows]
 certificate = "path/to/certificate.pfx"
-timestamp_url = "http://timestamp.digicert.com"  # optional
+timestamp_url = "http://timestamp.digicert.com"
 
 [signing.macos]
 identity = "Developer ID Application: Your Name (TEAMID)"
-entitlements = "entitlements.plist"  # optional
-team_id = "YOURTEAMID"  # for notarization
+entitlements = "entitlements.plist"
+team_id = "YOURTEAMID"
 ```
 
 ### Environment Variables
@@ -344,680 +1821,1073 @@ For CI/CD, use environment variables instead of storing secrets in poly.toml:
 
 ---
 
-## System Tray
+## Single Instance
 
-Display an icon in the system tray with a context menu. Configure in `poly.toml`.
+Prevent multiple instances of your app from running simultaneously.
 
 ### Configuration
 
 ```toml
-[tray]
-enabled = true
-tooltip = "My App"
-minimize_to_tray = false  # Minimize button hides to tray
-close_to_tray = true      # Close button hides to tray instead of exiting
-
-[[tray.menu]]
-id = "show"
-label = "Show Window"
-
-[[tray.menu]]
-id = "separator"
-
-[[tray.menu]]
-id = "settings"
-label = "Settings"
-
-[[tray.menu]]
-id = "quit"
-label = "Exit"
+[window]
+single_instance = true
 ```
 
-### Special Menu IDs
+### Behavior
 
-| ID | Behavior |
-|----|----------|
-| `show` | Shows and focuses the window |
-| `quit` or `exit` | Exits the application |
-| `separator` | Adds a separator line |
+When a second instance is launched:
+- It detects the existing instance via a lock file
+- Exits immediately with a message
+- The first instance continues running
 
-Any other ID will trigger a `polytray` event that you can handle in JavaScript.
-
-### `poly.tray.onMenuClick(callback)`
-
-Listen for custom tray menu clicks.
-
-```javascript
-poly.tray.onMenuClick((id) => {
-  switch (id) {
-    case 'settings':
-      openSettings();
-      break;
-    case 'about':
-      showAbout();
-      break;
-  }
-});
-```
-
-### `poly.tray.isEnabled()`
-
-Check if system tray is enabled.
-
-**Returns:** `Promise<boolean>`
-
-```javascript
-if (await poly.tray.isEnabled()) {
-  console.log('Tray is active');
-}
-```
-
-### Tray Behavior
-
-- When `close_to_tray = true`: Clicking the window close button hides the window to tray instead of exiting
-- When `minimize_to_tray = true`: Clicking minimize hides to tray instead of minimizing
-- Clicking the tray icon shows and focuses the window
-- The tray icon uses the app icon from `assets/icon.png` if available
+This is useful for apps that should only have one window, like system utilities or tray apps.
 
 ---
 
-## Clipboard
+## Dev Server Configuration
 
-Read and write system clipboard.
+Configure the development server in `poly.toml`:
 
-### `poly.clipboard.read()`
-
-Read text from clipboard.
-
-```javascript
-const text = await poly.clipboard.read();
-console.log(text);
+```toml
+[dev]
+port = 3000  # Custom port (default: auto-find free port)
 ```
 
-### `poly.clipboard.write(text)`
+If `port = 0` or not specified, Poly will automatically find a free port.
 
-Write text to clipboard.
+---
 
-```javascript
-await poly.clipboard.write('Hello World');
+## Project Structure
+
 ```
-
-### `poly.clipboard.clear()`
-
-Clear clipboard contents.
-
-```javascript
-await poly.clipboard.clear();
+my-app/
+├── poly.toml        # Configuration
+├── poly.lock        # Package lockfile
+├── packages/        # NPM packages
+├── src/
+│   └── main.poly    # Backend logic (optional)
+├── web/
+│   ├── index.html   # Your app
+│   ├── app.js       # JavaScript
+│   └── styles.css   # Styles
+└── assets/
+    └── icon.png     # App icon (for tray and taskbar)
 ```
 
 ---
 
-## Notifications
+## Package Manager
 
-Display native OS notifications.
+```bash
+# Add package
+poly add alpinejs
 
-### `poly.notification.show(title, body, icon?)`
+# Specific version
+poly add lodash -v 4.17.21
 
-Show a notification.
+# Remove package
+poly remove lodash
 
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `title` | string | Notification title |
-| `body` | string | Notification message |
-| `icon` | string | (Optional) Path to icon |
+# Install packages from lockfile
+poly install
 
-```javascript
-await poly.notification.show('Download Complete', 'Your file has been downloaded');
-
-// With icon
-await poly.notification.show('New Message', 'You have a new message', './assets/icon.png');
+# Verify hashes
+poly install --verify
 ```
 
-### `poly.notification.showWithTimeout(title, body, timeout)`
+Packages are stored in `packages/` and can be loaded via `/packages/` in the browser:
 
-Show a notification that auto-dismisses.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `title` | string | Notification title |
-| `body` | string | Notification message |
-| `timeout` | number | Auto-dismiss time in milliseconds |
-
-```javascript
-// Show notification for 5 seconds
-await poly.notification.showWithTimeout('Saved', 'Your changes have been saved', 5000);
+```html
+<script src="/packages/alpinejs/dist/cdn.min.js"></script>
 ```
 
 ---
 
-## Deep Links
+## Browser Mode
 
-Register and handle custom URL protocols (e.g., `myapp://action`).
+Poly provides a built-in browser mode for creating browser-like applications with a custom UI and separate content WebView. This is the recommended way to build browsers with Poly.
 
-### `poly.deeplink.register(protocol, appName)`
+### Quick Start
 
-Register a custom URL protocol in the system registry.
+```bash
+# Run browser mode with custom UI
+poly browser https://google.com --ui-html path/to/ui.html
 
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `protocol` | string | Protocol name (e.g., 'myapp' for myapp://) |
-| `appName` | string | Display name for the protocol |
+# With custom window size
+poly browser https://example.com --width 1400 --height 900 --ui-html ui.html
 
-```javascript
-// Register myapp:// protocol
-await poly.deeplink.register('myapp', 'My Application');
-
-// Now myapp://anything will open your app
+# Custom UI height (default: 80px)
+poly browser https://google.com --ui-height 100 --ui-html ui.html
 ```
 
-### `poly.deeplink.unregister(protocol)`
+### Command Options
 
-Remove a custom URL protocol from the system registry.
+| Option | Default | Description |
+|--------|---------|-------------|
+| `url` | about:blank | Start URL for content area |
+| `--title` | "Poly Browser" | Window title |
+| `--width` | 1024 | Window width |
+| `--height` | 768 | Window height |
+| `--ui-height` | 80 | Height of UI area in pixels |
+| `--ui-html` | - | Path to custom UI HTML file |
 
-```javascript
-await poly.deeplink.unregister('myapp');
+### Architecture
+
+Browser mode creates a frameless window with two WebViews:
+
+1. **Content WebView** - Displays web pages (bottom layer)
+2. **UI WebView** - Your custom browser UI (top layer, fixed height)
+
+```
+┌─────────────────────────────────────┐
+│  UI WebView (titlebar + toolbar)    │  ← ui-height (80px)
+├─────────────────────────────────────┤
+│                                     │
+│         Content WebView             │  ← Remaining height
+│         (web pages)                 │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
-### `poly.deeplink.isRegistered(protocol)`
+### UI HTML Requirements
 
-Check if a protocol is registered.
+Your UI HTML must use `window.ipc.postMessage()` to communicate with the native layer:
 
-**Returns:** `boolean`
+**IPC Commands:**
 
-```javascript
-const registered = await poly.deeplink.isRegistered('myapp');
-if (!registered) {
-  await poly.deeplink.register('myapp', 'My App');
-}
-```
+| Command | Description |
+|---------|-------------|
+| `navigate:URL` | Navigate content WebView to URL |
+| `minimize` | Minimize window |
+| `maximize` | Toggle maximize |
+| `close` | Close window |
+| `drag` | Start window drag (call on mousedown) |
 
-### `poly.deeplink.get()`
+### Event Callbacks
 
-Get the deep link URL that launched the app.
+The native layer calls these functions on your UI when events occur:
 
-**Returns:** `string | null` - The full URL or null if not launched via deep link
+| Function | Parameters | Description |
+|----------|------------|-------------|
+| `window.onNavStart(url)` | URL string | Navigation started |
+| `window.onLoadEnd(url)` | URL string | Page finished loading |
+| `window.onTitleChange(title)` | Title string | Page title changed |
 
-```javascript
-const link = await poly.deeplink.get();
-if (link) {
-  // Parse and handle the deep link
-  // e.g., myapp://open/document/123
-  const url = new URL(link);
-  console.log(url.pathname); // /open/document/123
-}
-```
+### Complete UI Example
 
-### `poly.deeplink.has()`
-
-Check if the app was launched via a deep link.
-
-**Returns:** `boolean`
-
-```javascript
-if (await poly.deeplink.has()) {
-  const link = await poly.deeplink.get();
-  handleDeepLink(link);
-}
-```
-
-### Deep Link Example
-
-```javascript
-// On app startup
-async function init() {
-  // Register protocol if not already
-  if (!await poly.deeplink.isRegistered('myapp')) {
-    await poly.deeplink.register('myapp', 'My App');
-  }
-  
-  // Handle deep link if launched with one
-  if (await poly.deeplink.has()) {
-    const link = await poly.deeplink.get();
-    // myapp://action/param1/param2
-    const url = new URL(link);
-    
-    switch (url.pathname) {
-      case '/open':
-        openDocument(url.searchParams.get('id'));
-        break;
-      case '/settings':
-        showSettings();
-        break;
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    body { 
+      font-family: 'Segoe UI', system-ui, sans-serif; 
+      background: #1a1a1f; 
+      color: #fff;
+      display: flex;
+      flex-direction: column;
     }
-  }
-}
+    
+    /* Titlebar - draggable */
+    .titlebar {
+      height: 32px;
+      background: #0f0f12;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      -webkit-app-region: drag;
+    }
+    
+    .titlebar-title { font-size: 12px; color: #888; }
+    
+    /* Window controls - not draggable */
+    .window-controls {
+      display: flex;
+      -webkit-app-region: no-drag;
+    }
+    
+    .win-btn {
+      width: 46px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+    }
+    .win-btn:hover { background: #333; color: #fff; }
+    .win-btn.close:hover { background: #e81123; }
+    
+    /* Toolbar */
+    .toolbar {
+      height: 48px;
+      background: #18181b;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      gap: 4px;
+    }
+    
+    .nav-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: transparent;
+      color: #888;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .nav-btn:hover { background: #333; color: #fff; }
+    
+    .url-input {
+      flex: 1;
+      height: 32px;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 8px;
+      padding: 0 12px;
+      color: #fff;
+      font-size: 13px;
+    }
+    .url-input:focus { border-color: #22d3ee; outline: none; }
+    
+    /* Loading bar */
+    .loading { 
+      height: 2px; 
+      background: #22d3ee; 
+      width: 0; 
+      transition: width 0.3s; 
+    }
+    .loading.active { width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <span class="titlebar-title" id="title">Poly Browser</span>
+    <div class="window-controls">
+      <button class="win-btn" onclick="window.ipc.postMessage('minimize')">─</button>
+      <button class="win-btn" onclick="window.ipc.postMessage('maximize')">□</button>
+      <button class="win-btn close" onclick="window.ipc.postMessage('close')">✕</button>
+    </div>
+  </div>
+  
+  <div class="toolbar">
+    <button class="nav-btn" onclick="goBack()">←</button>
+    <button class="nav-btn" onclick="goForward()">→</button>
+    <button class="nav-btn" onclick="reload()">↻</button>
+    <input type="text" class="url-input" id="url" 
+           placeholder="Enter URL or search" 
+           onkeydown="if(event.key==='Enter')navigate()">
+    <button class="nav-btn" onclick="goHome()">🏠</button>
+  </div>
+  
+  <div class="loading" id="loading"></div>
+
+  <script>
+    const urlInput = document.getElementById('url');
+    const loading = document.getElementById('loading');
+    const title = document.getElementById('title');
+    let currentUrl = '';
+    
+    // Event callbacks from native
+    window.onNavStart = function(url) {
+      currentUrl = url;
+      urlInput.value = url;
+      loading.classList.add('active');
+    };
+    
+    window.onLoadEnd = function(url) {
+      loading.classList.remove('active');
+    };
+    
+    window.onTitleChange = function(newTitle) {
+      title.textContent = newTitle || 'Poly Browser';
+    };
+    
+    // Navigation functions
+    function navigate() {
+      let url = urlInput.value.trim();
+      if (!url) return;
+      
+      // Add https:// if missing
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        // Check if it's a search query
+        if (!url.includes('.')) {
+          url = 'https://google.com/search?q=' + encodeURIComponent(url);
+        } else {
+          url = 'https://' + url;
+        }
+      }
+      
+      urlInput.value = url;
+      window.ipc.postMessage('navigate:' + url);
+    }
+    
+    function goBack() {
+      window.ipc.postMessage('navigate:javascript:history.back()');
+    }
+    
+    function goForward() {
+      window.ipc.postMessage('navigate:javascript:history.forward()');
+    }
+    
+    function reload() {
+      if (currentUrl) {
+        window.ipc.postMessage('navigate:' + currentUrl);
+      }
+    }
+    
+    function goHome() {
+      urlInput.value = 'https://google.com';
+      navigate();
+    }
+  </script>
+</body>
+</html>
 ```
+
+### Example: Minimal Browser
+
+Create a file `browser-ui.html` with the UI above, then run:
+
+```bash
+poly browser https://google.com --ui-html browser-ui.html
+```
+
+### Tips
+
+1. **Z-Order on Windows**: Content WebView is created first (bottom), UI WebView second (top)
+2. **Dragging**: Use `-webkit-app-region: drag` on titlebar, `no-drag` on buttons
+3. **Search**: Check if input contains `.` to distinguish URLs from search queries
+4. **Loading State**: Use `onNavStart` to show loading, `onLoadEnd` to hide
+5. **Title Updates**: `onTitleChange` fires when page title changes
 
 ---
 
-## Dialogs
+*Documentation for Poly v0.2.9*
 
-Native file dialogs and custom in-app dialogs.
-
-### `poly.dialog.open(options?)`
-
-Open file picker dialog.
-
-**Parameters:**
-| Option | Type | Description |
-|--------|------|-------------|
-| `title` | string | Dialog title |
-| `filters` | array | File type filters |
-
-**Returns:** `string | null` - Selected file path or null if cancelled
-
-```javascript
-const file = await poly.dialog.open({
-  title: 'Select Image',
-  filters: [['Images', ['png', 'jpg', 'gif']]]
-});
-
-if (file) {
-  console.log('Selected:', file);
-}
-```
-
-### `poly.dialog.openMultiple(options?)`
-
-Open file picker for multiple files.
-
-**Returns:** `string[]` - Array of selected file paths
-
-```javascript
-const files = await poly.dialog.openMultiple({
-  title: 'Select Files'
-});
-```
-
-### `poly.dialog.save(options?)`
-
-Open save file dialog.
-
-**Parameters:**
-| Option | Type | Description |
-|--------|------|-------------|
-| `title` | string | Dialog title |
-| `defaultName` | string | Default filename |
-| `filters` | array | File type filters |
-
-**Returns:** `string | null` - Selected save path or null
-
-```javascript
-const path = await poly.dialog.save({
-  title: 'Save Document',
-  defaultName: 'document.txt'
-});
-```
-
-### `poly.dialog.folder(options?)`
-
-Open folder picker dialog.
-
-**Returns:** `string | null` - Selected folder path or null
-
-```javascript
-const folder = await poly.dialog.folder({
-  title: 'Select Output Folder'
-});
-```
-
-### `poly.dialog.message(title, message, level?)`
-
-Show a message dialog.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `title` | string | Dialog title |
-| `message` | string | Message content |
-| `level` | string | 'info', 'warning', or 'error' |
-
-```javascript
-await poly.dialog.message('Success', 'File saved successfully!', 'info');
-await poly.dialog.message('Warning', 'This action cannot be undone', 'warning');
-await poly.dialog.message('Error', 'Failed to save file', 'error');
-```
-
-### `poly.dialog.confirm(title, message)`
-
-Show a confirmation dialog.
-
-**Returns:** `boolean` - true if confirmed, false if cancelled
-
-```javascript
-const confirmed = await poly.dialog.confirm(
-  'Delete File?',
-  'Are you sure you want to delete this file?'
-);
-
-if (confirmed) {
-  // Delete the file
-}
-```
-
-### `poly.dialog.custom(options)`
-
-Show a fully custom dialog.
-
-**Parameters:**
-| Option | Type | Description |
-|--------|------|-------------|
-| `type` | string | 'info', 'warning', 'error', 'confirm' |
-| `title` | string | Dialog title |
-| `message` | string | Message content |
-| `buttons` | array | Button definitions |
-
-**Button definition:**
-| Property | Type | Description |
-|----------|------|-------------|
-| `text` | string | Button label |
-| `value` | any | Return value when clicked |
-| `primary` | boolean | Primary button styling |
-
-**Returns:** Button value or null if dismissed
-
-```javascript
-const result = await poly.dialog.custom({
-  type: 'warning',
-  title: 'Unsaved Changes',
-  message: 'Do you want to save before closing?',
-  buttons: [
-    { text: 'Discard', value: 'discard' },
-    { text: 'Cancel', value: 'cancel' },
-    { text: 'Save', value: 'save', primary: true }
-  ]
-});
-
-switch (result) {
-  case 'save': await saveFile(); break;
-  case 'discard': closeWithoutSaving(); break;
-  case 'cancel': /* do nothing */ break;
-}
-```
 
 ---
 
-## File System
+## WebView API
 
-Read and write files.
+The WebView API allows creating and managing multiple WebViews within a window. This is the core API for building browser-like applications with Poly.
 
-### `poly.fs.read(path)`
+> **Note:** On Windows/WebView2, newly created WebViews appear on top of existing ones. Create content WebViews first, then UI WebViews.
 
-Read file contents as string.
+### Creating WebViews
 
-```javascript
-const content = await poly.fs.read('config.json');
-const config = JSON.parse(content);
-```
+#### `poly.webview.create(id, options)`
 
-### `poly.fs.write(path, content)`
-
-Write string content to file.
-
-```javascript
-await poly.fs.write('config.json', JSON.stringify(config, null, 2));
-```
-
-### `poly.fs.exists(path)`
-
-Check if file or directory exists.
-
-**Returns:** `boolean`
-
-```javascript
-if (await poly.fs.exists('config.json')) {
-  // Load config
-}
-```
-
-### `poly.fs.readDir(path)`
-
-List directory contents.
-
-**Returns:** `string[]` - Array of filenames
-
-```javascript
-const files = await poly.fs.readDir('./documents');
-```
-
----
-
-## Auto-Updater
-
-Check for and install updates from GitHub Releases.
-
-### `poly.updater.checkGithub(repo, currentVersion)`
-
-Check GitHub for updates.
+Creates a new WebView within the current window.
 
 **Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `repo` | string | GitHub repo (e.g., 'user/repo') |
-| `currentVersion` | string | Current app version |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | string | required | Unique identifier for the WebView |
+| `url` | string | "about:blank" | Initial URL to load |
+| `html` | string | - | HTML content (alternative to url) |
+| `x` | number | 0 | X position in pixels |
+| `y` | number | 0 | Y position in pixels |
+| `width` | number | 800 | Width in pixels |
+| `height` | number | 600 | Height in pixels |
+| `visible` | boolean | true | Whether WebView is visible |
+| `transparent` | boolean | false | Transparent background |
+| `devtools` | boolean | false | Enable DevTools |
+| `userAgent` | string | - | Custom user agent string |
+| `zoomLevel` | number | 1.0 | Initial zoom level (1.0 = 100%) |
+| `autoplay` | boolean | true | Allow media autoplay |
+
+**Returns:** `Promise<{success: boolean, id: string} | {error: string}>`
+
+```javascript
+// Create a content WebView
+const result = await poly.webview.create('content', {
+  url: 'https://example.com',
+  x: 0,
+  y: 80,
+  width: 1200,
+  height: 720,
+  devtools: true
+});
+```
+
+#### `poly.webview.destroy(id)`
+
+Removes a WebView.
+
+```javascript
+await poly.webview.destroy('content');
+```
+
+### Navigation
+
+#### `poly.webview.navigate(id, url)`
+
+Navigates a WebView to a URL.
+
+```javascript
+await poly.webview.navigate('content', 'https://google.com');
+```
+
+#### `poly.webview.loadHtml(id, html)`
+
+Loads HTML content directly into a WebView.
+
+```javascript
+await poly.webview.loadHtml('content', '<h1>Hello World</h1>');
+```
+
+#### `poly.webview.goBack(id)`
+
+Navigates back in history.
+
+```javascript
+await poly.webview.goBack('content');
+```
+
+#### `poly.webview.goForward(id)`
+
+Navigates forward in history.
+
+```javascript
+await poly.webview.goForward('content');
+```
+
+#### `poly.webview.reload(id)`
+
+Reloads the current page.
+
+```javascript
+await poly.webview.reload('content');
+```
+
+#### `poly.webview.stop(id)`
+
+Stops loading the current page.
+
+```javascript
+await poly.webview.stop('content');
+```
+
+### Display & Layout
+
+#### `poly.webview.setBounds(id, bounds)`
+
+Sets the position and size of a WebView.
+
+```javascript
+await poly.webview.setBounds('content', {
+  x: 0,
+  y: 80,
+  width: 1200,
+  height: 720
+});
+```
+
+#### `poly.webview.getBounds(id)`
+
+Gets the current bounds of a WebView.
+
+```javascript
+const bounds = await poly.webview.getBounds('content');
+// {x: 0, y: 80, width: 1200, height: 720}
+```
+
+#### `poly.webview.setVisible(id, visible)`
+
+Shows or hides a WebView.
+
+```javascript
+await poly.webview.setVisible('content', false);
+```
+
+#### `poly.webview.focus(id)`
+
+Focuses a WebView.
+
+```javascript
+await poly.webview.focus('content');
+```
+
+#### `poly.webview.setZoom(id, level)`
+
+Sets the zoom level (1.0 = 100%).
+
+```javascript
+await poly.webview.setZoom('content', 1.5); // 150% zoom
+```
+
+#### `poly.webview.setMainBounds(bounds)`
+
+Resizes the main app WebView.
+
+```javascript
+await poly.webview.setMainBounds({ x: 0, y: 0, width: 1200, height: 80 });
+```
+
+### Content Execution
+
+#### `poly.webview.eval(id, script)`
+
+Executes JavaScript in a WebView.
+
+```javascript
+await poly.webview.eval('content', 'document.title');
+```
+
+### State & Information
+
+#### `poly.webview.get(id)`
+
+Gets information about a specific WebView.
 
 **Returns:**
 ```javascript
 {
-  update_available: boolean,
-  latest_version: string,
-  current_version: string,
-  download_url: string | null,
-  release_notes: string | null
+  id: string,
+  url: string,
+  title: string,
+  visible: boolean,
+  isLoading: boolean,
+  canGoBack: boolean,
+  canGoForward: boolean,
+  zoomLevel: number,
+  bounds: { x, y, width, height }
 }
 ```
 
 ```javascript
-const info = await poly.updater.checkGithub('myuser/myapp', '1.0.0');
-
-if (info.update_available) {
-  console.log('New version:', info.latest_version);
+const info = await poly.webview.get('content');
+if (info.canGoBack) {
+  // Show back button
 }
 ```
 
-### `poly.updater.download(url)`
+#### `poly.webview.list()`
 
-Download update file.
-
-**Returns:** `string` - Path to downloaded file
+Lists all WebViews with their state.
 
 ```javascript
-const path = await poly.updater.download(info.download_url);
+const webviews = await poly.webview.list();
 ```
 
-### `poly.updater.install(path)`
+### Events
 
-Install downloaded update.
+WebViews emit events for navigation, title changes, loading state, and more. Use `pollEvents()` to retrieve pending events, or use the convenience event listeners.
+
+#### `poly.webview.pollEvents()`
+
+Retrieves all pending events from WebViews.
+
+**Event Types:**
+| Type | Data | Description |
+|------|------|-------------|
+| `navigate` | `{id, url}` | Navigation started |
+| `navigateFinish` | `{id, url}` | Navigation completed |
+| `titleChange` | `{id, title}` | Page title changed |
+| `loadStart` | `{id}` | Page started loading |
+| `loadFinish` | `{id}` | Page finished loading |
+| `newWindow` | `{id, url, target}` | New window requested (target="_blank") |
+| `download` | `{id, url, filename}` | Download requested |
+| `close` | `{id}` | WebView was closed |
+| `historyChange` | `{id, canGoBack, canGoForward}` | History state changed |
+| `permission` | `{id, permission, origin}` | Permission requested |
 
 ```javascript
-await poly.updater.install(path);
+// Poll for events
+const { events } = await poly.webview.pollEvents();
+for (const event of events) {
+  switch (event.type) {
+    case 'titleChange':
+      document.title = event.title;
+      break;
+    case 'newWindow':
+      // Handle new window request
+      await poly.webview.navigate('content', event.url);
+      break;
+  }
+}
 ```
 
-### `poly.updater.checkAndPrompt(options)`
-
-Convenience method: check, prompt user, download, and install.
+#### Event Listeners (Convenience API)
 
 ```javascript
-await poly.updater.checkAndPrompt({
-  repo: 'myuser/myapp',
-  currentVersion: '1.0.0'
+// Listen for navigation
+poly.webview.onNavigate('content', (url) => {
+  console.log('Navigated to:', url);
+});
+
+// Listen for title changes
+poly.webview.onTitleChange('content', (title) => {
+  document.title = title;
+});
+
+// Listen for loading state
+poly.webview.onLoadStart('content', () => {
+  showSpinner();
+});
+
+poly.webview.onLoadFinish('content', () => {
+  hideSpinner();
+});
+
+// Listen for new window requests
+poly.webview.onNewWindow('content', (url, target) => {
+  // Open in same WebView or create new one
+  poly.webview.navigate('content', url);
+});
+
+// Listen for downloads
+poly.webview.onDownload('content', (url, filename) => {
+  console.log('Download:', filename);
+});
+
+// Listen for history changes
+poly.webview.onHistoryChange('content', ({ canGoBack, canGoForward }) => {
+  backButton.disabled = !canGoBack;
+  forwardButton.disabled = !canGoForward;
+});
+
+// Listen to all WebViews (wildcard)
+poly.webview.on('titleChange', '*', (id, title) => {
+  console.log(`WebView ${id} title: ${title}`);
 });
 ```
 
----
+### Permissions
 
-## AI/LLM Integration
+#### `poly.webview.respondToPermission(id, permission, granted)`
 
-Built-in support for AI chat APIs.
-
-### `poly.ai.ollama(model, messages)`
-
-Chat with local Ollama.
+Responds to a permission request (camera, microphone, geolocation, etc.).
 
 ```javascript
-const response = await poly.ai.ollama('llama3', [
-  { role: 'user', content: 'Hello!' }
-]);
-
-console.log(response.content);
+poly.webview.on('permission', '*', async (id, { permission, origin }) => {
+  const granted = await poly.dialog.confirm(
+    'Permission Request',
+    `${origin} wants to access your ${permission}. Allow?`
+  );
+  await poly.webview.respondToPermission(id, permission, granted);
+});
 ```
 
-### `poly.ai.openai(model, messages, apiKey)`
-
-Chat with OpenAI.
+### Complete Browser Example
 
 ```javascript
-const response = await poly.ai.openai('gpt-4', [
-  { role: 'system', content: 'You are helpful.' },
-  { role: 'user', content: 'Hello!' }
-], 'sk-your-api-key');
-```
-
-### `poly.ai.anthropic(model, messages, apiKey, options?)`
-
-Chat with Anthropic Claude.
-
-```javascript
-const response = await poly.ai.anthropic(
-  'claude-3-5-sonnet-20241022',
-  [{ role: 'user', content: 'Explain quantum computing' }],
-  'your-api-key',
-  { enableThinking: true, thinkingBudget: 10000 }
-);
-
-console.log(response.thinking); // Reasoning process
-console.log(response.content);  // Final answer
-```
-
-### `poly.ai.custom(baseUrl, model, messages)`
-
-Chat with OpenAI-compatible APIs (LM Studio, LocalAI, etc).
-
-```javascript
-const response = await poly.ai.custom(
-  'http://localhost:1234/v1',
-  'local-model',
-  [{ role: 'user', content: 'Hello!' }]
-);
-```
-
-### `poly.ai.checkOllama()`
-
-Check if Ollama is running.
-
-**Returns:** `boolean`
-
-```javascript
-if (await poly.ai.checkOllama()) {
-  // Ollama is available
+// Initialize browser UI
+async function initBrowser() {
+  // Create content WebView (bottom layer)
+  await poly.webview.create('content', {
+    url: 'https://example.com',
+    x: 0, y: 80,
+    width: window.innerWidth,
+    height: window.innerHeight - 80,
+    devtools: true
+  });
+  
+  // Set up event listeners
+  poly.webview.onTitleChange('content', (title) => {
+    document.getElementById('title').textContent = title;
+  });
+  
+  poly.webview.onNavigate('content', (url) => {
+    document.getElementById('url-bar').value = url;
+  });
+  
+  poly.webview.onHistoryChange('content', ({ canGoBack, canGoForward }) => {
+    document.getElementById('back-btn').disabled = !canGoBack;
+    document.getElementById('forward-btn').disabled = !canGoForward;
+  });
+  
+  poly.webview.onNewWindow('content', (url) => {
+    // Open links in same WebView
+    poly.webview.navigate('content', url);
+  });
+  
+  poly.webview.onLoadStart('content', () => {
+    document.getElementById('loading').style.display = 'block';
+  });
+  
+  poly.webview.onLoadFinish('content', () => {
+    document.getElementById('loading').style.display = 'none';
+  });
 }
-```
 
-### `poly.ai.listModels()`
+// Navigation functions
+async function navigate() {
+  let url = document.getElementById('url-bar').value;
+  if (!url.startsWith('http')) url = 'https://' + url;
+  await poly.webview.navigate('content', url);
+}
 
-List available Ollama models.
+async function goBack() {
+  await poly.webview.goBack('content');
+}
 
-**Returns:** `string[]`
+async function goForward() {
+  await poly.webview.goForward('content');
+}
 
-```javascript
-const models = await poly.ai.listModels();
-// ['llama3', 'codellama', 'mistral']
+async function reload() {
+  await poly.webview.reload('content');
+}
+
+// Handle window resize
+window.addEventListener('resize', async () => {
+  await poly.webview.setBounds('content', {
+    x: 0, y: 80,
+    width: window.innerWidth,
+    height: window.innerHeight - 80
+  });
+});
+
+initBrowser();
 ```
 
 ---
 
-## IPC (Backend Functions)
+## MultiView API
 
-Call functions defined in `main.poly`.
+Create windows with multiple WebViews. Perfect for building browser-like applications, split-pane editors, or any UI that needs multiple independent web content areas.
 
-### `poly.invoke(functionName, args?)`
+### Overview
 
-Call a backend function.
+The MultiView API creates a new window with multiple WebViews arranged in a layout. Each WebView can:
+- Display different content (URL or HTML)
+- Communicate with other views via messages
+- Be resized and repositioned dynamically
+
+**Important:** Views are stacked in creation order. The first view in the array is at the bottom, the last is on top. For browser UIs, put the content view first and the UI view last.
+
+### `poly.multiview.create(options)`
+
+Creates a new multi-view window.
+
+**Parameters:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `title` | string | "Poly MultiView" | Window title |
+| `width` | number | 1024 | Window width |
+| `height` | number | 768 | Window height |
+| `decorations` | boolean | false | Show native titlebar |
+| `resizable` | boolean | true | Allow resizing |
+| `icon` | string | - | Path to window icon |
+| `views` | array | [] | Array of view configurations |
+
+**View Configuration:**
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `id` | string | "view" | Unique identifier for the view |
+| `url` | string | "about:blank" | URL to load |
+| `html` | string | - | HTML content (alternative to url) |
+| `x` | number | 0 | X position in window |
+| `y` | number | 0 | Y position in window |
+| `width` | number | 800 | View width |
+| `height` | number | 600 | View height |
+| `transparent` | boolean | false | Transparent background |
+| `devtools` | boolean | false | Enable DevTools |
+
+**Returns:** `Promise<{id: number}>` - Window ID
 
 ```javascript
-// In main.poly:
-// fn greet(name) { return "Hello, " + name }
+// Create a browser-like window
+const win = await poly.multiview.create({
+  title: 'My Browser',
+  width: 1200,
+  height: 800,
+  decorations: false,
+  views: [
+    // Content view (bottom layer)
+    { 
+      id: 'content', 
+      url: 'https://example.com',
+      x: 0, y: 80, 
+      width: 1200, height: 720 
+    },
+    // UI view (top layer)
+    { 
+      id: 'ui', 
+      url: 'http://localhost:3000/browser-ui.html',
+      x: 0, y: 0, 
+      width: 1200, height: 80,
+      transparent: true
+    }
+  ]
+});
 
-const result = await poly.invoke('greet', { name: 'World' });
-// "Hello, World"
+console.log('Window created with ID:', win.id);
 ```
 
----
+### `poly.multiview.navigate(windowId, viewId, url)`
 
-## Custom Titlebar Example
+Navigates a specific view to a URL.
 
-Complete example of a custom frameless titlebar. Set `decorations = false` in `poly.toml` to use this.
+**Parameters:**
 
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `windowId` | number | Window ID from create() |
+| `viewId` | string | View ID to navigate |
+| `url` | string | URL to load |
+
+```javascript
+// Navigate content view to a new URL
+await poly.multiview.navigate(win.id, 'content', 'https://google.com');
+```
+
+### `poly.multiview.postMessage(windowId, viewId, message)`
+
+Sends a message to a view. The view receives it as a `polymessage` event.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `windowId` | number | Window ID |
+| `viewId` | string | Target view ID |
+| `message` | any | Message data (will be JSON stringified) |
+
+```javascript
+// Send message from backend to UI view
+await poly.multiview.postMessage(win.id, 'ui', {
+  type: 'urlChanged',
+  url: 'https://google.com'
+});
+```
+
+**Receiving messages in a view:**
+
+```javascript
+window.addEventListener('polymessage', (e) => {
+  const data = e.detail;
+  console.log('Received:', data);
+  
+  if (data.type === 'urlChanged') {
+    document.getElementById('url-bar').value = data.url;
+  }
+});
+```
+
+### `poly.multiview.setBounds(windowId, viewId, bounds)`
+
+Changes the position and size of a view.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `windowId` | number | Window ID |
+| `viewId` | string | View ID |
+| `bounds` | object | `{x, y, width, height}` |
+
+```javascript
+// Resize content view
+await poly.multiview.setBounds(win.id, 'content', {
+  x: 0,
+  y: 100,
+  width: 1200,
+  height: 700
+});
+```
+
+### `poly.multiview.close(windowId)`
+
+Closes a multi-view window.
+
+```javascript
+await poly.multiview.close(win.id);
+```
+
+### `poly.multiview.list()`
+
+Lists all multi-view windows.
+
+**Returns:** `Promise<{windows: Array<{id, title, views}>}>`
+
+```javascript
+const result = await poly.multiview.list();
+console.log('Open windows:', result.windows);
+```
+
+### `poly.multiview.get(windowId)`
+
+Gets information about a specific window.
+
+**Returns:** `Promise<{id, title, views} | {error: string}>`
+
+```javascript
+const info = await poly.multiview.get(win.id);
+console.log('Window title:', info.title);
+console.log('Views:', info.views);
+```
+
+### IPC Between Views
+
+Views can communicate with each other using `window.ipc.postMessage()`:
+
+```javascript
+// In UI view - navigate content view
+function navigateTo(url) {
+  window.ipc.postMessage(`navigate:content:${url}`);
+}
+
+// Usage
+navigateTo('https://google.com');
+```
+
+**IPC Commands:**
+
+| Command | Format | Description |
+|---------|--------|-------------|
+| Navigate | `navigate:viewId:url` | Navigate a view to URL |
+| Minimize | `minimize` | Minimize window |
+| Maximize | `maximize` | Toggle maximize |
+| Close | `close` | Close window |
+| Drag | `drag` | Start window drag |
+
+### Complete Browser Example
+
+**poly.toml:**
+```toml
+[package]
+name = "My Browser"
+version = "1.0.0"
+
+[window]
+width = 1200
+height = 800
+decorations = false
+```
+
+**main.js (app entry):**
+```javascript
+// Create browser window on startup
+async function init() {
+  const win = await poly.multiview.create({
+    title: 'My Browser',
+    width: 1200,
+    height: 800,
+    icon: 'assets/icon.png',
+    views: [
+      // Content area (bottom)
+      { 
+        id: 'content', 
+        url: 'https://example.com',
+        x: 0, y: 80, 
+        width: 1200, height: 720 
+      },
+      // Browser UI (top)
+      { 
+        id: 'ui', 
+        url: 'http://localhost:3000/ui.html',
+        x: 0, y: 0, 
+        width: 1200, height: 80 
+      }
+    ]
+  });
+}
+
+init();
+```
+
+**ui.html (browser UI):**
 ```html
 <!DOCTYPE html>
 <html>
 <head>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a1f; color: #fff; font-family: system-ui; }
-    
-    .titlebar {
-      height: 32px;
-      background: #0f0f1a;
+    body { 
+      background: #1a1a1f; 
+      color: #fff; 
+      font-family: system-ui;
+      height: 80px;
+    }
+    .toolbar {
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      height: 100%;
       padding: 0 12px;
-      user-select: none;
+      gap: 8px;
     }
-    
-    .titlebar-title {
-      font-size: 12px;
-      color: #888;
-    }
-    
-    .titlebar-buttons {
-      display: flex;
-      gap: 4px;
-    }
-    
-    .titlebar-btn {
-      width: 28px;
-      height: 24px;
+    .url-bar {
+      flex: 1;
+      height: 36px;
+      background: #2a2a35;
       border: none;
-      background: transparent;
-      color: #888;
-      cursor: pointer;
-      font-size: 12px;
-      border-radius: 4px;
-    }
-    
-    .titlebar-btn:hover {
-      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 0 12px;
       color: #fff;
     }
-    
-    .titlebar-btn.close:hover {
-      background: #e81123;
+    .btn {
+      width: 36px;
+      height: 36px;
+      background: transparent;
+      border: none;
+      color: #888;
+      cursor: pointer;
+      border-radius: 6px;
     }
-    
-    .content {
-      padding: 20px;
-    }
+    .btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
   </style>
 </head>
 <body>
-  <div class="titlebar" onmousedown="polyWindow.drag()">
-    <div class="titlebar-title">My App</div>
-    <div class="titlebar-buttons">
-      <button class="titlebar-btn" onclick="polyWindow.minimize()">─</button>
-      <button class="titlebar-btn" onclick="polyWindow.maximize()">□</button>
-      <button class="titlebar-btn close" onclick="polyWindow.close()">✕</button>
-    </div>
+  <div class="toolbar" onmousedown="polyWindow.drag()">
+    <button class="btn" onclick="goBack()">←</button>
+    <button class="btn" onclick="goForward()">→</button>
+    <button class="btn" onclick="refresh()">↻</button>
+    <input type="text" class="url-bar" id="url" 
+           placeholder="Enter URL..." 
+           onkeydown="if(event.key==='Enter')navigate()">
+    <button class="btn" onclick="navigate()">Go</button>
+    <div style="width:20px"></div>
+    <button class="btn" onclick="polyWindow.minimize()">─</button>
+    <button class="btn" onclick="polyWindow.maximize()">□</button>
+    <button class="btn" onclick="polyWindow.close()">✕</button>
   </div>
-  
-  <div class="content">
-    <h1>Welcome</h1>
-    <p>Your app content here</p>
-  </div>
+
+  <script>
+    function navigate() {
+      let url = document.getElementById('url').value;
+      if (!url.startsWith('http')) url = 'https://' + url;
+      window.ipc.postMessage('navigate:content:' + url);
+    }
+    
+    function goBack() {
+      // Would need history tracking
+    }
+    
+    function goForward() {
+      // Would need history tracking
+    }
+    
+    function refresh() {
+      const url = document.getElementById('url').value;
+      if (url) window.ipc.postMessage('navigate:content:' + url);
+    }
+  </script>
 </body>
 </html>
 ```
+
+---
+
+## Known Issues
+
+### Multi-WebView Z-Order (Windows)
+
+WebViews created via `poly.webview.create()` always appear on top of existing WebViews. There is no way to control the stacking order. This is a limitation of the underlying WebView2 component on Windows.
+
+**Impact:** For browser apps, create content WebView first, then UI WebView.
+
+**Status:** Waiting for upstream fix in wry/WebView2.
+
+### Window Shadow Pulsing (Windows)
+
+On Windows with DWM composition, frameless windows may show pulsing shadows. This is a known WebView2/Windows issue.
+
+**Workaround:** Use `decorations = true` (native titlebar) or accept the visual artifact.

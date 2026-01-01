@@ -222,14 +222,23 @@ pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn
     
     let window = builder.build(&event_loop)?;
     
+    // Set background color to prevent flickering/shadow pulsing
+    let bg_color = if config.transparent {
+        (0, 0, 0, 0)
+    } else {
+        (26, 26, 26, 255) // #1a1a1a - dark gray
+    };
+    
     let webview = WebViewBuilder::new()
         .with_html(html)
         .with_devtools(config.dev_tools)
         .with_transparent(config.transparent)
+        .with_background_color(bg_color)
         .build(&window)?;
     
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
+        
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 *control_flow = ControlFlow::Exit;
@@ -327,10 +336,76 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     let minimize_to_tray = config.minimize_to_tray;
     let tray_enabled = config.tray_enabled;
     
+    // Set background color to prevent flickering/shadow pulsing
+    let bg_color = if config.transparent {
+        (0, 0, 0, 0)
+    } else {
+        (26, 26, 26, 255) // #1a1a1a - dark gray
+    };
+    
+    // Get titlebar config and create injection script that runs on every page
+    let titlebar_config = crate::titlebar::get_titlebar();
+    let init_script = if titlebar_config.enabled {
+        let html_escaped = titlebar_config.html.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
+        let css_escaped = titlebar_config.css.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
+        let js_escaped = titlebar_config.js.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
+        
+        format!(r#"
+(function() {{
+    function injectTitlebar() {{
+        if (document.getElementById('poly-titlebar')) return;
+        
+        const titlebar = document.createElement('div');
+        titlebar.id = 'poly-titlebar';
+        titlebar.innerHTML = `{html}`;
+        
+        const style = document.createElement('style');
+        style.id = 'poly-titlebar-style';
+        style.textContent = `{css}`;
+        
+        if (document.head) document.head.appendChild(style);
+        if (document.body) document.body.insertBefore(titlebar, document.body.firstChild);
+        
+        {js}
+    }}
+    
+    // Inject immediately if DOM is ready
+    if (document.readyState === 'loading') {{
+        document.addEventListener('DOMContentLoaded', injectTitlebar);
+    }} else {{
+        injectTitlebar();
+    }}
+    
+    // Also inject on any dynamic content changes
+    const observer = new MutationObserver(() => {{
+        if (!document.getElementById('poly-titlebar') && document.body) {{
+            injectTitlebar();
+        }}
+    }});
+    
+    if (document.body) {{
+        observer.observe(document.body, {{ childList: true, subtree: false }});
+    }} else {{
+        document.addEventListener('DOMContentLoaded', () => {{
+            observer.observe(document.body, {{ childList: true, subtree: false }});
+        }});
+    }}
+}})();
+"#,
+            html = html_escaped,
+            css = css_escaped,
+            js = js_escaped,
+        )
+    } else {
+        String::new()
+    };
+    
     let webview = wry::WebViewBuilder::new()
         .with_url(url)
         .with_devtools(config.dev_tools)
         .with_transparent(config.transparent)
+        .with_background_color(bg_color)
+        .with_initialization_script(&init_script)
         .with_ipc_handler(move |msg: wry::http::Request<String>| {
             let body = msg.body();
             match body.as_str() {
@@ -368,8 +443,15 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     
     let window_for_tray = Arc::clone(&window);
     
+    // WebView manager for multi-webview support
+    let mut webview_manager = crate::webview_native::WebViewManager::new();
+    webview_manager.set_main_webview(webview);
+    
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        *control_flow = ControlFlow::Poll; // Use Poll to process pending operations
+        
+        // Process pending WebView operations
+        webview_manager.process_pending_operations(&window);
         
         // Handle tray events
         if let Some(ref tray) = *tray_handle.lock().unwrap() {
@@ -387,7 +469,9 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                             _ => {
                                 // Send custom menu event to webview
                                 let js = format!("window.dispatchEvent(new CustomEvent('polytray', {{ detail: {{ id: '{}' }} }}));", id);
-                                let _ = webview.evaluate_script(&js);
+                                if let Some(wv) = webview_manager.main_webview() {
+                                    let _ = wv.evaluate_script(&js);
+                                }
                             }
                         }
                     }
@@ -407,11 +491,13 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                     *control_flow = ControlFlow::Exit;
                 }
             }
-            Event::WindowEvent { event: WindowEvent::Resized(size), .. } => {
-                let _ = webview.set_bounds(wry::Rect {
-                    position: wry::dpi::Position::Logical(wry::dpi::LogicalPosition::new(0.0, 0.0)),
-                    size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, size.height)),
-                });
+            Event::WindowEvent { event: WindowEvent::Resized(_size), .. } => {
+                // Don't auto-resize main WebView - let user control it via setMainBounds
+                // The user's JavaScript resize handler will update bounds as needed
+            }
+            Event::MainEventsCleared => {
+                // Small sleep to prevent busy-waiting when using Poll
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
             _ => {}
         }

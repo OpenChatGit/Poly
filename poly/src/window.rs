@@ -195,9 +195,13 @@ fn run_window(id: u64, config: WindowConfig, rx: std::sync::mpsc::Receiver<Windo
     let window_clone = Arc::clone(&window);
     let window_for_cmd = Arc::clone(&window);
     
+    // Set background color to prevent flickering/shadow pulsing
+    let bg_color = (26, 26, 26, 255); // #1a1a1a - dark gray
+    
     // Build webview
     let mut builder = WebViewBuilder::new()
         .with_devtools(true)
+        .with_background_color(bg_color)
         .with_ipc_handler(move |req: wry::http::Request<String>| {
             let body = req.body();
             match body.as_str() {

@@ -9,6 +9,7 @@ Poly is a modern framework for building cross-platform desktop applications usin
 ## Features
 
 - 🪶 **Lightweight** — ~7MB binary, fast startup
+- 🌐 **Browser Mode** — Build browsers with custom UI and WebView API
 - 🪟 **Multi-Window** — Create and manage multiple windows
 - 📋 **Clipboard** — Read/write system clipboard
 - 🎨 **Frameless Windows** — Optional frameless mode with window control API
@@ -62,6 +63,7 @@ poly build --release
 | `poly add <package>` | Add npm package |
 | `poly remove <package>` | Remove package |
 | `poly install` | Install from lockfile |
+| `poly browser <url>` | Browser mode with custom UI |
 
 ## Project Structure
 
@@ -126,9 +128,45 @@ await poly.updater.checkGithub('user/repo', '1.0.0');
 // AI/LLM
 await poly.ai.ollama('llama3', messages);
 await poly.ai.openai('gpt-4', messages, apiKey);
+
+// WebView API (for browser-like apps)
+await poly.webview.create('content', { url: 'https://example.com', x: 0, y: 80, width: 1200, height: 720 });
+await poly.webview.navigate('content', 'https://google.com');
+await poly.webview.goBack('content');
+await poly.webview.goForward('content');
 ```
 
 📖 **Full API Documentation:** [docs/API.md](docs/API.md)
+
+## Browser Mode
+
+Build browser-like applications with a custom UI:
+
+```bash
+# Run browser with custom UI
+poly browser https://google.com --ui-html browser-ui.html
+
+# Custom window size
+poly browser https://example.com --width 1400 --height 900 --ui-html ui.html
+```
+
+Your UI HTML communicates via IPC:
+```javascript
+// Navigate content area
+window.ipc.postMessage('navigate:https://google.com');
+
+// Window controls
+window.ipc.postMessage('minimize');
+window.ipc.postMessage('maximize');
+window.ipc.postMessage('close');
+
+// Receive events from content
+window.onNavStart = (url) => { /* navigation started */ };
+window.onLoadEnd = (url) => { /* page loaded */ };
+window.onTitleChange = (title) => { /* title changed */ };
+```
+
+See [docs/API.md#browser-mode](docs/API.md#browser-mode) for complete documentation.
 
 ## Package Manager
 
@@ -157,6 +195,9 @@ height = 768
 decorations = true  # false for frameless window (requires custom titlebar)
 single_instance = true  # prevent multiple instances
 
+[dev]
+port = 3000  # custom port for dev server (0 = auto)
+
 [tray]
 enabled = true
 close_to_tray = true
@@ -173,6 +214,7 @@ alpinejs = "3.14.3"
 | Memory | Low | High | Low |
 | Package Manager | Built-in | npm | npm |
 | Multi-Window | Built-in | Built-in | Built-in |
+| Browser Mode | Built-in | Manual | Manual |
 | Clipboard | Built-in | Built-in | Plugin |
 | Notifications | Built-in | Built-in | Plugin |
 | Deep Links | Built-in | Built-in | Plugin |

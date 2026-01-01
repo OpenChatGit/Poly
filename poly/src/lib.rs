@@ -13,6 +13,26 @@ pub mod notification;
 pub mod deeplink;
 pub mod templates;
 pub mod single_instance;
+pub mod sovereignty;
+pub mod browser;
+pub mod titlebar;
+pub mod webview;
+pub mod webview_native;
+pub mod multiview;
+pub mod multiview_native;
+
+// Re-export WebView types
+pub use webview::{WebViewConfig, WebViewBounds, WebViewState, WebViewEvent, WebViewOperation};
+
+// Re-export browser mode types (BrowserConfig is always available, run_browser_window only with native)
+pub use webview_native::BrowserConfig;
+#[cfg(feature = "native")]
+pub use webview_native::run_browser_window;
+
+// Re-export multiview types
+pub use multiview::{MultiViewWindowConfig, ViewConfig};
+#[cfg(feature = "native")]
+pub use multiview_native::create_multiview_window;
 
 use lexer::Lexer;
 use parser::Parser;
@@ -23,6 +43,7 @@ pub use updater::{UpdateConfig, UpdateInfo, check_github_updates, check_custom_u
 pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
 pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, MessageRole, check_ollama, list_ollama_models, chat as ai_chat};
 pub use single_instance::{SingleInstanceConfig, try_acquire_instance, release_instance, is_primary_instance, check_single_instance};
+pub use sovereignty::{SovereigntyConfig, Permission, check_permission, is_enabled as sovereignty_enabled};
 
 /// Run Poly source code and return the output
 pub fn run(source: &str) -> Result<Vec<String>, String> {

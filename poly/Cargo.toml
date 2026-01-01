@@ -1,6 +1,6 @@
 [package]
 name = "poly"
-version = "0.2.7"
+version = "0.2.9"
 edition = "2021"
 description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
 authors = ["Poly Team"]
@@ -21,6 +21,8 @@ atty = "0.2"
 notify = "7.0"
 # HTTP server for dev mode
 tiny_http = "0.12"
+# URL encoding/decoding
+urlencoding = "2.1"
 # JSON serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -51,6 +53,8 @@ tar = { version = "0.4", optional = true }
 arboard = { version = "3.4", optional = true }
 # Notifications
 notify-rust = { version = "4", optional = true }
+# SQLite database
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 # Windows API for frameless windows
 windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Console"], optional = true }
 # Raw window handle for WebView
@@ -62,7 +66,7 @@ raw-window-handle = { version = "0.6", optional = true }
 [features]
 default = []
 wasm = ["wasm-bindgen"]
-native = ["wry", "tao", "winit", "image", "rfd", "reqwest", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar", "arboard", "notify-rust", "windows", "raw-window-handle"]
+native = ["wry", "tao", "winit", "image", "rfd", "reqwest", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar", "arboard", "notify-rust", "windows", "raw-window-handle", "rusqlite"]
 # GUI mode - hides console window on Windows (used for bundled apps)
 gui = []
 

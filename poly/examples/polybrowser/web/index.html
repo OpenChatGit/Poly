@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poly Browser</title>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: 'Segoe UI', sans-serif; background: #09090b; color: #fafafa; }
+    
+    .titlebar { height: 32px; background: #18181b; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #27272a; }
+    .titlebar-drag { flex: 1; height: 100%; display: flex; align-items: center; padding-left: 12px; gap: 8px; }
+    .titlebar-icon { color: #22d3ee; }
+    .titlebar-title { font-size: 12px; color: #71717a; }
+    .window-controls { display: flex; height: 100%; }
+    .win-btn { width: 46px; height: 100%; border: none; background: transparent; color: #a1a1aa; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .win-btn:hover { background: #27272a; color: #fff; }
+    .win-btn.close:hover { background: #ef4444; }
+    
+    .toolbar { height: 52px; background: #18181b; display: flex; align-items: center; padding: 0 8px; gap: 6px; border-bottom: 1px solid #27272a; }
+    .tool-btn { width: 38px; height: 38px; border: none; background: transparent; color: #71717a; cursor: pointer; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+    .tool-btn:hover { background: #27272a; color: #fafafa; }
+    .tool-btn:disabled { opacity: 0.3; pointer-events: none; }
+    
+    .url-box { flex: 1; height: 38px; display: flex; align-items: center; background: #27272a; border: 1px solid #3f3f46; border-radius: 10px; padding: 0 14px; gap: 10px; margin: 0 6px; }
+    .url-box:focus-within { border-color: #22d3ee; background: #1c1c1f; }
+    .url-box svg { color: #52525b; width: 16px; height: 16px; flex-shrink: 0; }
+    .url-input { flex: 1; background: none; border: none; color: #fafafa; font-size: 13px; outline: none; }
+    .url-input::placeholder { color: #52525b; }
+    
+    .progress { height: 3px; background: #27272a; overflow: hidden; }
+    .progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, #22d3ee, #3b82f6); }
+    .progress.loading .progress-bar { animation: load 1.5s ease-in-out infinite; }
+    @keyframes load { 0%{width:0} 50%{width:70%} 100%{width:100%} }
+    
+    .content { flex: 1; position: relative; background: #111; }
+    .placeholder { 
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: #09090b; color: #52525b;
+    }
+    .placeholder.hidden { display: none; }
+    .placeholder svg { width: 48px; height: 48px; margin-bottom: 12px; color: #27272a; }
+    .placeholder.error p { color: #f87171; }
+    
+    .app { display: flex; flex-direction: column; height: 100%; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="titlebar">
+      <div class="titlebar-drag" id="drag-region">
+        <i data-lucide="globe" class="titlebar-icon" style="width:16px;height:16px"></i>
+        <span class="titlebar-title" id="title">Poly Browser</span>
+      </div>
+      <div class="window-controls">
+        <button class="win-btn" id="min-btn"><i data-lucide="minus" style="width:16px;height:16px"></i></button>
+        <button class="win-btn" id="max-btn"><i data-lucide="square" style="width:14px;height:14px"></i></button>
+        <button class="win-btn close" id="close-btn"><i data-lucide="x" style="width:16px;height:16px"></i></button>
+      </div>
+    </div>
+    
+    <div class="toolbar">
+      <button class="tool-btn" id="back" disabled><i data-lucide="chevron-left"></i></button>
+      <button class="tool-btn" id="forward" disabled><i data-lucide="chevron-right"></i></button>
+      <button class="tool-btn" id="refresh"><i data-lucide="rotate-cw"></i></button>
+      <div class="url-box">
+        <i data-lucide="search"></i>
+        <input type="text" class="url-input" id="url" placeholder="Search or enter URL" value="https://example.com">
+      </div>
+      <button class="tool-btn" id="home"><i data-lucide="home"></i></button>
+    </div>
+    
+    <div class="progress" id="progress"><div class="progress-bar"></div></div>
+    
+    <div class="content" id="content">
+      <div class="placeholder" id="placeholder">
+        <i data-lucide="globe"></i>
+        <p id="status">Starting browser...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    lucide.createIcons();
+    
+    const $ = id => document.getElementById(id);
+    const UI_HEIGHT = 87; // titlebar(32) + toolbar(52) + progress(3)
+    let ready = false;
+    
+    // Window controls
+    $('drag-region').onmousedown = () => window.ipc?.postMessage('drag');
+    $('min-btn').onclick = () => window.ipc?.postMessage('minimize');
+    $('max-btn').onclick = () => window.ipc?.postMessage('maximize');
+    $('close-btn').onclick = () => window.ipc?.postMessage('close');
+    
+    // Wait for poly
+    const waitPoly = (fn, n=0) => {
+      if (window.poly?.webview) fn();
+      else if (n < 50) setTimeout(() => waitPoly(fn, n+1), 100);
+      else { $('status').textContent = 'Poly API not available'; $('placeholder').classList.add('error'); }
+    };
+    
+    // Initialize
+    waitPoly(async () => {
+      $('status').textContent = 'Creating WebView...';
+      try {
+        // Shrink main webview to UI area only
+        await poly.webview.setMainBounds({
+          x: 0, y: 0,
+          width: window.innerWidth,
+          height: UI_HEIGHT
+        });
+        
+        // Create content webview below UI
+        const r = await poly.webview.create('browser', {
+          url: 'https://example.com',
+          x: 0, 
+          y: UI_HEIGHT,
+          width: window.innerWidth,
+          height: window.innerHeight - UI_HEIGHT,
+          devtools: true
+        });
+        
+        if (r.error) throw new Error(r.error);
+        
+        $('placeholder').classList.add('hidden');
+        ready = true;
+        poll();
+      } catch(e) {
+        $('status').textContent = 'Error: ' + e.message;
+        $('placeholder').classList.add('error');
+        console.error(e);
+      }
+    });
+    
+    // Poll events
+    async function poll() {
+      if (!ready) return;
+      try {
+        const r = await poly.webview.pollEvents();
+        r?.events?.forEach(e => {
+          if (e.type === 'titleChange') $('title').textContent = e.title || 'Poly Browser';
+          if (e.type === 'navigate') { $('url').value = e.url; $('progress').classList.add('loading'); }
+          if (e.type === 'loadFinish' || e.type === 'navigateFinish') $('progress').classList.remove('loading');
+          if (e.type === 'historyChange') { 
+            $('back').disabled = !e.canGoBack; 
+            $('forward').disabled = !e.canGoForward; 
+          }
+          if (e.type === 'newWindow') poly.webview.navigate('browser', e.url);
+        });
+      } catch(e) {}
+      setTimeout(poll, 100);
+    }
+    
+    // Navigation
+    const go = async (url) => {
+      if (!url) url = $('url').value.trim();
+      if (!url) return;
+      if (!/^https?:\/\//.test(url)) url = 'https://' + url;
+      $('url').value = url;
+      $('progress').classList.add('loading');
+      await poly.webview.navigate('browser', url);
+    };
+    
+    $('url').onkeydown = e => e.key === 'Enter' && go();
+    $('back').onclick = () => poly.webview.goBack('browser');
+    $('forward').onclick = () => poly.webview.goForward('browser');
+    $('refresh').onclick = () => poly.webview.reload('browser');
+    $('home').onclick = () => go('https://example.com');
+    
+    // Resize handler
+    window.onresize = () => {
+      if (!ready) return;
+      poly.webview.setMainBounds({ x: 0, y: 0, width: innerWidth, height: UI_HEIGHT });
+      poly.webview.setBounds('browser', { x: 0, y: UI_HEIGHT, width: innerWidth, height: innerHeight - UI_HEIGHT });
+    };
+  </script>
+</body>
+</html>
