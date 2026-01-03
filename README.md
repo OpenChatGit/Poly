@@ -47,4 +47,4 @@ See [docs/API.md](docs/API.md) for the full API reference.
 
 ## License
 
-[MIT](LICENSE)
+[Poly License](LICENSE)
