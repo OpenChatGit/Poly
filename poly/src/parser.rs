@@ -513,36 +513,15 @@ impl Parser {
                 }
                 self.expect(Token::RParen)?;
                 
-                // Check for UI widget syntax: Widget(...):
-                if self.check(&Token::Colon) {
-                    if let Expr::Identifier(widget_type) = expr {
-                        // This is a UI widget with children
-                        self.advance(); // consume ':'
-                        let children = self.parse_widget_children()?;
-                        
-                        // Convert args to props
-                        let mut props = kwargs;
-                        // First positional arg is often the main content
-                        if !args.is_empty() {
-                            if let Expr::String(s) = &args[0] {
-                                props.insert(0, ("text".to_string(), Expr::String(s.clone())));
-                            }
-                        }
-                        
-                        expr = Expr::Widget {
-                            widget_type,
-                            props,
-                            children,
-                        };
-                        continue;
-                    }
-                }
-                
+                // First convert to Call expression
                 if kwargs.is_empty() {
                     expr = Expr::Call(Box::new(expr), args);
                 } else {
                     expr = Expr::CallWithKwargs(Box::new(expr), args, kwargs);
                 }
+                
+                // NOTE: Widget syntax (Widget(...):) is handled separately in UI parsing context
+                // We don't check for it here to avoid conflicts with if/while/for statements
             } else if self.check(&Token::LBracket) {
                 self.advance();
                 let index = self.parse_expr()?;
@@ -582,6 +561,7 @@ impl Parser {
     }
     
     /// Parse UI widget children (indented block of widgets)
+    #[allow(dead_code)]
     fn parse_widget_children(&mut self) -> Result<Vec<Expr>, String> {
         let mut children = Vec::new();
         

@@ -2,7 +2,7 @@
 
 Complete reference for all Poly JavaScript APIs.
 
-**Version:** 0.2.9
+**Version:** 0.3.0
 
 ---
 
@@ -392,7 +392,7 @@ Returns the Poly version.
 
 ```javascript
 const version = await poly.app.getVersion();
-console.log('Poly Version:', version); // "0.2.9"
+console.log('Poly Version:', version); // "0.3.0"
 ```
 
 ### `poly.app.getName()`
@@ -1581,7 +1581,7 @@ const count = await poly.invoke('getCounter'); // 3
 
 ## Configuration (poly.toml)
 
-Complete reference for all configuration options.
+Complete reference for all configuration options. Poly reads all settings from `poly.toml` - no hardcoded values.
 
 ### Basic Structure
 
@@ -1592,22 +1592,57 @@ version = "1.0.0"
 description = "An awesome app"
 author = "Your Name"
 
+[web]
+dir = "web"
+
 [window]
+title = "My App"
 width = 1024
 height = 768
-decorations = true
 resizable = true
+background_color = "#1a1a1a"
 transparent = false
-single_instance = false
+decorations = true
+always_on_top = false
+fullscreen = false
+# min_width = 400
+# min_height = 300
+# max_width = 1920
+# max_height = 1080
+# default_popup_width = 800
+# default_popup_height = 600
 
 [dev]
 port = 3000
+devtools = false
+reload_interval = 2000
+# inject_alpine = true
+# inject_lucide = true
+
+[network]
+timeout = 30
+# user_agent = "Mozilla/5.0 ..."
+max_body_size = 50000000
+
+[app]
+notification_timeout = 5000
 
 [tray]
 enabled = false
 tooltip = "My App"
+# icon_path = "assets/icon.png"
+icon_size = 32
 minimize_to_tray = false
 close_to_tray = false
+
+[browser]
+# ui_height = 80
+# width = 1200
+# height = 800
+
+[build]
+icon_size = 64
+# icon_path = "assets/icon.png"
 
 [signing.windows]
 certificate = "path/to/cert.pfx"
@@ -1626,34 +1661,77 @@ lodash = "4.17.21"
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `name` | string | Folder name | App name |
-| `version` | string | "1.0.0" | App version |
+| `name` | string | "Poly App" | App name (used as window title if not set) |
+| `version` | string | "0.1.0" | App version |
 | `description` | string | - | Description |
 | `author` | string | - | Author |
+
+### [web] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `dir` | string | "web" | Directory containing web assets |
 
 ### [window] Section
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `width` | number | 1024 | Window width |
-| `height` | number | 768 | Window height |
+| `title` | string | package.name | Window title |
+| `width` | number | 1024 | Window width in pixels |
+| `height` | number | 768 | Window height in pixels |
+| `resizable` | boolean | true | Allow window resizing |
+| `background_color` | string | "#1a1a1a" | Background color (hex) |
+| `transparent` | boolean | false | Transparent window background |
 | `decorations` | boolean | true | Show native titlebar |
-| `resizable` | boolean | true | Allow resizing |
-| `transparent` | boolean | false | Transparent background |
-| `single_instance` | boolean | false | Allow only one instance |
+| `always_on_top` | boolean | false | Window always on top |
+| `fullscreen` | boolean | false | Start in fullscreen |
+| `min_width` | number | - | Minimum window width |
+| `min_height` | number | - | Minimum window height |
+| `max_width` | number | - | Maximum window width |
+| `max_height` | number | - | Maximum window height |
+| `default_popup_width` | number | 800 | Default width for popup windows |
+| `default_popup_height` | number | 600 | Default height for popup windows |
 
 ### [dev] Section
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `port` | number | 0 (auto) | Port for dev server |
+| `port` | number | 3000 | Port for dev server |
+| `devtools` | boolean | false | Enable DevTools in native mode |
+| `reload_interval` | number | 2000 | Hot reload polling interval (ms) |
+| `inject_alpine` | boolean | false | Auto-inject Alpine.js |
+| `inject_lucide` | boolean | false | Auto-inject Lucide Icons |
+
+**Note:** By default, Poly does NOT inject any libraries. You control your own dependencies. If you want Alpine.js or Lucide Icons auto-injected into your HTML, enable them here:
+
+```toml
+[dev]
+inject_alpine = true
+inject_lucide = true
+```
+
+### [network] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `timeout` | number | 30 | HTTP request timeout in seconds |
+| `user_agent` | string | Chrome UA | Custom User-Agent string |
+| `max_body_size` | number | 50000000 | Max response body size in bytes |
+
+### [app] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `notification_timeout` | number | 5000 | Default notification timeout (ms) |
 
 ### [tray] Section
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | false | Enable system tray |
-| `tooltip` | string | App name | Tooltip on hover |
+| `tooltip` | string | package.name | Tooltip on hover |
+| `icon_path` | string | - | Path to tray icon |
+| `icon_size` | number | 32 | Tray icon size in pixels |
 | `minimize_to_tray` | boolean | false | Minimize to tray |
 | `close_to_tray` | boolean | false | Close to tray |
 
@@ -1663,6 +1741,23 @@ lodash = "4.17.21"
 |--------|------|-------------|
 | `id` | string | Unique ID (or 'show', 'quit', 'separator') |
 | `label` | string | Displayed text |
+
+### [browser] Section
+
+Browser mode creates a dual-WebView window (UI + Content).
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `ui_height` | number | 80 | Height of UI WebView in pixels |
+| `width` | number | 1200 | Browser window width |
+| `height` | number | 800 | Browser window height |
+
+### [build] Section
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `icon_size` | number | 64 | Icon size for window icon |
+| `icon_path` | string | - | Path to app icon |
 
 ### [signing.windows] Section
 
@@ -1908,38 +2003,69 @@ Poly provides a built-in browser mode for creating browser-like applications wit
 
 ### Quick Start
 
-```bash
-# Run browser mode with custom UI
-poly browser https://google.com --ui-html path/to/ui.html
+There are two ways to enable browser mode:
 
-# With custom window size
-poly browser https://example.com --width 1400 --height 900 --ui-html ui.html
+**1. Using poly.toml (recommended):**
 
-# Custom UI height (default: 80px)
-poly browser https://google.com --ui-height 100 --ui-html ui.html
+Add a `[browser]` section to your `poly.toml`:
+
+```toml
+[package]
+name = "My Browser"
+version = "1.0.0"
+
+[window]
+width = 1280
+height = 800
+decorations = false
+
+[browser]
+ui_height = 80
 ```
 
-### Command Options
+Then run:
+```bash
+poly run --native path/to/app
+```
+
+**2. Using --browser flag:**
+
+```bash
+poly run --native --browser path/to/app
+poly run --native --browser --ui-height 100 path/to/app
+```
+
+**3. Using poly browser command (standalone):**
+
+```bash
+poly browser https://google.com --ui-html path/to/ui.html
+```
+
+### Configuration Options
+
+**poly.toml [browser] section:**
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `url` | about:blank | Start URL for content area |
-| `--title` | "Poly Browser" | Window title |
-| `--width` | 1024 | Window width |
-| `--height` | 768 | Window height |
+| `ui_height` | 80 | Height of UI area in pixels |
+
+**Command line flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--browser` | false | Enable browser mode |
 | `--ui-height` | 80 | Height of UI area in pixels |
-| `--ui-html` | - | Path to custom UI HTML file |
 
 ### Architecture
 
 Browser mode creates a frameless window with two WebViews:
 
-1. **Content WebView** - Displays web pages (bottom layer)
-2. **UI WebView** - Your custom browser UI (top layer, fixed height)
+1. **Content WebView** - Displays web pages (created first, bottom layer)
+2. **UI WebView** - Your custom browser UI (created second, top layer)
 
 ```
 ┌─────────────────────────────────────┐
-│  UI WebView (titlebar + toolbar)    │  ← ui-height (80px)
+│  UI WebView (titlebar + toolbar)    │  ← ui_height (80px)
 ├─────────────────────────────────────┤
 │                                     │
 │         Content WebView             │  ← Remaining height
@@ -1948,9 +2074,11 @@ Browser mode creates a frameless window with two WebViews:
 └─────────────────────────────────────┘
 ```
 
+> **Note:** On Windows/WebView2, the creation order matters for z-order. Browser mode handles this automatically by creating the content WebView first, then the UI WebView on top.
+
 ### UI HTML Requirements
 
-Your UI HTML must use `window.ipc.postMessage()` to communicate with the native layer:
+Your `web/index.html` serves as the UI. Use `window.ipc.postMessage()` to communicate with the native layer:
 
 **IPC Commands:**
 
@@ -2166,7 +2294,236 @@ poly browser https://google.com --ui-html browser-ui.html
 
 ---
 
-*Documentation for Poly v0.2.9*
+## Browser Tab API
+
+For building multi-tab browsers, Poly provides a dedicated Tab API that manages separate WebView instances for each tab. This is the recommended approach for browser applications.
+
+### Configuration
+
+Add a `[browser]` section to your `poly.toml`:
+
+```toml
+[browser]
+ui_height = 80
+start_url = "https://google.com"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `ui_height` | number | 80 | Height of UI area in pixels |
+| `start_url` | string | "https://google.com" | Initial URL for the first tab |
+
+### IPC Commands
+
+Send commands from your UI to the native layer using `window.ipc.postMessage()`:
+
+| Command | Format | Description |
+|---------|--------|-------------|
+| Create Tab | `createTab:URL` | Creates a new tab with the given URL |
+| Close Tab | `closeTab:ID` | Closes the tab with the given ID |
+| Switch Tab | `switchTab:ID` | Switches to the tab with the given ID |
+| Navigate | `navigate:ID:URL` | Navigates a specific tab to a URL |
+| Go Back | `goBack:ID` | Goes back in history for a tab |
+| Go Forward | `goForward:ID` | Goes forward in history for a tab |
+
+```javascript
+// Create a new tab
+window.ipc.postMessage('createTab:https://google.com');
+
+// Close a tab
+window.ipc.postMessage('closeTab:' + tabId);
+
+// Switch to a tab
+window.ipc.postMessage('switchTab:' + tabId);
+
+// Navigate a specific tab
+window.ipc.postMessage('navigate:' + tabId + ':https://example.com');
+
+// Navigate active tab (use 0 or omit tab ID)
+window.ipc.postMessage('navigate:https://example.com');
+
+// Go back/forward
+window.ipc.postMessage('goBack:' + tabId);
+window.ipc.postMessage('goForward:' + tabId);
+```
+
+### Event Callbacks
+
+The native layer calls these functions on your UI when tab events occur:
+
+| Function | Parameters | Description |
+|----------|------------|-------------|
+| `window.onTabCreated(tabId)` | Tab ID (number) | A new tab was created |
+| `window.onTabActivated(tabId)` | Tab ID (number) | A tab became active |
+| `window.onTabClosed(tabId)` | Tab ID (number) | A tab was closed |
+| `window.onTabNavStart(tabId, url)` | Tab ID, URL | Navigation started in a tab |
+| `window.onTabTitleChange(tabId, title)` | Tab ID, Title | Page title changed in a tab |
+| `window.onTabLoadEnd(tabId)` | Tab ID (number) | Page finished loading in a tab |
+
+```javascript
+// Handle tab creation
+window.onTabCreated = function(tabId) {
+  console.log('Tab created:', tabId);
+  // Add tab to your UI
+};
+
+// Handle tab activation
+window.onTabActivated = function(tabId) {
+  console.log('Tab activated:', tabId);
+  // Update UI to show active tab
+};
+
+// Handle tab close
+window.onTabClosed = function(tabId) {
+  console.log('Tab closed:', tabId);
+  // Remove tab from your UI
+};
+
+// Handle navigation start
+window.onTabNavStart = function(tabId, url) {
+  console.log('Tab', tabId, 'navigating to:', url);
+  // Update URL bar, show loading indicator
+};
+
+// Handle title change (usually means page loaded)
+window.onTabTitleChange = function(tabId, title) {
+  console.log('Tab', tabId, 'title:', title);
+  // Update tab title in UI, hide loading indicator
+};
+
+// Handle load complete
+window.onTabLoadEnd = function(tabId) {
+  console.log('Tab', tabId, 'loaded');
+  // Hide loading indicator
+};
+```
+
+### Complete Tab Browser Example
+
+```javascript
+// Tab state management
+const tabs = new Map(); // tabId -> { url, title, loading }
+let activeTabId = null;
+
+// Create a new tab
+function createTab(url = 'https://google.com') {
+  window.ipc.postMessage('createTab:' + url);
+}
+
+// Close a tab
+function closeTab(tabId) {
+  if (tabs.size > 1) {
+    window.ipc.postMessage('closeTab:' + tabId);
+  }
+}
+
+// Switch to a tab
+function switchTab(tabId) {
+  if (tabId !== activeTabId) {
+    window.ipc.postMessage('switchTab:' + tabId);
+  }
+}
+
+// Navigate the active tab
+function navigate(url) {
+  if (activeTabId) {
+    window.ipc.postMessage('navigate:' + activeTabId + ':' + url);
+  }
+}
+
+// Event handlers
+window.onTabCreated = function(tabId) {
+  tabs.set(tabId, { url: 'about:blank', title: 'New Tab', loading: true });
+  renderTabs();
+};
+
+window.onTabActivated = function(tabId) {
+  activeTabId = tabId;
+  const tab = tabs.get(tabId);
+  if (tab) {
+    document.getElementById('urlInput').value = tab.url;
+  }
+  renderTabs();
+};
+
+window.onTabClosed = function(tabId) {
+  tabs.delete(tabId);
+  renderTabs();
+};
+
+window.onTabNavStart = function(tabId, url) {
+  const tab = tabs.get(tabId);
+  if (tab) {
+    tab.url = url;
+    tab.loading = true;
+  }
+  if (tabId === activeTabId) {
+    document.getElementById('urlInput').value = url;
+    showLoading();
+  }
+  renderTabs();
+};
+
+window.onTabTitleChange = function(tabId, title) {
+  const tab = tabs.get(tabId);
+  if (tab) {
+    tab.title = title;
+    tab.loading = false;
+  }
+  if (tabId === activeTabId) {
+    hideLoading();
+  }
+  renderTabs();
+};
+
+// Render tabs UI
+function renderTabs() {
+  const container = document.getElementById('tabs');
+  container.innerHTML = Array.from(tabs.entries()).map(([id, tab]) => `
+    <div class="tab ${id === activeTabId ? 'active' : ''}" onclick="switchTab(${id})">
+      <span>${tab.title}</span>
+      <button onclick="event.stopPropagation(); closeTab(${id})">×</button>
+    </div>
+  `).join('');
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 't') {
+    e.preventDefault();
+    createTab();
+  } else if (e.ctrlKey && e.key === 'w') {
+    e.preventDefault();
+    if (activeTabId) closeTab(activeTabId);
+  }
+});
+```
+
+### Architecture
+
+Each tab is a separate WebView instance with its own:
+- Navigation history (back/forward)
+- Page state
+- JavaScript context
+
+```
+┌─────────────────────────────────────┐
+│  UI WebView (tabs + toolbar)        │  ← ui_height (80px)
+├─────────────────────────────────────┤
+│                                     │
+│  Tab 1 WebView (visible)            │  ← Active tab
+│                                     │
+│  Tab 2 WebView (hidden)             │  ← Background tabs
+│  Tab 3 WebView (hidden)             │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+> **Note:** On Windows, the UI WebView is always on top. Tab WebViews are shown/hidden based on which tab is active.
+
+---
+
+*Documentation for Poly v0.3.0*
 
 
 ---

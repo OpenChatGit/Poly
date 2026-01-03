@@ -1,22 +1,30 @@
 //! Package Management for Poly
 //! Fast npm-based package manager (UV-style)
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write};
 use std::path::Path;
+
+#[cfg(feature = "native")]
+use std::collections::HashSet;
+#[cfg(feature = "native")]
+use std::io::{self, Write};
+#[cfg(feature = "native")]
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "native")]
 use std::thread;
 
 // ANSI colors
 const CYAN: &str = "\x1b[36m";
 const GREEN: &str = "\x1b[32m";
+#[allow(dead_code)]
 const YELLOW: &str = "\x1b[33m";
 const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
 /// NPM package metadata
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct NpmPackage {
     pub name: String,
@@ -26,11 +34,11 @@ pub struct NpmPackage {
     pub dependencies: HashMap<String, String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct NpmDist {
     pub tarball: String,
     #[serde(default)]
-    #[allow(dead_code)]
     pub integrity: Option<String>,
 }
 
@@ -75,6 +83,7 @@ pub fn fetch_npm_package(client: &reqwest::blocking::Client, name: &str, version
 }
 
 #[cfg(not(feature = "native"))]
+#[allow(dead_code)]
 pub fn fetch_npm_package(_client: &(), _name: &str, _version: Option<&str>) -> Result<NpmPackage, String> {
     Err("Requires native feature".to_string())
 }
@@ -134,10 +143,12 @@ pub fn download_and_extract(client: &reqwest::blocking::Client, pkg: &NpmPackage
 }
 
 #[cfg(not(feature = "native"))]
+#[allow(dead_code)]
 pub fn download_and_extract(_client: &(), _pkg: &NpmPackage, _dest: &Path) -> Result<String, String> {
     Err("Requires native feature".to_string())
 }
 
+#[allow(dead_code)]
 fn base64_encode(data: &[u8]) -> String {
     const ALPHA: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut result = String::new();
@@ -169,6 +180,7 @@ pub fn write_lockfile(entries: &HashMap<String, LockEntry>) -> Result<(), String
 
 
 /// Package to install
+#[allow(dead_code)]
 #[derive(Clone)]
 struct PackageJob {
     name: String,
@@ -451,6 +463,7 @@ pub fn install_packages(_verify_only: bool) -> Result<(), String> {
     Err("Requires native feature".to_string())
 }
 
+#[allow(dead_code)]
 fn update_poly_toml(package: &str, version: &str) -> Result<(), String> {
     let path = Path::new("poly.toml");
     let content = fs::read_to_string(path).map_err(|e| format!("Read error: {}", e))?;

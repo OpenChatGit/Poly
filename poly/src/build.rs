@@ -383,7 +383,7 @@ pub fn load_signing_config(project_path: &Path) -> SigningConfig {
     let poly_toml = project_path.join("poly.toml");
     if poly_toml.exists() {
         if let Ok(content) = fs::read_to_string(&poly_toml) {
-            let mut in_signing_section = false;
+            let mut _in_signing_section = false;
             let mut in_windows_section = false;
             let mut in_macos_section = false;
             
@@ -391,19 +391,19 @@ pub fn load_signing_config(project_path: &Path) -> SigningConfig {
                 let line = line.trim();
                 
                 if line == "[signing]" {
-                    in_signing_section = true;
+                    _in_signing_section = true;
                     in_windows_section = false;
                     in_macos_section = false;
                 } else if line == "[signing.windows]" {
-                    in_signing_section = false;
+                    _in_signing_section = false;
                     in_windows_section = true;
                     in_macos_section = false;
                 } else if line == "[signing.macos]" {
-                    in_signing_section = false;
+                    _in_signing_section = false;
                     in_windows_section = false;
                     in_macos_section = true;
                 } else if line.starts_with('[') {
-                    in_signing_section = false;
+                    _in_signing_section = false;
                     in_windows_section = false;
                     in_macos_section = false;
                 } else if in_windows_section {
@@ -576,6 +576,7 @@ fn sign_macos(exe_path: &Path, config: &SigningConfig) -> Result<(), String> {
 }
 
 /// Notarize macOS app bundle with Apple
+#[allow(dead_code)]
 pub fn notarize_macos(app_path: &Path, config: &SigningConfig) -> Result<(), String> {
     let apple_id = config.macos_notarize_apple_id.as_ref()
         .ok_or("No Apple ID for notarization. Set POLY_MACOS_APPLE_ID")?;
@@ -630,6 +631,7 @@ pub fn notarize_macos(app_path: &Path, config: &SigningConfig) -> Result<(), Str
 }
 
 /// Create Windows installer (portable zip for now)
+#[allow(unused_variables)]
 fn create_windows_installer(
     dist_dir: &Path,
     app_name: &str,
@@ -652,14 +654,14 @@ fn create_windows_installer(
         add_dir_to_zip(&mut zip, dist_dir, "", &options)?;
         
         zip.finish().map_err(|e| format!("Failed to finish zip: {}", e))?;
+        
+        return Ok(zip_path);
     }
     
     #[cfg(not(feature = "native"))]
     {
-        return Err("Installer creation requires native feature".to_string());
+        Err("Installer creation requires native feature".to_string())
     }
-    
-    Ok(zip_path)
 }
 
 #[cfg(feature = "native")]

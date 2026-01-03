@@ -4,6 +4,8 @@
 #[cfg(feature = "native")]
 use wry::WebViewBuilder;
 
+use crate::config::PolyConfig;
+
 /// Configuration for native window
 #[derive(Debug, Clone)]
 pub struct NativeConfig {
@@ -24,6 +26,7 @@ pub struct NativeConfig {
     pub close_to_tray: bool,
     pub tray_menu_items: Vec<(String, String)>,
     pub single_instance: bool,
+    pub background_color: (u8, u8, u8, u8),
 }
 
 impl Default for NativeConfig {
@@ -46,6 +49,7 @@ impl Default for NativeConfig {
             close_to_tray: false,
             tray_menu_items: Vec::new(),
             single_instance: false,
+            background_color: (26, 26, 26, 255),
         }
     }
 }
@@ -53,6 +57,34 @@ impl Default for NativeConfig {
 impl NativeConfig {
     pub fn new(title: &str) -> Self {
         Self { title: title.to_string(), ..Default::default() }
+    }
+    
+    /// Create NativeConfig from PolyConfig (poly.toml)
+    pub fn from_poly_config(config: &PolyConfig) -> Self {
+        // Use window.icon_path first, fallback to build.icon_path
+        let icon_path = config.window.icon_path.clone()
+            .or_else(|| config.build.icon_path.clone());
+        
+        Self {
+            title: config.get_title().to_string(),
+            width: config.window.width,
+            height: config.window.height,
+            resizable: config.window.resizable,
+            fullscreen: config.window.fullscreen,
+            transparent: config.window.transparent,
+            decorations: config.window.decorations,
+            always_on_top: config.window.always_on_top,
+            dev_tools: config.dev.devtools,
+            icon_path,
+            tray_enabled: config.tray.enabled,
+            tray_icon_path: config.tray.icon_path.clone(),
+            tray_tooltip: Some(config.get_tray_tooltip().to_string()),
+            minimize_to_tray: config.tray.minimize_to_tray,
+            close_to_tray: config.tray.close_to_tray,
+            tray_menu_items: Vec::new(),
+            single_instance: false,
+            background_color: config.get_background_rgba(),
+        }
     }
     
     pub fn with_size(mut self, width: u32, height: u32) -> Self {
@@ -93,6 +125,10 @@ impl NativeConfig {
     
     pub fn with_single_instance(mut self, enabled: bool) -> Self {
         self.single_instance = enabled; self
+    }
+    
+    pub fn with_background_color(mut self, r: u8, g: u8, b: u8, a: u8) -> Self {
+        self.background_color = (r, g, b, a); self
     }
 }
 
@@ -226,7 +262,7 @@ pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn
     let bg_color = if config.transparent {
         (0, 0, 0, 0)
     } else {
-        (26, 26, 26, 255) // #1a1a1a - dark gray
+        config.background_color
     };
     
     let webview = WebViewBuilder::new()
@@ -340,7 +376,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     let bg_color = if config.transparent {
         (0, 0, 0, 0)
     } else {
-        (26, 26, 26, 255) // #1a1a1a - dark gray
+        config.background_color
     };
     
     // Get titlebar config and create injection script that runs on every page

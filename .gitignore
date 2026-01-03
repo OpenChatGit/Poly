@@ -11,6 +11,9 @@ Cargo.lock
 *.swo
 *~
 
+# MD
+CHANGELOG.md
+
 # OS
 .DS_Store
 Thumbs.db

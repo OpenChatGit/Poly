@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.2.9";
+const VERSION: &str = "0.3.1";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -77,6 +77,14 @@ enum Commands {
         /// Run as native window (requires --features native)
         #[arg(long)]
         native: bool,
+        
+        /// Browser mode: UI WebView + Content WebView (for browser-like apps)
+        #[arg(long)]
+        browser: bool,
+        
+        /// UI height in pixels for browser mode (default: 80)
+        #[arg(long, default_value = "80")]
+        ui_height: u32,
     },
     
     /// Build the application
@@ -197,6 +205,504 @@ enum Commands {
     },
 }
 
+/// Cookie storage for PolyView proxy
+use std::sync::Mutex;
+lazy_static::lazy_static! {
+    static ref POLYVIEW_COOKIES: Mutex<std::collections::HashMap<String, Vec<String>>> = Mutex::new(std::collections::HashMap::new());
+}
+
+/// Handle PolyView proxy request - fetches URL and rewrites content to bypass iframe restrictions
+/// This is "iframe2" - better than normal iframes because it bypasses ALL restrictions
+fn handle_polyview_proxy(target_url: &str, proxy_port: u16) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    
+    
+    println!("[PolyView] Proxying: {}", target_url);
+    
+    // Parse URL to get domain for cookies
+    let domain = url::Url::parse(target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    
+    // Build a client that looks like a real browser
+    // Key: Don't follow redirects automatically - we need to rewrite redirect URLs
+    let client = ureq::AgentBuilder::new()
+        .redirects(0) // Handle redirects manually to rewrite them
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build();
+    
+    // Get stored cookies for this domain
+    let cookie_header = {
+        let cookies = POLYVIEW_COOKIES.lock().unwrap();
+        if let Some(domain_cookies) = cookies.get(&domain) {
+            domain_cookies.join("; ")
+        } else {
+            String::new()
+        }
+    };
+    
+    let mut req = client.get(target_url)
+        .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+        .set("Accept-Language", "en-US,en;q=0.9,de;q=0.8")
+        .set("Accept-Encoding", "identity") // Don't request compression
+        .set("Cache-Control", "no-cache")
+        .set("Pragma", "no-cache")
+        .set("Sec-Ch-Ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"")
+        .set("Sec-Ch-Ua-Mobile", "?0")
+        .set("Sec-Ch-Ua-Platform", "\"Windows\"")
+        .set("Sec-Fetch-Dest", "document")
+        .set("Sec-Fetch-Mode", "navigate")
+        .set("Sec-Fetch-Site", "none")
+        .set("Sec-Fetch-User", "?1")
+        .set("Upgrade-Insecure-Requests", "1");
+    
+    // Add cookies if we have them
+    if !cookie_header.is_empty() {
+        req = req.set("Cookie", &cookie_header);
+    }
+    
+    match req.call() {
+        Ok(response) => {
+            process_polyview_response(response, target_url, proxy_port, &domain, 200)
+        }
+        Err(ureq::Error::Status(code, response)) => {
+            // Handle redirects (3xx) and error responses
+            if (300..400).contains(&code) {
+                // Handle redirect - rewrite Location header
+                if let Some(location) = response.header("Location") {
+                    let absolute_url = resolve_polyview_url(target_url, location);
+                    let proxied_location = format!(
+                        "http://localhost:{}/__polyview/?url={}",
+                        proxy_port,
+                        urlencoding::encode(&absolute_url)
+                    );
+                    
+                    // Store any cookies from redirect response
+                    store_polyview_cookies(&response, &domain);
+                    
+                    return tiny_http::Response::from_string("")
+                        .with_status_code(code)
+                        .with_header(tiny_http::Header::from_bytes(&b"Location"[..], proxied_location.as_bytes()).unwrap())
+                        .with_header(tiny_http::Header::from_bytes(&b"X-Frame-Options"[..], &b"ALLOWALL"[..]).unwrap())
+                        .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+                }
+            }
+            process_polyview_response(response, target_url, proxy_port, &domain, code)
+        }
+        Err(e) => {
+            println!("[PolyView] Error: {}", e);
+            let error_html = format!(
+                r#"<!DOCTYPE html>
+                <html>
+                <head><title>Error</title></head>
+                <body style="font-family:system-ui;padding:40px;background:#1a1a1f;color:#fff">
+                <h1>Failed to load page</h1>
+                <p style="color:#888">{}</p>
+                <p style="color:#666;font-size:12px">{}</p>
+                </body>
+                </html>"#,
+                target_url, e
+            );
+            tiny_http::Response::from_string(error_html)
+                .with_status_code(502)
+                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap())
+        }
+    }
+}
+
+/// Store cookies from response
+fn store_polyview_cookies(response: &ureq::Response, domain: &str) {
+    let mut cookies = POLYVIEW_COOKIES.lock().unwrap();
+    let entry = cookies.entry(domain.to_string()).or_insert_with(Vec::new);
+    
+    // Get all Set-Cookie headers
+    for name in response.headers_names() {
+        if name.eq_ignore_ascii_case("set-cookie") {
+            if let Some(value) = response.header(&name) {
+                // Extract just the cookie name=value part (before ;)
+                let cookie = value.split(';').next().unwrap_or(value).to_string();
+                let cookie_name = cookie.split('=').next().unwrap_or("");
+                
+                // Update or add cookie
+                entry.retain(|c| !c.starts_with(&format!("{}=", cookie_name)));
+                entry.push(cookie);
+            }
+        }
+    }
+}
+
+/// Process PolyView response
+fn process_polyview_response(
+    response: ureq::Response,
+    target_url: &str,
+    proxy_port: u16,
+    domain: &str,
+    status: u16
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    use std::io::Read;
+    
+    let content_type = response.content_type().to_string();
+    let is_html = content_type.contains("text/html");
+    
+    // Store cookies from response
+    store_polyview_cookies(&response, domain);
+    
+    // Read body
+    let body = if is_html {
+        let mut body_str = String::new();
+        let reader = response.into_reader();
+        let _ = reader.take(50_000_000).read_to_string(&mut body_str);
+        rewrite_polyview_html(&body_str, target_url, proxy_port).into_bytes()
+    } else {
+        let mut body = Vec::new();
+        let reader = response.into_reader();
+        let _ = reader.take(50_000_000).read_to_end(&mut body);
+        body
+    };
+    
+    // Build response - strip ALL blocking headers
+    let mut resp = tiny_http::Response::from_data(body)
+        .with_status_code(status);
+    
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()
+    );
+    // Remove X-Frame-Options completely by setting ALLOWALL
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"X-Frame-Options"[..], &b"ALLOWALL"[..]).unwrap()
+    );
+    // Override CSP to allow framing from anywhere AND allow all content
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(
+            &b"Content-Security-Policy"[..], 
+            &b"frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline';"[..]
+        ).unwrap()
+    );
+    // Allow all origins
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap()
+    );
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, PUT, DELETE, OPTIONS"[..]).unwrap()
+    );
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap()
+    );
+    resp = resp.with_header(
+        tiny_http::Header::from_bytes(&b"Access-Control-Allow-Credentials"[..], &b"true"[..]).unwrap()
+    );
+    
+    resp
+}
+
+/// Handle PolyView POST request - for form submissions
+fn handle_polyview_proxy_post(target_url: &str, proxy_port: u16, body: &[u8], content_type: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    
+    
+    println!("[PolyView] POST: {}", target_url);
+    
+    let domain = url::Url::parse(target_url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    
+    let client = ureq::AgentBuilder::new()
+        .redirects(0)
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .build();
+    
+    // Get stored cookies
+    let cookie_header = {
+        let cookies = POLYVIEW_COOKIES.lock().unwrap();
+        if let Some(domain_cookies) = cookies.get(&domain) {
+            domain_cookies.join("; ")
+        } else {
+            String::new()
+        }
+    };
+    
+    let mut req = client.post(target_url)
+        .set("Content-Type", content_type)
+        .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .set("Accept-Language", "en-US,en;q=0.9")
+        .set("Origin", &format!("http://localhost:{}", proxy_port))
+        .set("Sec-Ch-Ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\"")
+        .set("Sec-Ch-Ua-Mobile", "?0")
+        .set("Sec-Ch-Ua-Platform", "\"Windows\"")
+        .set("Sec-Fetch-Dest", "document")
+        .set("Sec-Fetch-Mode", "navigate")
+        .set("Sec-Fetch-Site", "same-origin")
+        .set("Upgrade-Insecure-Requests", "1");
+    
+    if !cookie_header.is_empty() {
+        req = req.set("Cookie", &cookie_header);
+    }
+    
+    match req.send_bytes(body) {
+        Ok(response) => {
+            process_polyview_response(response, target_url, proxy_port, &domain, 200)
+        }
+        Err(ureq::Error::Status(code, response)) => {
+            if (300..400).contains(&code) {
+                if let Some(location) = response.header("Location") {
+                    let absolute_url = resolve_polyview_url(target_url, location);
+                    let proxied_location = format!(
+                        "http://localhost:{}/__polyview/?url={}",
+                        proxy_port,
+                        urlencoding::encode(&absolute_url)
+                    );
+                    
+                    store_polyview_cookies(&response, &domain);
+                    
+                    return tiny_http::Response::from_string("")
+                        .with_status_code(code)
+                        .with_header(tiny_http::Header::from_bytes(&b"Location"[..], proxied_location.as_bytes()).unwrap())
+                        .with_header(tiny_http::Header::from_bytes(&b"X-Frame-Options"[..], &b"ALLOWALL"[..]).unwrap());
+                }
+            }
+            process_polyview_response(response, target_url, proxy_port, &domain, code)
+        }
+        Err(e) => {
+            println!("[PolyView] POST Error: {}", e);
+            let error_html = format!(
+                r#"<!DOCTYPE html><html><body style="font-family:system-ui;padding:40px;background:#1a1a1f;color:#fff">
+                <h1>POST Failed</h1><p style="color:#888">{}</p></body></html>"#,
+                e
+            );
+            tiny_http::Response::from_string(error_html)
+                .with_status_code(502)
+                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap())
+        }
+    }
+}
+
+/// Resolve a relative URL against a base URL for PolyView
+fn resolve_polyview_url(base: &str, relative: &str) -> String {
+    if relative.starts_with("http://") || relative.starts_with("https://") {
+        relative.to_string()
+    } else if relative.starts_with("//") {
+        if base.starts_with("https://") {
+            format!("https:{}", relative)
+        } else {
+            format!("http:{}", relative)
+        }
+    } else if let Ok(base_url) = url::Url::parse(base) {
+        base_url.join(relative)
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| relative.to_string())
+    } else {
+        relative.to_string()
+    }
+}
+
+/// Rewrite HTML to proxy all URLs through PolyView
+/// This is the core of "iframe2" - making the content work seamlessly in an iframe
+fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String {
+    let proxy_base = format!("http://localhost:{}/__polyview/?url=", proxy_port);
+    
+    let mut result = html.to_string();
+    
+    // Inject base tag for relative URLs
+    let base_tag = format!(r#"<base href="{}">"#, base_url);
+    if let Some(head_pos) = result.to_lowercase().find("<head") {
+        if let Some(close_pos) = result[head_pos..].find('>') {
+            let insert_pos = head_pos + close_pos + 1;
+            result.insert_str(insert_pos, &base_tag);
+        }
+    }
+    
+    // Rewrite href, src, action attributes
+    result = rewrite_polyview_attribute(&result, "href", base_url, &proxy_base);
+    result = rewrite_polyview_attribute(&result, "src", base_url, &proxy_base);
+    result = rewrite_polyview_attribute(&result, "action", base_url, &proxy_base);
+    
+    // Inject PolyView client script - this is what makes iframe2 special
+    // It intercepts navigation, form submissions, and reports state to parent
+    let client_script = format!(r#"
+<script>
+(function() {{
+    // PolyView Client - "iframe2" magic
+    const PROXY_BASE = 'http://localhost:{}/__polyview/?url=';
+    const BASE_URL = '{}';
+    const PROXY_PORT = {};
+    
+    // Report to parent window
+    function reportToParent(type, data) {{
+        if (window.parent && window.parent !== window) {{
+            window.parent.postMessage({{ type: 'polyview:' + type, ...data }}, '*');
+        }}
+    }}
+    
+    // Convert URL to proxy URL
+    function toProxyUrl(url) {{
+        if (!url || url.startsWith('javascript:') || url.startsWith('data:') || 
+            url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('#') ||
+            url.includes('/__polyview/')) {{
+            return url;
+        }}
+        // Make absolute
+        try {{
+            const absolute = new URL(url, BASE_URL).href;
+            return PROXY_BASE + encodeURIComponent(absolute);
+        }} catch {{
+            return url;
+        }}
+    }}
+    
+    // Intercept link clicks
+    document.addEventListener('click', function(e) {{
+        const link = e.target.closest('a[href]');
+        if (link) {{
+            const href = link.getAttribute('href');
+            if (href && !href.startsWith('javascript:') && !href.startsWith('#') && 
+                !href.startsWith('mailto:') && !href.startsWith('tel:')) {{
+                e.preventDefault();
+                const proxyUrl = toProxyUrl(href);
+                window.location.href = proxyUrl;
+            }}
+        }}
+    }}, true);
+    
+    // Intercept form submissions
+    document.addEventListener('submit', function(e) {{
+        const form = e.target;
+        if (form.tagName === 'FORM') {{
+            const action = form.getAttribute('action') || window.location.href;
+            if (!action.includes('/__polyview/')) {{
+                e.preventDefault();
+                const proxyAction = toProxyUrl(action);
+                form.setAttribute('action', proxyAction);
+                form.submit();
+            }}
+        }}
+    }}, true);
+    
+    // Intercept window.open
+    const originalOpen = window.open;
+    window.open = function(url, target, features) {{
+        if (url && !url.startsWith('javascript:')) {{
+            url = toProxyUrl(url);
+        }}
+        return originalOpen.call(window, url, target, features);
+    }};
+    
+    // Intercept location changes
+    const locationProxy = new Proxy(window.location, {{
+        set: function(target, prop, value) {{
+            if (prop === 'href' && value && !value.includes('/__polyview/')) {{
+                value = toProxyUrl(value);
+            }}
+            target[prop] = value;
+            return true;
+        }}
+    }});
+    
+    // Report page load
+    window.addEventListener('load', function() {{
+        reportToParent('loaded', {{ url: BASE_URL, title: document.title }});
+    }});
+    
+    // Watch for title changes
+    const titleEl = document.querySelector('title');
+    if (titleEl) {{
+        new MutationObserver(function() {{
+            reportToParent('title', {{ title: document.title }});
+        }}).observe(titleEl, {{ childList: true, characterData: true, subtree: true }});
+    }}
+    
+    // Report initial navigation
+    reportToParent('navigate', {{ url: BASE_URL }});
+    
+    // Override fetch to handle CORS
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options) {{
+        if (typeof url === 'string' && url.startsWith('http') && !url.includes('localhost')) {{
+            // Route through proxy for cross-origin requests
+            url = toProxyUrl(url);
+        }}
+        return originalFetch.call(window, url, options);
+    }};
+    
+    // Override XMLHttpRequest
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(method, url, ...args) {{
+        if (typeof url === 'string' && url.startsWith('http') && !url.includes('localhost')) {{
+            url = toProxyUrl(url);
+        }}
+        return originalXHROpen.call(this, method, url, ...args);
+    }};
+    
+    console.log('[PolyView] iframe2 client loaded for:', BASE_URL);
+}})();
+</script>
+"#, proxy_port, base_url, proxy_port);
+    
+    if let Some(pos) = result.to_lowercase().find("</head>") {
+        result.insert_str(pos, &client_script);
+    } else if let Some(pos) = result.to_lowercase().find("<body") {
+        result.insert_str(pos, &client_script);
+    }
+    
+    result
+}
+
+/// Rewrite a specific attribute in HTML for PolyView
+fn rewrite_polyview_attribute(html: &str, attr: &str, base_url: &str, proxy_base: &str) -> String {
+    let mut result = String::with_capacity(html.len() * 2);
+    let mut remaining = html;
+    
+    let patterns = [
+        format!(r#"{}=""#, attr),
+        format!(r#"{}='"#, attr),
+    ];
+    
+    while !remaining.is_empty() {
+        let mut found = false;
+        
+        for pattern in &patterns {
+            if let Some(pos) = remaining.to_lowercase().find(&pattern.to_lowercase()) {
+                result.push_str(&remaining[..pos]);
+                
+                let after_attr = &remaining[pos + pattern.len()..];
+                let quote = if pattern.ends_with('"') { '"' } else { '\'' };
+                let end_pos = after_attr.find(quote).unwrap_or(after_attr.len());
+                let url_value = &after_attr[..end_pos];
+                
+                let should_proxy = !url_value.starts_with('#') 
+                    && !url_value.starts_with("javascript:")
+                    && !url_value.starts_with("data:")
+                    && !url_value.starts_with("mailto:")
+                    && !url_value.starts_with("tel:")
+                    && !url_value.contains("/__polyview/")
+                    && !url_value.is_empty();
+                
+                if should_proxy {
+                    let absolute_url = resolve_polyview_url(base_url, url_value);
+                    let proxied_url = format!("{}{}", proxy_base, urlencoding::encode(&absolute_url));
+                    result.push_str(&format!("{}=\"{}", attr, proxied_url));
+                } else {
+                    result.push_str(&remaining[pos..pos + pattern.len()]);
+                    result.push_str(url_value);
+                }
+                
+                result.push(quote);
+                remaining = &after_attr[end_pos + 1..];
+                found = true;
+                break;
+            }
+        }
+        
+        if !found {
+            result.push_str(remaining);
+            break;
+        }
+    }
+    
+    result
+}
+
 fn main() {
     let cli = Cli::parse();
     
@@ -208,7 +714,7 @@ fn main() {
     
     let result = match cli.command {
         Some(Commands::Dev { path, port, open }) => { run_dev_server(&path, port, open); Ok(()) },
-        Some(Commands::Run { path, release, native }) => run_app_result(&path, release, native),
+        Some(Commands::Run { path, release, native, browser, ui_height }) => run_app_result(&path, release, native, browser, ui_height),
         Some(Commands::Build { path, target, release, installer, sign, ci }) => { 
             if ci {
                 if let Err(e) = build::generate_ci_workflow(Path::new(&path)) {
@@ -258,8 +764,8 @@ fn main() {
                             }
                         }
                         
-                        // Run native app from bundle
-                        run_native_app(exe_dir, false);
+                        // Run native app from bundle (default: no browser mode, ui_height 80)
+                        run_native_app(exe_dir, false, false, 80);
                         return;
                     }
                 }
@@ -461,6 +967,7 @@ fn download_and_install_update(info: &poly::UpdateInfo) {
 }
 
 #[cfg(not(feature = "native"))]
+#[allow(dead_code)]
 fn download_and_install_update(_info: &poly::UpdateInfo) {
     println!("  {}>{} Update requires native feature", YELLOW, RESET);
 }
@@ -518,6 +1025,17 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     
     let project_path = Path::new(path);
     let project_path_owned = project_path.to_path_buf();
+    
+    // Load config from poly.toml
+    let config = poly::PolyConfig::load(project_path);
+    
+    // Get values from config
+    let inject_alpine = config.dev.inject_alpine;
+    let inject_lucide = config.dev.inject_lucide;
+    let reload_interval = config.dev.reload_interval;
+    
+    // Use config port if set, otherwise CLI arg (CLI arg takes precedence if not default)
+    let port = if port != 3000 { port } else { config.dev.port };
     
     let entry = find_entry_point(project_path);
     if entry.is_none() {
@@ -582,17 +1100,17 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
                     if custom_index.exists() {
                         let mut html = fs::read_to_string(&custom_index).unwrap_or_default();
                         
-                        // Only inject Alpine.js if not already present
-                        if !html.contains("alpine") && !html.contains("Alpine") {
-                            let head_scripts = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
+                        // Only inject if enabled in poly.toml [dev] section
+                        if inject_alpine && !html.contains("alpine") && !html.contains("Alpine") {
+                            let alpine_script = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>"#;
                             if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                                html = html.replace("</head>", &format!("{}</head>", alpine_script));
                             }
-                        } else if !html.contains("lucide") {
-                            let head_scripts = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
+                        }
+                        if inject_lucide && !html.contains("lucide") {
+                            let lucide_script = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
                             if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                                html = html.replace("</head>", &format!("{}</head>", lucide_script));
                             }
                         }
                         
@@ -953,6 +1471,19 @@ window.poly = {{
     async list() {{ return poly.invoke('__poly_multiview_list', {{}}); }},
     // Get window info
     async get(windowId) {{ return poly.invoke('__poly_multiview_get', {{ windowId }}); }}
+  }},
+  // PolyView API - "iframe2" that bypasses all iframe restrictions
+  // Use <poly-view src="https://example.com"></poly-view> in your HTML
+  polyview: {{
+    // Get the proxy URL for a target URL
+    proxyUrl(url) {{ return '/__polyview/?url=' + encodeURIComponent(url); }},
+    // Navigate a poly-view element
+    navigate(element, url) {{
+      if (element && element.navigate) element.navigate(url);
+      else if (element) element.src = this.proxyUrl(url);
+    }},
+    // Check if PolyView is available
+    isAvailable() {{ return typeof customElements !== 'undefined' && customElements.get('poly-view') !== undefined; }}
   }}
 }};
 // Initialize Lucide Icons
@@ -964,14 +1495,14 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
     if (!document.hidden) {{
       try {{ const r = await fetch('/__poly_reload'); const d = await r.json(); if (d.version > v) {{ v = d.version; location.reload(); }} }} catch(e) {{}}
     }}
-    if (polling) setTimeout(check, 2000);
+    if (polling) setTimeout(check, {reload_interval});
   }}
   function start() {{ if (!polling) {{ polling = true; check(); }} }}
   function stop() {{ polling = false; }}
   document.addEventListener('visibilitychange', () => document.hidden ? stop() : start());
   start();
 }})();
-</script>"#, reload_counter_http.load(Ordering::Relaxed));
+</script>"#, reload_counter_http.load(Ordering::Relaxed), reload_interval = reload_interval);
                         // Insert before </body> or at end
                         if html.contains("</body>") {
                             html = html.replace("</body>", &format!("{}</body>", reload_script));
@@ -1171,8 +1702,12 @@ fn handle_ipc_invoke_stateful(interpreter: &std::sync::Arc<std::sync::Mutex<poly
         return handle_system_api(fn_name, &args);
     }
     
-    // Build argument string from JSON
-    let args_str = json_to_poly_value(&args);
+    // Build argument string from JSON - skip empty objects
+    let args_str = if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+        String::new() // No arguments
+    } else {
+        json_to_poly_value(&args)
+    };
     
     // Call function on persistent interpreter
     let mut interp = interpreter.lock().unwrap();
@@ -1210,8 +1745,12 @@ fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
         Err(e) => return serde_json::json!({"error": format!("Failed to read: {}", e)}).to_string(),
     };
     
-    // Build argument string from JSON (pass entire args object as single argument)
-    let args_str = json_to_poly_value(&args);
+    // Build argument string from JSON - skip empty objects
+    let args_str = if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+        String::new() // No arguments
+    } else {
+        json_to_poly_value(&args)
+    };
     
     // Create a call expression - the result will be the last evaluated value
     let call_expr = format!("{fn_name}({args_str})");
@@ -1228,6 +1767,7 @@ fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
 }
 
 /// Handle built-in system APIs
+#[allow(unused_variables)]
 fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
     match fn_name {
         // File Dialogs
@@ -2907,12 +3447,12 @@ fn open_in_browser(url: &str) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 
-fn run_app_result(path: &str, release: bool, native: bool) -> Result<(), String> {
+fn run_app_result(path: &str, release: bool, native: bool, browser: bool, ui_height: u32) -> Result<(), String> {
     let project_path = Path::new(path);
     
     // If native mode, try to run in a WebView window
     if native {
-        run_native_app(project_path, release);
+        run_native_app(project_path, release, browser, ui_height);
         return Ok(());
     }
     
@@ -3025,6 +3565,7 @@ fn run_browser_mode(url: &str, title: &str, width: u32, height: u32, ui_height: 
 }
 
 /// Default browser UI HTML
+#[allow(dead_code)]
 fn default_browser_ui() -> String {
     // Minimal default - apps should provide their own UI via --ui-html
     r#"<!DOCTYPE html>
@@ -3040,7 +3581,8 @@ body { background: #1a1a1f; height: 100%; display: flex; align-items: center; ju
 </html>"#.to_string()
 }
 
-fn run_native_app(project_path: &Path, _release: bool) {
+#[allow(unused_variables)]
+fn run_native_app(project_path: &Path, _release: bool, browser_flag: bool, ui_height_arg: u32) {
     use std::sync::Arc;
     use std::thread;
     
@@ -3095,10 +3637,15 @@ fn run_native_app(project_path: &Path, _release: bool) {
             .to_string()
     };
     
-    // Check for [browser] section in poly.toml - if present, use browser mode
-    let browser_mode = if poly_toml_path.exists() {
+    // Check for [browser] section in poly.toml OR --browser flag
+    // Must be an actual section, not a comment
+    let browser_mode = browser_flag || if poly_toml_path.exists() {
         if let Ok(content) = fs::read_to_string(&poly_toml_path) {
-            content.contains("[browser]")
+            // Check for actual [browser] section (not commented out)
+            content.lines().any(|line| {
+                let trimmed = line.trim();
+                trimmed == "[browser]"
+            })
         } else {
             false
         }
@@ -3109,11 +3656,12 @@ fn run_native_app(project_path: &Path, _release: bool) {
     // If browser mode is enabled, use the dual-WebView browser window
     #[cfg(feature = "native")]
     if browser_mode {
-        // Parse browser config
-        let mut ui_height: u32 = 80;
+        // Parse browser config - use arg if provided, otherwise from poly.toml
+        let mut ui_height: u32 = if ui_height_arg != 80 { ui_height_arg } else { 80 };
         let mut browser_width: u32 = 1200;
         let mut browser_height: u32 = 800;
         let mut dev_port: u16 = 0;
+        let mut start_url: String = "https://google.com".to_string();
         
         if let Ok(content) = fs::read_to_string(&poly_toml_path) {
             let mut in_browser_section = false;
@@ -3138,8 +3686,18 @@ fn run_native_app(project_path: &Path, _release: bool) {
                     in_window_section = false;
                     in_dev_section = false;
                 } else if in_browser_section {
-                    if let Some(val) = line.strip_prefix("ui_height").and_then(|s| s.trim().strip_prefix('=')) {
-                        ui_height = val.trim().parse().unwrap_or(80);
+                    // Only use poly.toml ui_height if not overridden by arg
+                    if ui_height_arg == 80 {
+                        if let Some(val) = line.strip_prefix("ui_height").and_then(|s| s.trim().strip_prefix('=')) {
+                            ui_height = val.trim().parse().unwrap_or(80);
+                        }
+                    }
+                    // Parse start_url
+                    if let Some(val) = line.strip_prefix("start_url").and_then(|s| s.trim().strip_prefix('=')) {
+                        let val = val.trim().trim_matches('"');
+                        if !val.is_empty() {
+                            start_url = val.to_string();
+                        }
                     }
                 } else if in_window_section {
                     if let Some(val) = line.strip_prefix("width").and_then(|s| s.trim().strip_prefix('=')) {
@@ -3178,6 +3736,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
         println!("  {}>{} Local server: http://localhost:{}", DIM, RESET, port);
         println!("  {}>{} UI height: {}px", DIM, RESET, ui_height);
         println!("  {}>{} Window: {}x{}", DIM, RESET, browser_width, browser_height);
+        println!("  {}>{} Start URL: {}", DIM, RESET, start_url);
         println!();
         
         // Start local HTTP server for UI assets
@@ -3247,7 +3806,7 @@ fn run_native_app(project_path: &Path, _release: bool) {
             height: browser_height,
             ui_height,
             ui_html: ui_url, // This is now a URL, not HTML content
-            start_url: "about:blank".to_string(),
+            start_url,
             devtools: true,
             icon_path: icon,
             decorations: false,
@@ -3282,6 +3841,8 @@ fn run_native_app(project_path: &Path, _release: bool) {
     
     // Dev/Server config
     let mut dev_port: u16 = 0; // 0 = auto-find free port
+    let mut inject_alpine = false;  // Default: don't inject (user decides)
+    let mut inject_lucide = false;  // Default: don't inject (user decides)
     
     // Parse window section from poly.toml
     if poly_toml_path.exists() {
@@ -3316,6 +3877,10 @@ fn run_native_app(project_path: &Path, _release: bool) {
                 } else if in_dev_section {
                     if let Some(val) = line.strip_prefix("port").and_then(|s| s.trim().strip_prefix('=')) {
                         dev_port = val.trim().parse().unwrap_or(0);
+                    } else if let Some(val) = line.strip_prefix("inject_alpine").and_then(|s| s.trim().strip_prefix('=')) {
+                        inject_alpine = val.trim() == "true";
+                    } else if let Some(val) = line.strip_prefix("inject_lucide").and_then(|s| s.trim().strip_prefix('=')) {
+                        inject_lucide = val.trim() == "true";
                     }
                 }
             }
@@ -3600,6 +4165,45 @@ fn run_native_app(project_path: &Path, _release: bool) {
                     }
                 }
             }
+            // PolyView Proxy - "iframe2" that bypasses all iframe restrictions
+            // Usage: /__polyview/?url=https://example.com
+            // Supports GET and POST requests
+            else if url.starts_with("/__polyview") {
+                let target_url = url.strip_prefix("/__polyview/?url=")
+                    .or_else(|| url.strip_prefix("/__polyview?url="))
+                    .or_else(|| url.strip_prefix("/__polyview/"))
+                    .or_else(|| url.strip_prefix("/__polyview"))
+                    .unwrap_or("");
+                
+                // URL decode
+                let target_url = urlencoding::decode(target_url).unwrap_or_default().to_string();
+                
+                if target_url.is_empty() {
+                    tiny_http::Response::from_string(r#"<html><body>Missing URL parameter</body></html>"#)
+                        .with_status_code(400)
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap())
+                } else {
+                    // Check request method
+                    let method = request.method().as_str();
+                    if method == "POST" {
+                        // Read POST body
+                        let mut body = Vec::new();
+                        request.as_reader().read_to_end(&mut body).ok();
+                        
+                        // Get content type
+                        let content_type = request.headers()
+                            .iter()
+                            .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("content-type"))
+                            .map(|h| h.value.as_str().to_string())
+                            .unwrap_or_else(|| "application/x-www-form-urlencoded".to_string());
+                        
+                        handle_polyview_proxy_post(&target_url, port, &body, &content_type)
+                    } else {
+                        // GET request
+                        handle_polyview_proxy(&target_url, port)
+                    }
+                }
+            }
             // Serve window config (decorations, etc.)
             else if url == "/__poly_config" {
                 tiny_http::Response::from_string(format!(r#"{{"decorations":{}}}"#, decorations_for_server))
@@ -3641,22 +4245,21 @@ fn run_native_app(project_path: &Path, _release: bool) {
                         _ => "application/octet-stream",
                     };
                     
-                    // Inject Alpine.js, Lucide Icons, and IPC Bridge into HTML files
+                    // Inject scripts based on poly.toml [dev] section config
                     let final_content = if ct.starts_with("text/html") {
                         let mut html = String::from_utf8_lossy(&content).to_string();
                         
-                        // Only inject Alpine.js if not already present
-                        if !html.contains("alpine") && !html.contains("Alpine") {
-                            let head_scripts = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>
-<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
+                        // Only inject if enabled in poly.toml [dev] section
+                        if inject_alpine && !html.contains("alpine") && !html.contains("Alpine") {
+                            let alpine_script = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>"#;
                             if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                                html = html.replace("</head>", &format!("{}</head>", alpine_script));
                             }
-                        } else if !html.contains("lucide") {
-                            // Only inject Lucide if Alpine is present but Lucide isn't
-                            let head_scripts = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
+                        }
+                        if inject_lucide && !html.contains("lucide") {
+                            let lucide_script = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
                             if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", head_scripts));
+                                html = html.replace("</head>", &format!("{}</head>", lucide_script));
                             }
                         }
                         
@@ -4316,24 +4919,10 @@ fn create_project(name: &str, template: &str) {
     fs::create_dir_all(project_path.join("web")).expect("Failed to create directory");
     fs::create_dir_all(project_path.join("assets")).expect("Failed to create directory");
     
-    // Copy default Poly icon if available
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let icon_candidates = [
-                exe_dir.join("assets/Polybarsmall@2x.png"),
-                exe_dir.join("../poly/assets/Polybarsmall@2x.png"),
-                exe_dir.join("../../poly/assets/Polybarsmall@2x.png"),
-            ];
-            for src in icon_candidates {
-                if src.exists() {
-                    let _ = fs::copy(&src, project_path.join("assets/icon.png"));
-                    break;
-                }
-            }
-        }
-    }
+    // Write embedded default icon to assets/icon.png
+    fs::write(project_path.join("assets/icon.png"), poly::templates::DEFAULT_ICON_PNG).ok();
     
-    // poly.toml - entry is now optional (for backend logic only)
+    // poly.toml - with icon_path configured
     fs::write(project_path.join("poly.toml"), format!(r#"[package]
 name = "{}"
 version = "0.1.0"
@@ -4345,16 +4934,26 @@ dir = "web"
 width = 1024
 height = 768
 resizable = true
+icon_path = "assets/icon.png"
+
+[dev]
+# Auto-inject libraries (default: false - you control your dependencies)
+# inject_alpine = true
+# inject_lucide = true
 
 # System Tray (optional)
 # [tray]
 # enabled = true
 # tooltip = "My App"
+# icon_path = "assets/icon.png"
 # minimize_to_tray = false
 # close_to_tray = false
 
+# Browser Mode (dual WebView: UI + Content)
+# [browser]
+# ui_height = 80
+
 # JavaScript Dependencies (managed by poly add/remove)
-# Example: poly add alpinejs
 [dependencies]
 "#, name)).ok();
 
@@ -4419,8 +5018,12 @@ version = "0.1.0"
 [web]
 dir = "web"
 
+[dev]
+# Auto-inject libraries (default: false - you control your dependencies)
+# inject_alpine = true
+# inject_lucide = true
+
 # JavaScript Dependencies (managed by poly add/remove)
-# Example: poly add alpinejs
 [dependencies]
 "#, name)).ok();
     }

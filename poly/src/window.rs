@@ -1,7 +1,9 @@
 //! Multi-Window Support for Poly
 //! Create and manage multiple windows
 
+#[cfg(feature = "native")]
 use std::collections::HashMap;
+#[cfg(feature = "native")]
 use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
 
 #[cfg(feature = "native")]
@@ -86,10 +88,10 @@ pub enum WindowCommand {
 
 /// Window info stored in registry
 #[cfg(feature = "native")]
-struct WindowInfo {
+pub struct WindowInfo {
     #[allow(dead_code)]
-    title: String,
-    sender: Sender<WindowCommand>,
+    pub title: String,
+    pub sender: Sender<WindowCommand>,
 }
 
 /// Global window registry

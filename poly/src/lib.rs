@@ -20,6 +20,8 @@ pub mod webview;
 pub mod webview_native;
 pub mod multiview;
 pub mod multiview_native;
+pub mod polyview;
+pub mod config;
 
 // Re-export WebView types
 pub use webview::{WebViewConfig, WebViewBounds, WebViewState, WebViewEvent, WebViewOperation};
@@ -44,6 +46,7 @@ pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
 pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, MessageRole, check_ollama, list_ollama_models, chat as ai_chat};
 pub use single_instance::{SingleInstanceConfig, try_acquire_instance, release_instance, is_primary_instance, check_single_instance};
 pub use sovereignty::{SovereigntyConfig, Permission, check_permission, is_enabled as sovereignty_enabled};
+pub use config::{PolyConfig, init_global_config, get_config};
 
 /// Run Poly source code and return the output
 pub fn run(source: &str) -> Result<Vec<String>, String> {

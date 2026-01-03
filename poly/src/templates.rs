@@ -12,69 +12,9 @@ pub fn welcome_html(name: &str) -> String {
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app" x-data="app()">
-    <div class="container">
-      <!-- Logo -->
-      <div class="logo-wrapper">
-        {logo_svg}
-      </div>
-
-      <!-- Welcome -->
-      <h1>Welcome to <span class="gradient">{name}</span></h1>
-      <p class="subtitle">Your Poly app is ready. Start building something amazing.</p>
-
-      <!-- Features -->
-      <div class="features">
-        <div class="feature-card">
-          <div class="feature-icon"><i data-lucide="zap"></i></div>
-          <h3>Hot Reload</h3>
-          <p>Changes appear instantly</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon"><i data-lucide="cpu"></i></div>
-          <h3>IPC Bridge</h3>
-          <p>Call Poly from JavaScript</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon"><i data-lucide="package"></i></div>
-          <h3>Native Build</h3>
-          <p>Desktop apps with WebView</p>
-        </div>
-      </div>
-
-      <!-- Demo -->
-      <div class="demo-section">
-        <h2>Try it out</h2>
-        <div class="demo-card">
-          <div class="demo-row">
-            <button class="btn btn-primary" @click="count++">
-              <i data-lucide="plus"></i>
-              Count: <span x-text="count"></span>
-            </button>
-            <button class="btn btn-secondary" @click="count = 0">Reset</button>
-          </div>
-          <div class="demo-row">
-            <input type="text" x-model="name" placeholder="Enter your name..." class="input">
-          </div>
-          <p class="greeting" x-show="name.length > 0" x-transition>
-            Hello, <span x-text="name"></span>! 👋
-          </p>
-        </div>
-      </div>
-
-      <!-- Quick Start -->
-      <div class="quickstart">
-        <h2>Quick Start</h2>
-        <div class="code-block">
-          <code>web/index.html</code> - Your app's HTML<br>
-          <code>web/styles.css</code> - Your styles<br>
-          <code>web/app.js</code> - Your JavaScript<br>
-          <code>src/main.poly</code> - Backend logic (optional)
-        </div>
-      </div>
-
-      <footer>Built with <span class="heart">♥</span> using Poly</footer>
-    </div>
+  <div class="app">
+    {logo_svg}
+    <h1>Welcome to {name}</h1>
   </div>
   <script src="app.js"></script>
 </body>
@@ -83,246 +23,44 @@ pub fn welcome_html(name: &str) -> String {
 
 /// Generate the welcome screen CSS
 pub fn welcome_css() -> &'static str {
-    r#"* { margin: 0; padding: 0; box-sizing: border-box; }
-
-:root {
-  --bg: #0a0a0f;
-  --surface: rgba(255, 255, 255, 0.03);
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #fafafa;
-  --text-muted: #888;
-  --text-dim: #555;
-  --accent: #5dc1d2;
-  --accent-dark: #1e80ad;
+    r#"* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg);
-  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0a0a0a;
+  color: #fff;
   min-height: 100vh;
-  line-height: 1.6;
 }
 
 .app {
-  min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  min-height: 100vh;
+  gap: 2rem;
 }
-
-.container { max-width: 720px; text-align: center; }
-
-/* Logo */
-.logo-wrapper { margin-bottom: 2rem; }
 
 .logo {
-  width: 80px;
+  width: 120px;
   height: auto;
-  filter: drop-shadow(0 20px 40px rgba(93, 193, 210, 0.2));
-  animation: float 4s ease-in-out infinite;
 }
 
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
-}
-
-/* Typography */
-h1 { font-size: 2rem; font-weight: 600; margin-bottom: 0.5rem; }
-
-.gradient {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.subtitle { color: var(--text-muted); font-size: 1rem; margin-bottom: 3rem; }
-
-h2 {
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--text-dim);
-  margin-bottom: 1rem;
-}
-
-/* Feature Cards */
-.features {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-  margin-bottom: 3rem;
-}
-
-.feature-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem 1rem;
-  transition: all 0.2s;
-}
-
-.feature-card:hover {
-  border-color: rgba(93, 193, 210, 0.3);
-  transform: translateY(-2px);
-}
-
-.feature-icon {
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 0.75rem;
-}
-
-.feature-icon i, .feature-icon svg { width: 20px; height: 20px; color: white; }
-
-.feature-card h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.25rem; }
-.feature-card p { font-size: 0.8rem; color: var(--text-muted); }
-
-/* Demo Section */
-.demo-section { margin-bottom: 3rem; }
-
-.demo-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
-}
-
-.demo-row {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: center;
-  margin-bottom: 1rem;
-}
-
-.demo-row:last-child { margin-bottom: 0; }
-
-/* Buttons */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1.2rem;
-  border: none;
-  border-radius: 8px;
-  font-size: 0.85rem;
+h1 {
+  font-size: 1.5rem;
   font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn i, .btn svg { width: 16px; height: 16px; }
-
-.btn-primary {
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
-  color: white;
-}
-
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(93, 193, 210, 0.3);
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-}
-
-.btn-secondary:hover {
-  background: var(--surface);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: var(--text);
-}
-
-/* Input */
-.input {
-  flex: 1;
-  max-width: 250px;
-  padding: 0.6rem 1rem;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 0.85rem;
-  outline: none;
-  transition: all 0.2s;
-}
-
-.input:focus {
-  border-color: rgba(93, 193, 210, 0.5);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.input::placeholder { color: var(--text-dim); }
-
-.greeting { color: var(--accent); font-size: 1rem; margin-top: 0.5rem; }
-
-/* Quick Start */
-.quickstart { margin-bottom: 3rem; }
-
-.code-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.25rem;
-  text-align: left;
-  font-size: 0.85rem;
-  line-height: 1.8;
-  color: var(--text-muted);
-}
-
-.code-block code {
-  background: rgba(93, 193, 210, 0.15);
-  color: var(--accent);
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
-  font-size: 0.8rem;
-}
-
-/* Footer */
-footer { color: var(--text-dim); font-size: 0.8rem; }
-.heart { color: #ef4444; }
-
-/* Responsive */
-@media (max-width: 600px) {
-  .features { grid-template-columns: 1fr; }
-  h1 { font-size: 1.5rem; }
+  color: #e0e0e0;
 }
 "#
 }
 
 /// Generate the welcome screen JavaScript
 pub fn welcome_js() -> &'static str {
-    r#"// App State
-function app() {
-  return {
-    count: 0,
-    name: '',
-    
-    // Example: Call Poly backend
-    async callBackend() {
-      try {
-        const result = await poly.invoke('greet', { name: this.name || 'World' });
-        console.log('Backend says:', result);
-      } catch (e) {
-        console.log('Backend not available');
-      }
-    }
-  };
-}
-
-console.log('App loaded - Edit web/ files to customize');
+    r#"// Your JavaScript goes here
 "#
 }
 
@@ -383,3 +121,7 @@ pub const POLY_LOGO_SVG: &str = r##"<svg viewBox="0 0 366.77 474.9" class="logo"
   <polygon fill="url(#t)" points="129.35 314.21 186.81 254.55 280.28 314.21 129.35 314.21"/>
   <polygon fill="url(#u)" points="280.28 0 183.38 60.26 0 0 280.28 0"/>
 </svg>"##;
+
+/// Default Poly icon PNG (embedded as bytes)
+/// This is the Polybarsmall@2x.png icon
+pub const DEFAULT_ICON_PNG: &[u8] = include_bytes!("../assets/Polybarsmall@2x.png");

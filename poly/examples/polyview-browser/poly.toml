@@ -1,6 +1,7 @@
 [package]
-name = "Poly Browser"
+name = "PolyView Browser"
 version = "1.0.0"
+description = "A browser built with PolyView - iframe2 that bypasses all restrictions"
 
 [window]
 width = 1280
@@ -9,10 +10,5 @@ decorations = false
 resizable = true
 
 [dev]
-# No auto-injection - browser uses vanilla JS
 inject_alpine = false
 inject_lucide = false
-
-[browser]
-ui_height = 80
-start_url = "https://google.com"

@@ -3,41 +3,43 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Poly Browser</title>
+  <title>PolyView Browser</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Tab Bar -->
-  <div class="tabbar">
-    <div class="tabs-area">
-      <div class="tabs" id="tabs"></div>
-      <button class="new-tab-btn" id="newTabBtn" title="New Tab (Ctrl+T)">
-        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
-      <div class="drag-region" id="dragRegion"></div>
-    </div>
+  <!-- Titlebar -->
+  <div class="titlebar" id="titlebar">
+    <div class="titlebar-drag"></div>
     <div class="window-controls">
-      <button class="win-btn" id="minBtn" title="Minimize">
+      <button class="win-btn" onclick="polyWindow.minimize()">
         <svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg>
       </button>
-      <button class="win-btn" id="maxBtn" title="Maximize">
+      <button class="win-btn" onclick="polyWindow.maximize()">
         <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
       </button>
-      <button class="win-btn close" id="closeBtn" title="Close">
+      <button class="win-btn close" onclick="polyWindow.close()">
         <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
   </div>
+
+  <!-- Tab Bar -->
+  <div class="tabbar">
+    <div class="tabs" id="tabs"></div>
+    <button class="new-tab-btn" onclick="createTab()" title="New Tab (Ctrl+T)">
+      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
   
   <!-- Toolbar -->
   <div class="toolbar">
-    <button class="nav-btn" id="backBtn" title="Back" disabled>
+    <button class="nav-btn" id="backBtn" onclick="goBack()" title="Back">
       <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
     </button>
-    <button class="nav-btn" id="forwardBtn" title="Forward" disabled>
+    <button class="nav-btn" id="forwardBtn" onclick="goForward()" title="Forward">
       <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
-    <button class="nav-btn" id="reloadBtn" title="Reload">
+    <button class="nav-btn" id="reloadBtn" onclick="reload()" title="Reload">
       <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
     </button>
     
@@ -53,23 +55,13 @@
       </div>
     </div>
     
-    <button class="nav-btn" id="homeBtn" title="Home">
+    <button class="nav-btn" onclick="goHome()" title="Home">
       <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
     </button>
-    
-    <div class="loading-bar" id="loadingBar"></div>
   </div>
   
-  <!-- Content area placeholder -->
-  <div class="content" id="content">
-    <svg viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="10"/>
-      <line x1="2" y1="12" x2="22" y2="12"/>
-      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-    </svg>
-    <p id="status">Initializing...</p>
-    <p class="hint">Run with: <code>poly run --native --browser poly/examples/polybrowser</code></p>
-  </div>
+  <!-- Content Area - PolyView iframes -->
+  <div class="content" id="content"></div>
 
   <script src="app.js"></script>
 </body>

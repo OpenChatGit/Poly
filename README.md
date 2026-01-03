@@ -63,7 +63,7 @@ poly build --release
 | `poly add <package>` | Add npm package |
 | `poly remove <package>` | Remove package |
 | `poly install` | Install from lockfile |
-| `poly browser <url>` | Browser mode with custom UI |
+| `poly run --native --browser` | Run in browser mode |
 
 ## Project Structure
 
@@ -143,11 +143,17 @@ await poly.webview.goForward('content');
 Build browser-like applications with a custom UI:
 
 ```bash
-# Run browser with custom UI
-poly browser https://google.com --ui-html browser-ui.html
+# Run with --browser flag
+poly run --native --browser path/to/app
 
-# Custom window size
-poly browser https://example.com --width 1400 --height 900 --ui-html ui.html
+# Or add [browser] section to poly.toml for automatic browser mode
+poly run --native path/to/app
+```
+
+**poly.toml configuration:**
+```toml
+[browser]
+ui_height = 80  # Height of UI area in pixels
 ```
 
 Your UI HTML communicates via IPC:
@@ -197,6 +203,11 @@ single_instance = true  # prevent multiple instances
 
 [dev]
 port = 3000  # custom port for dev server (0 = auto)
+# inject_alpine = true  # auto-inject Alpine.js (default: false)
+# inject_lucide = true  # auto-inject Lucide Icons (default: false)
+
+[browser]
+ui_height = 80  # for browser mode apps
 
 [tray]
 enabled = true
@@ -205,6 +216,8 @@ close_to_tray = true
 [dependencies]
 alpinejs = "3.14.3"
 ```
+
+**Note:** Poly does NOT auto-inject any libraries by default. You control your dependencies. Enable `inject_alpine` or `inject_lucide` in `[dev]` if you want them auto-injected.
 
 ## Comparison
 

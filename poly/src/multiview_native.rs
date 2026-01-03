@@ -7,6 +7,7 @@
 
 #[cfg(feature = "native")]
 mod native_impl {
+    #[allow(unused_imports)]
     use crate::multiview::{MultiViewWindowConfig, ViewConfig, MultiViewOperation};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -15,6 +16,7 @@ mod native_impl {
     /// Handle to a multi-view window
     pub struct MultiViewWindow {
         pub id: u64,
+        #[allow(dead_code)]
         views: HashMap<String, ViewHandle>,
     }
     
