@@ -1,6 +1,6 @@
 [package]
 name = "poly"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
 authors = ["Poly Team"]

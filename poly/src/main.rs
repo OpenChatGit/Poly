@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.3.1";
+const VERSION: &str = "0.3.2";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -1275,7 +1275,23 @@ window.poly = {{
     async close(id) {{ return poly.invoke('__poly_window_close', {{ id }}); }},
     async closeAll() {{ return poly.invoke('__poly_window_close_all', {{}}); }},
     async list() {{ return poly.invoke('__poly_window_list', {{}}); }},
-    async count() {{ return poly.invoke('__poly_window_count', {{}}); }}
+    async count() {{ return poly.invoke('__poly_window_count', {{}}); }},
+    async minimize(id) {{ return poly.invoke('__poly_window_minimize', {{ id }}); }},
+    async maximize(id) {{ return poly.invoke('__poly_window_maximize', {{ id }}); }},
+    async restore(id) {{ return poly.invoke('__poly_window_restore', {{ id }}); }},
+    async show(id) {{ return poly.invoke('__poly_window_show', {{ id }}); }},
+    async hide(id) {{ return poly.invoke('__poly_window_hide', {{ id }}); }},
+    async focus(id) {{ return poly.invoke('__poly_window_focus', {{ id }}); }},
+    async setTitle(id, title) {{ return poly.invoke('__poly_window_set_title', {{ id, title }}); }},
+    async setSize(id, width, height) {{ return poly.invoke('__poly_window_set_size', {{ id, width, height }}); }},
+    async setPosition(id, x, y) {{ return poly.invoke('__poly_window_set_position', {{ id, x, y }}); }},
+    async setAlwaysOnTop(id, value) {{ return poly.invoke('__poly_window_set_always_on_top', {{ id, value }}); }},
+    async setFullscreen(id, value) {{ return poly.invoke('__poly_window_set_fullscreen', {{ id, value }}); }},
+    async navigate(id, url) {{ return poly.invoke('__poly_window_navigate', {{ id, url }}); }},
+    async loadHtml(id, html) {{ return poly.invoke('__poly_window_load_html', {{ id, html }}); }},
+    async eval(id, script) {{ return poly.invoke('__poly_window_eval', {{ id, script }}); }},
+    async getState(id) {{ return poly.invoke('__poly_window_get_state', {{ id }}); }},
+    async listStates() {{ return poly.invoke('__poly_window_list_states', {{}}); }}
   }},
   notification: {{
     async show(title, body, icon) {{ return poly.invoke('__poly_notification_show', {{ title, body, icon }}); }},
@@ -2087,6 +2103,266 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
                 serde_json::json!({"result": []}).to_string()
             }
         }
+        "__poly_window_minimize" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::minimize_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_maximize" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::maximize_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_restore" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::restore_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_show" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::show_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_hide" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::hide_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_focus" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::focus_window(id) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_set_title" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(feature = "native")]
+            {
+                match poly::window::set_window_title(id, title) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_set_size" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
+            let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
+            #[cfg(feature = "native")]
+            {
+                match poly::window::set_window_size(id, width, height) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_set_position" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let x = args.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = args.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            #[cfg(feature = "native")]
+            {
+                match poly::window::set_window_position(id, x, y) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_set_always_on_top" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let value = args.get("value").and_then(|v| v.as_bool()).unwrap_or(false);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::set_window_always_on_top(id, value) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_set_fullscreen" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let value = args.get("value").and_then(|v| v.as_bool()).unwrap_or(false);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::set_window_fullscreen(id, value) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_navigate" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(feature = "native")]
+            {
+                match poly::window::navigate_window(id, url) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_load_html" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let html = args.get("html").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(feature = "native")]
+            {
+                match poly::window::load_window_html(id, html) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_eval" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let script = args.get("script").and_then(|v| v.as_str()).unwrap_or("");
+            #[cfg(feature = "native")]
+            {
+                match poly::window::eval_window_script(id, script) {
+                    Ok(_) => serde_json::json!({"result": true}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_get_state" => {
+            let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            #[cfg(feature = "native")]
+            {
+                match poly::window::get_window_state(id) {
+                    Ok(state) => serde_json::json!({
+                        "result": {
+                            "id": state.id,
+                            "title": state.title,
+                            "width": state.width,
+                            "height": state.height,
+                            "x": state.x,
+                            "y": state.y,
+                            "isVisible": state.is_visible,
+                            "isMinimized": state.is_minimized,
+                            "isMaximized": state.is_maximized,
+                            "isFullscreen": state.is_fullscreen,
+                            "isFocused": state.is_focused
+                        }
+                    }).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_window_list_states" => {
+            #[cfg(feature = "native")]
+            {
+                let states: Vec<_> = poly::window::list_window_states()
+                    .into_iter()
+                    .map(|s| serde_json::json!({
+                        "id": s.id,
+                        "title": s.title,
+                        "width": s.width,
+                        "height": s.height,
+                        "x": s.x,
+                        "y": s.y,
+                        "isVisible": s.is_visible,
+                        "isMinimized": s.is_minimized,
+                        "isMaximized": s.is_maximized,
+                        "isFullscreen": s.is_fullscreen,
+                        "isFocused": s.is_focused
+                    }))
+                    .collect();
+                serde_json::json!({"result": states}).to_string()
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"result": []}).to_string()
+            }
+        }
         // Notification APIs
         "__poly_notification_show" => {
             let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("Notification");
@@ -2864,15 +3140,6 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
                 }).to_string(),
                 None => serde_json::json!({"error": "Window not found"}).to_string(),
             }
-        }
-        // Window APIs (these need window handle, return placeholder in dev server)
-        "__poly_window_set_title" | "__poly_window_get_title" | "__poly_window_center" |
-        "__poly_window_set_size" | "__poly_window_get_size" | "__poly_window_set_position" |
-        "__poly_window_get_position" | "__poly_window_set_min_size" | "__poly_window_set_max_size" |
-        "__poly_window_set_always_on_top" | "__poly_window_set_fullscreen" |
-        "__poly_window_is_fullscreen" | "__poly_window_is_maximized" | "__poly_window_is_minimized" => {
-            // These require native window handle, not available in dev server
-            serde_json::json!({"error": "Window APIs only available in native mode (poly run --native)"}).to_string()
         }
         _ => serde_json::json!({"error": format!("Unknown system API: {}", fn_name)}).to_string(),
     }
@@ -4489,7 +4756,23 @@ window.poly = {
     async close(id) { return poly.invoke('__poly_window_close', { id }); },
     async closeAll() { return poly.invoke('__poly_window_close_all', {}); },
     async list() { return poly.invoke('__poly_window_list', {}); },
-    async count() { return poly.invoke('__poly_window_count', {}); }
+    async count() { return poly.invoke('__poly_window_count', {}); },
+    async minimize(id) { return poly.invoke('__poly_window_minimize', { id }); },
+    async maximize(id) { return poly.invoke('__poly_window_maximize', { id }); },
+    async restore(id) { return poly.invoke('__poly_window_restore', { id }); },
+    async show(id) { return poly.invoke('__poly_window_show', { id }); },
+    async hide(id) { return poly.invoke('__poly_window_hide', { id }); },
+    async focus(id) { return poly.invoke('__poly_window_focus', { id }); },
+    async setTitle(id, title) { return poly.invoke('__poly_window_set_title', { id, title }); },
+    async setSize(id, width, height) { return poly.invoke('__poly_window_set_size', { id, width, height }); },
+    async setPosition(id, x, y) { return poly.invoke('__poly_window_set_position', { id, x, y }); },
+    async setAlwaysOnTop(id, value) { return poly.invoke('__poly_window_set_always_on_top', { id, value }); },
+    async setFullscreen(id, value) { return poly.invoke('__poly_window_set_fullscreen', { id, value }); },
+    async navigate(id, url) { return poly.invoke('__poly_window_navigate', { id, url }); },
+    async loadHtml(id, html) { return poly.invoke('__poly_window_load_html', { id, html }); },
+    async eval(id, script) { return poly.invoke('__poly_window_eval', { id, script }); },
+    async getState(id) { return poly.invoke('__poly_window_get_state', { id }); },
+    async listStates() { return poly.invoke('__poly_window_list_states', {}); }
   },
   notification: {
     async show(title, body, icon) { return poly.invoke('__poly_notification_show', { title, body, icon }); },

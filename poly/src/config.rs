@@ -105,6 +105,36 @@ pub struct BrowserConfig {
     pub height: u32,
 }
 
+/// Predefined window configuration
+#[derive(Debug, Clone)]
+pub struct PredefinedWindow {
+    pub id: String,
+    pub title: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub url: Option<String>,
+    pub resizable: bool,
+    pub decorations: bool,
+    pub always_on_top: bool,
+    pub transparent: bool,
+}
+
+impl Default for PredefinedWindow {
+    fn default() -> Self {
+        Self {
+            id: "default".to_string(),
+            title: None,
+            width: 800,
+            height: 600,
+            url: None,
+            resizable: true,
+            decorations: false,
+            always_on_top: false,
+            transparent: false,
+        }
+    }
+}
+
 impl Default for PolyConfig {
     fn default() -> Self {
         Self {

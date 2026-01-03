@@ -2,7 +2,7 @@
 
 Complete reference for all Poly JavaScript APIs.
 
-**Version:** 0.3.0
+**Version:** 0.3.1
 
 ---
 
@@ -304,6 +304,375 @@ Returns the number of open windows.
 ```javascript
 const count = await poly.windows.count();
 console.log(`${count} windows open`);
+```
+
+### Extended Window Control
+
+Control individual windows after creation.
+
+#### `poly.windows.minimize(id)`
+
+Minimizes a window.
+
+```javascript
+await poly.windows.minimize(win.id);
+```
+
+#### `poly.windows.maximize(id)`
+
+Toggles maximize state.
+
+```javascript
+await poly.windows.maximize(win.id);
+```
+
+#### `poly.windows.restore(id)`
+
+Restores a window from minimized/maximized state.
+
+```javascript
+await poly.windows.restore(win.id);
+```
+
+#### `poly.windows.show(id)` / `poly.windows.hide(id)`
+
+Shows or hides a window.
+
+```javascript
+await poly.windows.hide(win.id);
+// Later...
+await poly.windows.show(win.id);
+```
+
+#### `poly.windows.focus(id)`
+
+Brings a window to front and focuses it.
+
+```javascript
+await poly.windows.focus(win.id);
+```
+
+#### `poly.windows.setTitle(id, title)`
+
+Changes the window title.
+
+```javascript
+await poly.windows.setTitle(win.id, 'New Title');
+```
+
+#### `poly.windows.setSize(id, width, height)`
+
+Resizes a window.
+
+```javascript
+await poly.windows.setSize(win.id, 800, 600);
+```
+
+#### `poly.windows.setPosition(id, x, y)`
+
+Moves a window to specific coordinates.
+
+```javascript
+await poly.windows.setPosition(win.id, 100, 100);
+```
+
+#### `poly.windows.setAlwaysOnTop(id, value)`
+
+Sets whether window stays on top.
+
+```javascript
+await poly.windows.setAlwaysOnTop(win.id, true);
+```
+
+#### `poly.windows.setFullscreen(id, value)`
+
+Toggles fullscreen mode.
+
+```javascript
+await poly.windows.setFullscreen(win.id, true);
+```
+
+#### `poly.windows.navigate(id, url)`
+
+Navigates the window's WebView to a URL.
+
+```javascript
+await poly.windows.navigate(win.id, 'https://example.com');
+```
+
+#### `poly.windows.eval(id, script)`
+
+Executes JavaScript in the window's WebView.
+
+```javascript
+await poly.windows.eval(win.id, 'document.body.style.background = "red"');
+```
+
+#### `poly.windows.getState(id)`
+
+Gets the current state of a window.
+
+**Returns:**
+```javascript
+{
+  id: number,
+  title: string,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  is_visible: boolean,
+  is_minimized: boolean,
+  is_maximized: boolean,
+  is_fullscreen: boolean,
+  is_focused: boolean
+}
+```
+
+```javascript
+const state = await poly.windows.getState(win.id);
+console.log(`Window at (${state.x}, ${state.y}), size ${state.width}x${state.height}`);
+```
+
+### Complete Window Options
+
+All options for `poly.windows.create()`:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `title` | string | "Poly Window" | Window title |
+| `width` | number | 800 | Window width |
+| `height` | number | 600 | Window height |
+| `min_width` | number | - | Minimum width |
+| `min_height` | number | - | Minimum height |
+| `max_width` | number | - | Maximum width |
+| `max_height` | number | - | Maximum height |
+| `url` | string | - | URL to load |
+| `html` | string | - | HTML content |
+| `resizable` | boolean | true | Allow resizing |
+| `decorations` | boolean | false | Show native titlebar |
+| `always_on_top` | boolean | false | Stay on top |
+| `transparent` | boolean | false | Transparent background |
+| `fullscreen` | boolean | false | Start fullscreen |
+| `maximized` | boolean | false | Start maximized |
+| `visible` | boolean | true | Initially visible |
+| `focused` | boolean | true | Initially focused |
+| `icon_path` | string | - | Window icon (PNG) |
+| `background_color` | array | [26,26,26,255] | RGBA background |
+| `x` | number | center | Initial X position |
+| `y` | number | center | Initial Y position |
+| `devtools` | boolean | false | Enable DevTools |
+
+```javascript
+// Full example with all options
+const win = await poly.windows.create({
+  title: 'Advanced Window',
+  width: 1200,
+  height: 800,
+  min_width: 400,
+  min_height: 300,
+  url: 'http://localhost:3000/app.html',
+  resizable: true,
+  decorations: false,
+  always_on_top: false,
+  transparent: false,
+  icon_path: 'assets/icon.png',
+  background_color: [26, 26, 31, 255],
+  x: 100,
+  y: 100,
+  devtools: true
+});
+```
+
+### Window Manipulation Guide
+
+After creating a window, you can fully control and modify it using the window ID.
+
+#### Changing Window Properties
+
+```javascript
+// Create a window
+const win = await poly.windows.create({
+  title: 'My Window',
+  width: 600,
+  height: 400,
+  html: '<h1>Hello</h1>'
+});
+
+// Change title dynamically
+await poly.windows.setTitle(win.id, 'New Title - Updated!');
+
+// Resize the window
+await poly.windows.setSize(win.id, 800, 600);
+
+// Move the window
+await poly.windows.setPosition(win.id, 100, 100);
+
+// Make it always on top
+await poly.windows.setAlwaysOnTop(win.id, true);
+```
+
+#### Modifying Window Content
+
+You can change what's displayed in a window after creation:
+
+```javascript
+// Navigate to a URL
+await poly.windows.navigate(win.id, 'https://example.com');
+
+// Or execute JavaScript to modify the DOM
+await poly.windows.eval(win.id, `
+  document.body.innerHTML = '<h1>Content Updated!</h1>';
+  document.body.style.background = '#1a1a2e';
+  document.body.style.color = '#fff';
+`);
+```
+
+#### Dynamic UI Updates via eval()
+
+The `eval()` method is powerful for updating window content dynamically:
+
+```javascript
+// Update a status display
+async function updateStatus(windowId, status, color) {
+  await poly.windows.eval(windowId, `
+    document.getElementById('status').textContent = '${status}';
+    document.getElementById('status').style.color = '${color}';
+  `);
+}
+
+// Show a notification in the window
+async function showNotification(windowId, message) {
+  await poly.windows.eval(windowId, `
+    const notification = document.createElement('div');
+    notification.textContent = '${message}';
+    notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#4ade80;color:#000;padding:12px 20px;border-radius:8px;';
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+  `);
+}
+
+// Usage
+await updateStatus(win.id, 'Connected', '#4ade80');
+await showNotification(win.id, 'Settings saved!');
+```
+
+#### Window State Management
+
+```javascript
+// Get current state
+const state = await poly.windows.getState(win.id);
+console.log(`Position: (${state.x}, ${state.y})`);
+console.log(`Size: ${state.width}x${state.height}`);
+console.log(`Maximized: ${state.is_maximized}`);
+
+// Control visibility
+await poly.windows.hide(win.id);    // Hide window
+await poly.windows.show(win.id);    // Show and focus
+await poly.windows.focus(win.id);   // Bring to front
+
+// Window state
+await poly.windows.minimize(win.id);
+await poly.windows.maximize(win.id);
+await poly.windows.restore(win.id);
+```
+
+#### Complete Example: Settings Window
+
+```javascript
+// Create a settings window
+let settingsWindow = null;
+
+async function openSettings() {
+  // If already open, just focus it
+  if (settingsWindow) {
+    try {
+      await poly.windows.focus(settingsWindow);
+      return;
+    } catch (e) {
+      // Window was closed, create new one
+      settingsWindow = null;
+    }
+  }
+  
+  const win = await poly.windows.create({
+    title: 'Settings',
+    width: 500,
+    height: 400,
+    decorations: false,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { background: #1a1a2e; color: #fff; font-family: system-ui; }
+          .titlebar {
+            height: 36px; background: #16213e;
+            display: flex; justify-content: space-between;
+            align-items: center; padding: 0 12px;
+          }
+          .titlebar button {
+            background: none; border: none;
+            color: #888; cursor: pointer; padding: 4px 8px;
+          }
+          .titlebar button:hover { color: #fff; }
+          .content { padding: 24px; }
+          h2 { margin-bottom: 20px; }
+          .setting {
+            display: flex; justify-content: space-between;
+            align-items: center; padding: 12px 0;
+            border-bottom: 1px solid #2a2a4e;
+          }
+          .toggle {
+            width: 48px; height: 24px;
+            background: #333; border-radius: 12px;
+            cursor: pointer; position: relative;
+          }
+          .toggle.active { background: #4ade80; }
+          .toggle::after {
+            content: ''; position: absolute;
+            width: 20px; height: 20px;
+            background: #fff; border-radius: 50%;
+            top: 2px; left: 2px; transition: 0.2s;
+          }
+          .toggle.active::after { left: 26px; }
+        </style>
+      </head>
+      <body>
+        <div class="titlebar" onmousedown="polyWindow.drag()">
+          <span>⚙️ Settings</span>
+          <button onclick="polyWindow.close()">✕</button>
+        </div>
+        <div class="content">
+          <h2>Preferences</h2>
+          <div class="setting">
+            <span>Dark Mode</span>
+            <div class="toggle active" onclick="this.classList.toggle('active')"></div>
+          </div>
+          <div class="setting">
+            <span>Notifications</span>
+            <div class="toggle" onclick="this.classList.toggle('active')"></div>
+          </div>
+          <div class="setting">
+            <span>Auto-Update</span>
+            <div class="toggle active" onclick="this.classList.toggle('active')"></div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  });
+  
+  settingsWindow = win.id;
+}
+
+// Update settings window title when changes are made
+async function markSettingsChanged() {
+  if (settingsWindow) {
+    await poly.windows.setTitle(settingsWindow, 'Settings *');
+  }
+}
 ```
 
 ---
@@ -1685,6 +2054,7 @@ lodash = "4.17.21"
 | `decorations` | boolean | true | Show native titlebar |
 | `always_on_top` | boolean | false | Window always on top |
 | `fullscreen` | boolean | false | Start in fullscreen |
+| `icon_path` | string | - | Path to window icon (PNG) |
 | `min_width` | number | - | Minimum window width |
 | `min_height` | number | - | Minimum window height |
 | `max_width` | number | - | Maximum window width |

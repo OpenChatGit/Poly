@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poly 0.3.1 Feature Test</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="titlebar" onmousedown="polyWindow.drag()">
+    <span class="title">Poly 0.3.1 Feature Test</span>
+    <div class="titlebar-buttons">
+      <button onclick="polyWindow.minimize()">─</button>
+      <button onclick="polyWindow.maximize()">□</button>
+      <button class="close" onclick="polyWindow.close()">✕</button>
+    </div>
+  </div>
+
+  <div class="app">
+    <h1>🧪 Poly 0.3.1 Feature Test</h1>
+    <p class="subtitle">Testing all new features from this release</p>
+
+    <div class="test-grid">
+      <!-- Config Test -->
+      <div class="test-card">
+        <h2>📋 Configuration</h2>
+        <p>Testing poly.toml config loading</p>
+        <div class="test-results" id="config-results"></div>
+        <button onclick="testConfig()">Run Test</button>
+      </div>
+
+      <!-- Icon Test -->
+      <div class="test-card">
+        <h2>🖼️ Window Icon</h2>
+        <p>Check titlebar & taskbar icon</p>
+        <div class="test-results" id="icon-results">
+          <span class="info">Look at the titlebar and taskbar!</span>
+        </div>
+        <button onclick="checkIcon()">Verify</button>
+      </div>
+
+      <!-- Multi-Window Test -->
+      <div class="test-card">
+        <h2>🪟 Multi-Window</h2>
+        <p>Create and control windows</p>
+        <div class="test-results" id="window-results"></div>
+        <button onclick="testMultiWindow()">Create Window</button>
+      </div>
+
+      <!-- Window Control Test -->
+      <div class="test-card">
+        <h2>🎛️ Window Control</h2>
+        <p>Test window manipulation</p>
+        <div class="test-results" id="control-results"></div>
+        <div class="button-row">
+          <button onclick="testMinimize()">Min</button>
+          <button onclick="testMaximize()">Max</button>
+          <button onclick="testRestore()">Restore</button>
+        </div>
+      </div>
+
+      <!-- Window Manipulation Test -->
+      <div class="test-card">
+        <h2>✏️ Window Manipulation</h2>
+        <p>Modify created windows</p>
+        <div class="test-results" id="manipulation-results"></div>
+        <div class="button-row">
+          <button onclick="testSetTitle()">Title</button>
+          <button onclick="testSetSize()">Size</button>
+          <button onclick="testNavigate()">Navigate</button>
+        </div>
+        <div class="button-row" style="margin-top: 8px;">
+          <button onclick="testEvalScript()">Eval JS</button>
+          <button onclick="testSetPosition()">Move</button>
+        </div>
+      </div>
+
+      <!-- Window State Test -->
+      <div class="test-card">
+        <h2>📊 Window State</h2>
+        <p>Get current window state</p>
+        <div class="test-results" id="state-results"></div>
+        <button onclick="testWindowState()">Get State</button>
+      </div>
+
+      <!-- System Info Test -->
+      <div class="test-card">
+        <h2>💻 System Info</h2>
+        <p>OS and platform info</p>
+        <div class="test-results" id="system-results"></div>
+        <button onclick="testSystemInfo()">Get Info</button>
+      </div>
+    </div>
+
+    <div class="log-section">
+      <h2>📝 Test Log</h2>
+      <div class="log" id="log"></div>
+      <button onclick="clearLog()">Clear Log</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
