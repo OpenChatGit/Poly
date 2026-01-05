@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chat - Poly</title>
+  <!-- CSS Files -->
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/sidebar.css">
+  <link rel="stylesheet" href="css/chat.css">
+  <link rel="stylesheet" href="css/input.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/canvas.css">
+  <link rel="stylesheet" href="/packages/prismjs/themes/prism-tomorrow.min.css">
+  <!-- Devicon - Programming Language Icons -->
+  <link rel="stylesheet" href="css/devicon.css">
+</head>
+<body>
+  <!-- Sidebar -->
+  <div class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <button class="new-chat-btn" onclick="newChat()">
+        <i data-lucide="plus" class="icon"></i>
+        <span>New Chat</span>
+      </button>
+      <button class="sidebar-toggle" onclick="toggleSidebar()">
+        <i data-lucide="panel-left-close" class="icon"></i>
+      </button>
+    </div>
+    <div class="chat-history" id="chat-history"></div>
+  </div>
+  
+  <!-- Sidebar toggle when closed -->
+  <button class="sidebar-open-btn" id="sidebar-open-btn" onclick="toggleSidebar()">
+    <i data-lucide="panel-left-open" class="icon"></i>
+  </button>
+
+  <div class="app-wrapper" id="app-wrapper">
+    <div class="app" id="app">
+      <div class="chat-area">
+        <div id="chat-messages" class="messages"></div>
+      </div>
+    </div>
+    
+    <!-- Canvas Panel (Split Screen) -->
+    <div class="canvas-panel" id="canvas-panel">
+      <div class="canvas-header">
+        <div class="canvas-tabs-wrap">
+          <button class="canvas-add-btn" onclick="showNewFileInput()" title="New File">
+            <i data-lucide="plus" class="icon"></i>
+          </button>
+          <div class="canvas-new-file-dropdown" id="new-file-dropdown">
+            <input type="text" id="new-file-input" placeholder="filename.js" onkeydown="handleNewFileKey(event)">
+            <button class="new-file-create" onclick="createNewFile()">
+              <i data-lucide="check" class="icon"></i>
+            </button>
+            <button class="new-file-cancel" onclick="hideNewFileInput()">
+              <i data-lucide="x" class="icon"></i>
+            </button>
+          </div>
+          <div class="canvas-tabs" id="canvas-tabs">
+            <!-- Tabs will be added dynamically -->
+          </div>
+          <div class="canvas-diagnostics" id="canvas-diagnostics">
+            <span class="diag-ok">
+              <i data-lucide="check-circle" class="icon"></i>
+              <span>No issues</span>
+            </span>
+          </div>
+        </div>
+        <div class="canvas-actions">
+          <button class="canvas-action-btn" onclick="copyCanvasCode()" title="Copy Code">
+            <i data-lucide="copy" class="icon"></i>
+          </button>
+          <button class="canvas-action-btn primary" onclick="runCanvasCode()" title="Run Code">
+            <i data-lucide="play" class="icon"></i>
+          </button>
+          <button class="canvas-action-btn" onclick="closeCanvas()" title="Close Canvas">
+            <i data-lucide="x" class="icon"></i>
+          </button>
+        </div>
+      </div>
+      <div class="canvas-editor-wrap">
+        <div class="canvas-editor" id="canvas-editor">
+          <!-- CodeMirror will be mounted here -->
+        </div>
+      </div>
+    </div>
+  </div>
+    
+  <div class="input-island centered" id="input-island">
+    <div class="input-main">
+      <textarea id="user-input" placeholder="Ask anything..." rows="1"></textarea>
+    </div>
+    <div class="input-footer">
+      <div class="footer-left">
+        <button class="canvas-indicator" id="canvas-indicator" onclick="toggleCanvasMode()" style="display: none;">
+          <i data-lucide="code-2" class="icon"></i>
+          <span>Canvas</span>
+          <i data-lucide="x" class="close-icon"></i>
+        </button>
+        <div class="tools-dropdown">
+          <button id="tools-btn" class="tools-btn" onclick="toggleToolsMenu()">
+            <i data-lucide="wrench" class="icon"></i>
+            <span class="tools-label">Tools</span>
+          </button>
+          <div id="tools-menu" class="tools-menu">
+            <div class="tools-menu-item" onclick="toggleCanvasMode()">
+              <i data-lucide="code-2" class="icon"></i><span>Canvas Mode</span>
+              <span id="canvas-mode-status" class="toggle-status">Off</span>
+            </div>
+            <div class="tools-menu-item" onclick="toggleWebSearch()">
+              <i data-lucide="globe" class="icon"></i><span>Web Search</span>
+              <span id="web-search-status" class="toggle-status">Off</span>
+            </div>
+            <div class="tools-divider"></div>
+            <div class="tools-menu-item" onclick="toggleThink()">
+              <i data-lucide="brain" class="icon"></i><span>Thinking Mode</span>
+              <span id="think-status" class="toggle-status">Off</span>
+            </div>
+            <div class="tools-menu-item" onclick="toggleStream()">
+              <i data-lucide="zap" class="icon"></i><span>Streaming</span>
+              <span id="stream-status" class="toggle-status on">On</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="footer-right">
+        <div class="model-selector">
+          <button id="model-btn" class="model-btn" onclick="toggleModelMenu()">
+            <span id="model-name">Select model</span>
+            <i data-lucide="chevron-down" class="chevron"></i>
+          </button>
+          <div id="model-menu" class="model-menu">
+            <div class="model-menu-header">
+              <span>Models</span><span id="models-count" class="model-count"></span>
+            </div>
+            <div id="model-list" class="model-list"></div>
+          </div>
+        </div>
+        <button id="send-btn" onclick="sendMessage()">
+          <i data-lucide="arrow-up" class="icon"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Libraries -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+  <script>
+    // Ensure marked is available globally
+    window.addEventListener('DOMContentLoaded', function() {
+      if (typeof marked !== 'undefined') {
+        console.log('[Init] marked loaded, parse:', typeof marked.parse);
+        window.markedLib = marked;
+        // Configure marked for safe rendering
+        marked.setOptions({
+          breaks: true,
+          gfm: true
+        });
+      } else {
+        console.warn('[Init] marked not loaded!');
+      }
+    });
+  </script>
+  <script src="/packages/prismjs/prism.js"></script>
+  <script src="/packages/prismjs/components/prism-python.min.js"></script>
+  <script src="/packages/prismjs/components/prism-javascript.min.js"></script>
+  <script src="/packages/prismjs/components/prism-typescript.min.js"></script>
+  <script src="/packages/prismjs/components/prism-css.min.js"></script>
+  <script src="/packages/prismjs/components/prism-markup.min.js"></script>
+  <script src="/packages/prismjs/components/prism-json.min.js"></script>
+  <script src="/packages/prismjs/components/prism-bash.min.js"></script>
+  <script src="/packages/prismjs/components/prism-rust.min.js"></script>
+  <script src="/packages/prismjs/components/prism-c.min.js"></script>
+  <script src="/packages/prismjs/components/prism-cpp.min.js"></script>
+  <script src="/packages/prismjs/components/prism-java.min.js"></script>
+  <script src="/packages/prismjs/components/prism-sql.min.js"></script>
+  <script src="/packages/prismjs/components/prism-yaml.min.js"></script>
+  <script src="/packages/prismjs/components/prism-toml.min.js"></script>
+  <!-- App Scripts -->
+  <script src="js/models/index.js"></script>
+  <script src="js/models/qwen3/index.js"></script>
+  <script src="js/tools.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/app.js"></script>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+use_default_settings: true
+
+general:
+  instance_name: "Poly Search"
+
+search:
+  safe_search: 0
+  autocomplete: "google"
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "poly-searxng-secret-key-change-me"
+  limiter: false
+  image_proxy: true
+  http_protocol_version: "1.1"
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+  theme_args:
+    simple_style: dark
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+
+engines:
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+    weight: 2.0
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: false
+    weight: 1.5
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+  - name: github
+    engine: github
+    shortcut: gh
+    disabled: false
+    weight: 1.5
+  - name: stackoverflow
+    engine: stackoverflow
+    shortcut: st
+    disabled: false

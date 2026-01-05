@@ -225,6 +225,56 @@ impl Interpreter {
                 let val = self.evaluate(expr)?;
                 Err(format!("{}", val))
             }
+            Statement::Assert(condition, message) => {
+                let cond_val = self.evaluate(condition)?;
+                if !self.is_truthy(&cond_val) {
+                    let msg = match message {
+                        Some(expr) => format!("{}", self.evaluate(expr)?),
+                        None => "Assertion failed".to_string(),
+                    };
+                    return Err(self.error(msg));
+                }
+                Ok(Value::None)
+            }
+            Statement::Del(expr) => {
+                match expr {
+                    Expr::Identifier(name) => {
+                        // Remove from current scope
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.remove(name);
+                        }
+                        self.globals.remove(name);
+                    }
+                    Expr::Index(target, index) => {
+                        if let Expr::Identifier(name) = target.as_ref() {
+                            let idx = self.evaluate(index)?;
+                            if let Some(Value::List(mut items)) = self.get_var(name) {
+                                if let Value::Int(i) = idx {
+                                    let i = if i < 0 { (items.len() as i64 + i) as usize } else { i as usize };
+                                    if i < items.len() {
+                                        items.remove(i);
+                                        self.set_var(name.clone(), Value::List(items));
+                                    }
+                                }
+                            } else if let Some(Value::Dict(mut pairs)) = self.get_var(name) {
+                                pairs.retain(|(k, _)| k != &idx);
+                                self.set_var(name.clone(), Value::Dict(pairs));
+                            }
+                        }
+                    }
+                    _ => return Err(self.error("Invalid del target")),
+                }
+                Ok(Value::None)
+            }
+            Statement::Global(names) => {
+                // Mark variables as global (for now, just ensure they exist in globals)
+                for name in names {
+                    if !self.globals.contains_key(name) {
+                        self.globals.insert(name.clone(), Value::None);
+                    }
+                }
+                Ok(Value::None)
+            }
         }
     }
     
@@ -481,6 +531,7 @@ impl Interpreter {
                 self.get_var(name).ok_or_else(|| self.error(format!("Undefined variable: {}", name)))
             }
             Expr::Index(target, index) => self.evaluate_index(target, index),
+            Expr::Slice(target, start, end) => self.evaluate_slice(target, start, end),
             Expr::Attribute(target, attr) => self.evaluate_attribute(target, attr),
             Expr::BinaryOp(left, op, right) => {
                 let left_val = self.evaluate(left)?;
@@ -503,6 +554,34 @@ impl Interpreter {
                 // Check if this is a method call (obj.method())
                 if let Expr::Attribute(target, method_name) = callee.as_ref() {
                     let target_val = self.evaluate(target)?;
+                    
+                    // Handle string method calls
+                    if let Value::String(s) = &target_val {
+                        let arg_values: Vec<Value> = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<_>, _>>()?;
+                        return self.call_string_method(s, method_name, arg_values);
+                    }
+                    
+                    // Handle list method calls
+                    if let Value::List(items) = &target_val {
+                        let arg_values: Vec<Value> = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<_>, _>>()?;
+                        let result = self.call_list_method(items.clone(), method_name, arg_values)?;
+                        
+                        // For mutating methods, update the original variable
+                        if matches!(method_name.as_str(), "append" | "push" | "insert" | "remove" | "pop" | "clear" | "extend" | "sort" | "reverse") {
+                            if let Expr::Identifier(var_name) = target.as_ref() {
+                                if let Value::List(new_items) = &result {
+                                    self.set_var(var_name.clone(), Value::List(new_items.clone()));
+                                }
+                            }
+                        }
+                        return Ok(result);
+                    }
+                    
+                    // Handle dict method calls
+                    if let Value::Dict(pairs) = &target_val {
+                        let arg_values: Vec<Value> = args.iter().map(|a| self.evaluate(a)).collect::<Result<Vec<_>, _>>()?;
+                        return self.call_dict_method(pairs.clone(), method_name, arg_values);
+                    }
                     
                     // Handle instance method calls
                     if let Value::Instance { class_name, fields: _ } = &target_val {
@@ -661,6 +740,46 @@ impl Interpreter {
             _ => Err(self.error("Invalid index operation")),
         }
     }
+    
+    fn evaluate_slice(&mut self, target: &Expr, start: &Option<Box<Expr>>, end: &Option<Box<Expr>>) -> Result<Value, String> {
+        let target_val = self.evaluate(target)?;
+        
+        let start_idx = match start {
+            Some(expr) => {
+                match self.evaluate(expr)? {
+                    Value::Int(i) => Some(i),
+                    _ => return Err(self.error("Slice index must be an integer")),
+                }
+            }
+            None => None,
+        };
+        
+        let end_idx = match end {
+            Some(expr) => {
+                match self.evaluate(expr)? {
+                    Value::Int(i) => Some(i),
+                    _ => return Err(self.error("Slice index must be an integer")),
+                }
+            }
+            None => None,
+        };
+        
+        match target_val {
+            Value::List(items) => {
+                let len = items.len() as i64;
+                let start = start_idx.map(|i| if i < 0 { (len + i).max(0) } else { i.min(len) }).unwrap_or(0) as usize;
+                let end = end_idx.map(|i| if i < 0 { (len + i).max(0) } else { i.min(len) }).unwrap_or(len) as usize;
+                Ok(Value::List(items[start..end.min(items.len())].to_vec()))
+            }
+            Value::String(s) => {
+                let len = s.len() as i64;
+                let start = start_idx.map(|i| if i < 0 { (len + i).max(0) } else { i.min(len) }).unwrap_or(0) as usize;
+                let end = end_idx.map(|i| if i < 0 { (len + i).max(0) } else { i.min(len) }).unwrap_or(len) as usize;
+                Ok(Value::String(s.chars().skip(start).take(end.saturating_sub(start)).collect()))
+            }
+            _ => Err(self.error("Can only slice lists and strings")),
+        }
+    }
 
     fn evaluate_attribute(&mut self, target: &Expr, attr: &str) -> Result<Value, String> {
         let target_val = self.evaluate(target)?;
@@ -684,10 +803,29 @@ impl Interpreter {
                 }
                 Err(self.error(format!("No attribute '{}' on instance", attr)))
             }
-            Value::List(_) | Value::String(_) | Value::Dict(_) => {
-                Ok(Value::NativeFunction(format!("{}.{}", 
-                    match &target_val { Value::List(_) => "list", Value::String(_) => "str", _ => "dict" }, 
-                    attr)))
+            Value::String(s) => {
+                // String attributes/methods
+                match attr {
+                    "length" => Ok(Value::Int(s.len() as i64)),
+                    _ => Ok(Value::NativeFunction(format!("str.{}", attr))),
+                }
+            }
+            Value::List(items) => {
+                // List attributes
+                match attr {
+                    "length" => Ok(Value::Int(items.len() as i64)),
+                    _ => Ok(Value::NativeFunction(format!("list.{}", attr))),
+                }
+            }
+            Value::Dict(pairs) => {
+                // Dict attributes
+                match attr {
+                    "length" => Ok(Value::Int(pairs.len() as i64)),
+                    "keys" => Ok(Value::NativeFunction("dict.keys".to_string())),
+                    "values" => Ok(Value::NativeFunction("dict.values".to_string())),
+                    "items" => Ok(Value::NativeFunction("dict.items".to_string())),
+                    _ => Ok(Value::NativeFunction(format!("dict.{}", attr))),
+                }
             }
             _ => Err(self.error(format!("No attribute '{}' on {:?}", attr, target_val))),
         }
@@ -773,6 +911,313 @@ impl Interpreter {
             }
             Value::NativeFunction(name) => self.call_native(&name, args),
             _ => Err(self.error("Not a function")),
+        }
+    }
+    
+    /// Call a string method
+    fn call_string_method(&mut self, s: &str, method: &str, args: Vec<Value>) -> Result<Value, String> {
+        match method {
+            "upper" => Ok(Value::String(s.to_uppercase())),
+            "lower" => Ok(Value::String(s.to_lowercase())),
+            "strip" | "trim" => Ok(Value::String(s.trim().to_string())),
+            "lstrip" => Ok(Value::String(s.trim_start().to_string())),
+            "rstrip" => Ok(Value::String(s.trim_end().to_string())),
+            "split" => {
+                let sep = match args.get(0) {
+                    Some(Value::String(sep)) => sep.as_str(),
+                    _ => " ",
+                };
+                if sep == " " {
+                    Ok(Value::List(s.split_whitespace().map(|p| Value::String(p.to_string())).collect()))
+                } else {
+                    Ok(Value::List(s.split(sep).map(|p| Value::String(p.to_string())).collect()))
+                }
+            }
+            "join" => {
+                match args.get(0) {
+                    Some(Value::List(items)) => {
+                        let strings: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
+                        Ok(Value::String(strings.join(s)))
+                    }
+                    _ => Err(self.error("join() requires a list")),
+                }
+            }
+            "replace" => {
+                match (args.get(0), args.get(1)) {
+                    (Some(Value::String(old)), Some(Value::String(new))) => {
+                        Ok(Value::String(s.replace(old.as_str(), new.as_str())))
+                    }
+                    _ => Err(self.error("replace() requires two strings")),
+                }
+            }
+            "startswith" => {
+                match args.get(0) {
+                    Some(Value::String(prefix)) => Ok(Value::Bool(s.starts_with(prefix.as_str()))),
+                    _ => Err(self.error("startswith() requires a string")),
+                }
+            }
+            "endswith" => {
+                match args.get(0) {
+                    Some(Value::String(suffix)) => Ok(Value::Bool(s.ends_with(suffix.as_str()))),
+                    _ => Err(self.error("endswith() requires a string")),
+                }
+            }
+            "find" => {
+                match args.get(0) {
+                    Some(Value::String(sub)) => {
+                        Ok(Value::Int(s.find(sub.as_str()).map(|i| i as i64).unwrap_or(-1)))
+                    }
+                    _ => Err(self.error("find() requires a string")),
+                }
+            }
+            "rfind" => {
+                match args.get(0) {
+                    Some(Value::String(sub)) => {
+                        Ok(Value::Int(s.rfind(sub.as_str()).map(|i| i as i64).unwrap_or(-1)))
+                    }
+                    _ => Err(self.error("rfind() requires a string")),
+                }
+            }
+            "count" => {
+                match args.get(0) {
+                    Some(Value::String(sub)) => {
+                        Ok(Value::Int(s.matches(sub.as_str()).count() as i64))
+                    }
+                    _ => Err(self.error("count() requires a string")),
+                }
+            }
+            "isdigit" => Ok(Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))),
+            "isalpha" => Ok(Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_alphabetic()))),
+            "isalnum" => Ok(Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_alphanumeric()))),
+            "isspace" => Ok(Value::Bool(!s.is_empty() && s.chars().all(|c| c.is_whitespace()))),
+            "isupper" => Ok(Value::Bool(!s.is_empty() && s.chars().all(|c| !c.is_alphabetic() || c.is_uppercase()))),
+            "islower" => Ok(Value::Bool(!s.is_empty() && s.chars().all(|c| !c.is_alphabetic() || c.is_lowercase()))),
+            "capitalize" => {
+                let mut chars = s.chars();
+                let result = match chars.next() {
+                    Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+                    None => String::new(),
+                };
+                Ok(Value::String(result))
+            }
+            "title" => {
+                let result = s.split_whitespace()
+                    .map(|word| {
+                        let mut chars = word.chars();
+                        match chars.next() {
+                            Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Ok(Value::String(result))
+            }
+            "center" => {
+                match args.get(0) {
+                    Some(Value::Int(width)) => {
+                        let width = *width as usize;
+                        let fill = match args.get(1) {
+                            Some(Value::String(f)) if !f.is_empty() => f.chars().next().unwrap(),
+                            _ => ' ',
+                        };
+                        if s.len() >= width {
+                            Ok(Value::String(s.to_string()))
+                        } else {
+                            let padding = width - s.len();
+                            let left = padding / 2;
+                            let right = padding - left;
+                            Ok(Value::String(format!("{}{}{}", fill.to_string().repeat(left), s, fill.to_string().repeat(right))))
+                        }
+                    }
+                    _ => Err(self.error("center() requires a width")),
+                }
+            }
+            "zfill" => {
+                match args.get(0) {
+                    Some(Value::Int(width)) => {
+                        let width = *width as usize;
+                        if s.len() >= width {
+                            Ok(Value::String(s.to_string()))
+                        } else {
+                            Ok(Value::String(format!("{:0>width$}", s, width = width)))
+                        }
+                    }
+                    _ => Err(self.error("zfill() requires a width")),
+                }
+            }
+            "encode" => Ok(Value::List(s.bytes().map(|b| Value::Int(b as i64)).collect())),
+            _ => Err(self.error(format!("Unknown string method: {}", method))),
+        }
+    }
+    
+    /// Call a list method
+    fn call_list_method(&mut self, mut items: Vec<Value>, method: &str, args: Vec<Value>) -> Result<Value, String> {
+        match method {
+            "append" | "push" => {
+                match args.get(0) {
+                    Some(val) => {
+                        items.push(val.clone());
+                        Ok(Value::List(items))
+                    }
+                    None => Err(self.error("append() requires a value")),
+                }
+            }
+            "pop" => {
+                let idx = match args.get(0) {
+                    Some(Value::Int(i)) => {
+                        let i = if *i < 0 { (items.len() as i64 + i) as usize } else { *i as usize };
+                        Some(i)
+                    }
+                    Some(_) => return Err(self.error("pop() index must be an integer")),
+                    None => None,
+                };
+                
+                if items.is_empty() {
+                    return Err(self.error("pop from empty list"));
+                }
+                
+                let popped = match idx {
+                    Some(i) if i < items.len() => items.remove(i),
+                    None => items.pop().unwrap(),
+                    _ => return Err(self.error("pop index out of range")),
+                };
+                
+                // Return the popped value (the list is updated via set_var in the caller)
+                Ok(popped)
+            }
+            "insert" => {
+                match (args.get(0), args.get(1)) {
+                    (Some(Value::Int(idx)), Some(val)) => {
+                        let idx = if *idx < 0 { (items.len() as i64 + idx) as usize } else { *idx as usize };
+                        items.insert(idx.min(items.len()), val.clone());
+                        Ok(Value::List(items))
+                    }
+                    _ => Err(self.error("insert() requires index and value")),
+                }
+            }
+            "remove" => {
+                match args.get(0) {
+                    Some(val) => {
+                        if let Some(pos) = items.iter().position(|v| v == val) {
+                            items.remove(pos);
+                        }
+                        Ok(Value::List(items))
+                    }
+                    None => Err(self.error("remove() requires a value")),
+                }
+            }
+            "clear" => Ok(Value::List(Vec::new())),
+            "copy" => Ok(Value::List(items.clone())),
+            "extend" => {
+                match args.get(0) {
+                    Some(Value::List(other)) => {
+                        items.extend(other.clone());
+                        Ok(Value::List(items))
+                    }
+                    _ => Err(self.error("extend() requires a list")),
+                }
+            }
+            "index" => {
+                match args.get(0) {
+                    Some(val) => {
+                        Ok(Value::Int(items.iter().position(|v| v == val).map(|i| i as i64).unwrap_or(-1)))
+                    }
+                    None => Err(self.error("index() requires a value")),
+                }
+            }
+            "count" => {
+                match args.get(0) {
+                    Some(val) => {
+                        Ok(Value::Int(items.iter().filter(|v| *v == val).count() as i64))
+                    }
+                    None => Err(self.error("count() requires a value")),
+                }
+            }
+            "sort" => {
+                items.sort_by(|a, b| self.compare_values(a, b));
+                Ok(Value::List(items))
+            }
+            "reverse" => {
+                items.reverse();
+                Ok(Value::List(items))
+            }
+            "join" => {
+                match args.get(0) {
+                    Some(Value::String(sep)) => {
+                        let strings: Vec<String> = items.iter().map(|v| format!("{}", v)).collect();
+                        Ok(Value::String(strings.join(sep)))
+                    }
+                    _ => Err(self.error("join() requires a separator string")),
+                }
+            }
+            _ => Err(self.error(format!("Unknown list method: {}", method))),
+        }
+    }
+    
+    /// Call a dict method
+    fn call_dict_method(&mut self, pairs: Vec<(Value, Value)>, method: &str, args: Vec<Value>) -> Result<Value, String> {
+        match method {
+            "keys" => {
+                Ok(Value::List(pairs.iter().map(|(k, _)| k.clone()).collect()))
+            }
+            "values" => {
+                Ok(Value::List(pairs.iter().map(|(_, v)| v.clone()).collect()))
+            }
+            "items" => {
+                Ok(Value::List(pairs.iter().map(|(k, v)| Value::List(vec![k.clone(), v.clone()])).collect()))
+            }
+            "get" => {
+                let key = args.get(0).ok_or_else(|| self.error("get() requires a key"))?;
+                let default = args.get(1).cloned().unwrap_or(Value::None);
+                
+                for (k, v) in &pairs {
+                    if k == key {
+                        return Ok(v.clone());
+                    }
+                }
+                Ok(default)
+            }
+            "pop" => {
+                let key = args.get(0).ok_or_else(|| self.error("pop() requires a key"))?;
+                let default = args.get(1).cloned();
+                
+                for (k, v) in &pairs {
+                    if k == key {
+                        return Ok(v.clone());
+                    }
+                }
+                
+                match default {
+                    Some(d) => Ok(d),
+                    None => Err(self.error("Key not found")),
+                }
+            }
+            "update" => {
+                match args.get(0) {
+                    Some(Value::Dict(other)) => {
+                        let mut new_pairs = pairs.clone();
+                        for (k, v) in other {
+                            let mut found = false;
+                            for (ek, ev) in new_pairs.iter_mut() {
+                                if ek == k {
+                                    *ev = v.clone();
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found {
+                                new_pairs.push((k.clone(), v.clone()));
+                            }
+                        }
+                        Ok(Value::Dict(new_pairs))
+                    }
+                    _ => Err(self.error("update() requires a dict")),
+                }
+            }
+            "clear" => Ok(Value::Dict(Vec::new())),
+            "copy" => Ok(Value::Dict(pairs.clone())),
+            _ => Err(self.error(format!("Unknown dict method: {}", method))),
         }
     }
 
@@ -2529,6 +2974,17 @@ const {name_lower}Store = new {name}Store();
                 Ok(Value::Bool(pairs.iter().any(|(k, _)| k == key)))
             }
             
+            // Is operator (identity comparison)
+            (Value::None, BinOp::Is, Value::None) => Ok(Value::Bool(true)),
+            (a, BinOp::Is, b) => Ok(Value::Bool(a == b)),
+            
+            // Bitwise operators
+            (Value::Int(a), BinOp::BitAnd, Value::Int(b)) => Ok(Value::Int(a & b)),
+            (Value::Int(a), BinOp::BitOr, Value::Int(b)) => Ok(Value::Int(a | b)),
+            (Value::Int(a), BinOp::BitXor, Value::Int(b)) => Ok(Value::Int(a ^ b)),
+            (Value::Int(a), BinOp::LShift, Value::Int(b)) => Ok(Value::Int(a << b)),
+            (Value::Int(a), BinOp::RShift, Value::Int(b)) => Ok(Value::Int(a >> b)),
+            
             _ => Err(format!("Invalid operation: {:?} {:?} {:?}", left, op, right)),
         }
     }
@@ -2538,6 +2994,7 @@ const {name_lower}Store = new {name}Store();
             (UnaryOp::Neg, Value::Int(n)) => Ok(Value::Int(-n)),
             (UnaryOp::Neg, Value::Float(f)) => Ok(Value::Float(-f)),
             (UnaryOp::Not, val) => Ok(Value::Bool(!self.is_truthy(val))),
+            (UnaryOp::BitNot, Value::Int(n)) => Ok(Value::Int(!n)),
             _ => Err(format!("Invalid unary operation: {:?} {:?}", op, val)),
         }
     }

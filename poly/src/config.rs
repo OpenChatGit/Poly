@@ -31,6 +31,7 @@ pub struct PackageConfig {
 #[derive(Debug, Clone)]
 pub struct WebConfig {
     pub dir: String,
+    pub packages_dir: String,
 }
 
 /// [window] section - all window-related settings
@@ -164,6 +165,7 @@ impl Default for WebConfig {
     fn default() -> Self {
         Self {
             dir: "web".to_string(),
+            packages_dir: "packages".to_string(),
         }
     }
 }
@@ -325,6 +327,7 @@ impl PolyConfig {
     fn parse_web(&mut self, key: &str, value: &str) {
         match key {
             "dir" => self.web.dir = value.to_string(),
+            "packages_dir" => self.web.packages_dir = value.to_string(),
             _ => {}
         }
     }

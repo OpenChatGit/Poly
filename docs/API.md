@@ -1769,36 +1769,59 @@ async function checkForUpdates() {
 
 ## AI/LLM Integration
 
-Built-in support for AI chat APIs.
+Built-in support for AI chat APIs with Ollama, OpenAI, Anthropic, and custom providers.
 
-### `poly.ai.ollama(model, messages)`
+### `poly.ai.ollama(model, messages, options?)`
 
-Chat with local Ollama.
+Chat with local Ollama. Supports thinking/reasoning for compatible models.
 
 **Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model name (e.g., 'llama3', 'codellama') |
+| `model` | string | Model name (e.g., 'llama3', 'qwen3', 'deepseek-r1') |
 | `messages` | array | Chat messages |
+| `options` | object | Optional settings |
+
+**Options:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `temperature` | number | Temperature (0.0 - 2.0, default: 0.7) |
+| `maxTokens` | number | Max tokens to generate |
+| `think` | boolean | Enable thinking mode (for qwen3, deepseek-r1, etc.) |
 
 ```javascript
+// Basic usage
 const response = await poly.ai.ollama('llama3', [
   { role: 'user', content: 'Explain recursion in one sentence.' }
 ]);
-
 console.log(response.content);
+
+// With thinking enabled (for reasoning models)
+const response = await poly.ai.ollama('qwen3', [
+  { role: 'user', content: 'How many r are in strawberry?' }
+], { think: true });
+
+console.log(response.thinking); // Reasoning process
+console.log(response.content);  // Final answer
 ```
 
-### `poly.ai.openai(model, messages, apiKey)`
+### `poly.ai.openai(model, messages, apiKey, options?)`
 
 Chat with OpenAI.
 
 **Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `model` | string | Model name (e.g., 'gpt-4', 'gpt-3.5-turbo') |
+| `model` | string | Model name (e.g., 'gpt-4', 'gpt-4o', 'gpt-3.5-turbo') |
 | `messages` | array | Chat messages |
 | `apiKey` | string | OpenAI API key |
+| `options` | object | Optional settings |
+
+**Options:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `temperature` | number | Temperature (0.0 - 2.0, default: 0.7) |
+| `maxTokens` | number | Max tokens to generate |
 
 ```javascript
 const response = await poly.ai.openai('gpt-4', [
@@ -1811,7 +1834,7 @@ console.log(response.content);
 
 ### `poly.ai.anthropic(model, messages, apiKey, options?)`
 
-Chat with Anthropic Claude.
+Chat with Anthropic Claude. Supports extended thinking.
 
 **Parameters:**
 | Parameter | Type | Description |
@@ -1824,8 +1847,10 @@ Chat with Anthropic Claude.
 **Options:**
 | Option | Type | Description |
 |--------|------|-------------|
+| `temperature` | number | Temperature (0.0 - 2.0, default: 0.7) |
+| `maxTokens` | number | Max tokens to generate |
 | `enableThinking` | boolean | Enable extended thinking |
-| `thinkingBudget` | number | Token budget for thinking |
+| `thinkingBudget` | number | Token budget for thinking (default: 10000) |
 
 ```javascript
 const response = await poly.ai.anthropic(
@@ -1839,21 +1864,57 @@ console.log(response.thinking); // Thinking process
 console.log(response.content);  // Final answer
 ```
 
-### `poly.ai.custom(baseUrl, model, messages)`
+### `poly.ai.custom(baseUrl, model, messages, options?)`
 
-Chat with OpenAI-compatible APIs (LM Studio, LocalAI, etc).
+Chat with OpenAI-compatible APIs (LM Studio, LocalAI, vLLM, etc).
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `baseUrl` | string | API base URL |
+| `model` | string | Model name |
+| `messages` | array | Chat messages |
+| `options` | object | Optional settings |
 
 ```javascript
 const response = await poly.ai.custom(
   'http://localhost:1234/v1',
   'local-model',
-  [{ role: 'user', content: 'Hello!' }]
+  [{ role: 'user', content: 'Hello!' }],
+  { temperature: 0.5 }
 );
+```
+
+### `poly.ai.chat(options)`
+
+Generic chat function with full control over provider and settings.
+
+**Options:**
+| Option | Type | Description |
+|--------|------|-------------|
+| `provider` | string | 'ollama', 'openai', 'anthropic', or 'custom' |
+| `model` | string | Model name |
+| `messages` | array | Chat messages |
+| `baseUrl` | string | Custom API URL (optional) |
+| `apiKey` | string | API key (for OpenAI/Anthropic) |
+| `temperature` | number | Temperature |
+| `maxTokens` | number | Max tokens |
+| `enableThinking` | boolean | Enable thinking |
+| `thinkingBudget` | number | Thinking token budget |
+
+```javascript
+const response = await poly.ai.chat({
+  provider: 'ollama',
+  model: 'qwen3',
+  messages: [{ role: 'user', content: 'Hello!' }],
+  temperature: 0.7,
+  enableThinking: true
+});
 ```
 
 ### `poly.ai.checkOllama()`
 
-Checks if Ollama is running.
+Checks if Ollama is running locally.
 
 **Returns:** `Promise<boolean>`
 
@@ -1872,7 +1933,24 @@ Lists available Ollama models.
 ```javascript
 const models = await poly.ai.listModels();
 console.log('Available models:', models);
-// ['llama3', 'codellama', 'mistral']
+// ['llama3', 'qwen3', 'deepseek-r1', 'codellama']
+```
+
+### Response Format
+
+All AI methods return a response object:
+
+```javascript
+{
+  content: "The answer...",      // Main response text
+  thinking: "Let me think...",   // Reasoning (if enabled, null otherwise)
+  model: "qwen3",                // Model used
+  usage: {                       // Token usage (if available)
+    prompt_tokens: 10,
+    completion_tokens: 50,
+    total_tokens: 60
+  }
+}
 ```
 
 ---

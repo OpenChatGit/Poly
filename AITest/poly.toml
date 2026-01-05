@@ -1,0 +1,45 @@
+[package]
+name = "AITest"
+version = "0.1.0"
+
+[web]
+dir = "web"
+packages_dir = "packages"
+
+[window]
+width = 1080
+height = 768
+resizable = true
+icon_path = "assets/icon.png"
+decorations = true
+
+[dev]
+# Auto-inject libraries (default: false - you control your dependencies)
+# inject_alpine = true
+# inject_lucide = true
+
+# System Tray (optional)
+# [tray]
+# enabled = true
+# tooltip = "My App"
+# icon_path = "assets/icon.png"
+# minimize_to_tray = false
+# close_to_tray = false
+
+# Browser Mode (dual WebView: UI + Content)
+# [browser]
+# ui_height = 80
+
+# JavaScript Dependencies (managed by poly add/remove)
+[dependencies]
+devicon = "2.17.0"
+"file-icons" = "0.0.0"
+"@codemirror/theme-one-dark" = "6.1.3"
+"@codemirror/lang-json" = "6.0.2"
+"@codemirror/lang-html" = "6.4.11"
+"@codemirror/lang-python" = "6.2.1"
+"@codemirror/lang-javascript" = "6.2.4"
+codemirror = "6.0.2"
+prismjs = "1.30.0"
+"highlight.js" = "11.11.1"
+marked = "17.0.1"

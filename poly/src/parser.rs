@@ -51,6 +51,9 @@ impl Parser {
             Some(Token::Pass) => { self.advance(); Ok(Statement::Pass) }
             Some(Token::Break) => { self.advance(); Ok(Statement::Break) }
             Some(Token::Continue) => { self.advance(); Ok(Statement::Continue) }
+            Some(Token::Assert) => self.parse_assert(),
+            Some(Token::Del) => self.parse_del(),
+            Some(Token::Global) => self.parse_global(),
             Some(Token::Try) => self.parse_try(),
             Some(Token::Raise) => self.parse_raise(),
             _ => self.parse_expr_or_assign(),
@@ -257,6 +260,39 @@ impl Parser {
         let expr = self.parse_expr()?;
         Ok(Statement::Raise(expr))
     }
+    
+    fn parse_assert(&mut self) -> Result<Statement, String> {
+        self.advance(); // consume 'assert'
+        let condition = self.parse_expr()?;
+        
+        // Optional message after comma
+        let message = if self.check(&Token::Comma) {
+            self.advance();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        
+        Ok(Statement::Assert(condition, message))
+    }
+    
+    fn parse_del(&mut self) -> Result<Statement, String> {
+        self.advance(); // consume 'del'
+        let expr = self.parse_expr()?;
+        Ok(Statement::Del(expr))
+    }
+    
+    fn parse_global(&mut self) -> Result<Statement, String> {
+        self.advance(); // consume 'global'
+        let mut names = vec![self.expect_identifier()?];
+        
+        while self.check(&Token::Comma) {
+            self.advance();
+            names.push(self.expect_identifier()?);
+        }
+        
+        Ok(Statement::Global(names))
+    }
 
     fn parse_expr_or_assign(&mut self) -> Result<Statement, String> {
         let expr = self.parse_expr()?;
@@ -398,15 +434,107 @@ impl Parser {
     }
 
     fn parse_comparison(&mut self) -> Result<Expr, String> {
-        let mut left = self.parse_term()?;
+        let mut left = self.parse_bitwise_or()?;
         
         loop {
+            // Check for 'not in' first
+            if self.check(&Token::Not) {
+                let saved_pos = self.pos;
+                self.advance();
+                if self.check(&Token::In) {
+                    self.advance();
+                    let right = self.parse_bitwise_or()?;
+                    // 'not in' is equivalent to 'not (x in y)'
+                    let in_expr = Expr::BinaryOp(Box::new(left), BinOp::In, Box::new(right));
+                    left = Expr::UnaryOp(UnaryOp::Not, Box::new(in_expr));
+                    continue;
+                } else {
+                    // Not 'not in', restore position
+                    self.pos = saved_pos;
+                    break;
+                }
+            }
+            
+            // Check for 'is not'
+            if self.check(&Token::Is) {
+                self.advance();
+                if self.check(&Token::Not) {
+                    self.advance();
+                    let right = self.parse_bitwise_or()?;
+                    // 'is not' is equivalent to 'not (x is y)'
+                    let is_expr = Expr::BinaryOp(Box::new(left), BinOp::Is, Box::new(right));
+                    left = Expr::UnaryOp(UnaryOp::Not, Box::new(is_expr));
+                    continue;
+                } else {
+                    let right = self.parse_bitwise_or()?;
+                    left = Expr::BinaryOp(Box::new(left), BinOp::Is, Box::new(right));
+                    continue;
+                }
+            }
+            
             let op = match self.peek() {
                 Some(Token::Lt) => BinOp::Lt,
                 Some(Token::Gt) => BinOp::Gt,
                 Some(Token::LtEq) => BinOp::LtEq,
                 Some(Token::GtEq) => BinOp::GtEq,
                 Some(Token::In) => BinOp::In,
+                _ => break,
+            };
+            self.advance();
+            let right = self.parse_bitwise_or()?;
+            left = Expr::BinaryOp(Box::new(left), op, Box::new(right));
+        }
+        
+        Ok(left)
+    }
+    
+    // Bitwise OR (lowest bitwise precedence)
+    fn parse_bitwise_or(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_bitwise_xor()?;
+        
+        while self.check(&Token::Pipe) {
+            self.advance();
+            let right = self.parse_bitwise_xor()?;
+            left = Expr::BinaryOp(Box::new(left), BinOp::BitOr, Box::new(right));
+        }
+        
+        Ok(left)
+    }
+    
+    // Bitwise XOR
+    fn parse_bitwise_xor(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_bitwise_and()?;
+        
+        while self.check(&Token::Caret) {
+            self.advance();
+            let right = self.parse_bitwise_and()?;
+            left = Expr::BinaryOp(Box::new(left), BinOp::BitXor, Box::new(right));
+        }
+        
+        Ok(left)
+    }
+    
+    // Bitwise AND
+    fn parse_bitwise_and(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_shift()?;
+        
+        while self.check(&Token::Ampersand) {
+            self.advance();
+            let right = self.parse_shift()?;
+            left = Expr::BinaryOp(Box::new(left), BinOp::BitAnd, Box::new(right));
+        }
+        
+        Ok(left)
+    }
+    
+    // Shift operators
+    fn parse_shift(&mut self) -> Result<Expr, String> {
+        let mut left = self.parse_term()?;
+        
+        loop {
+            let op = match self.peek() {
+                Some(Token::LShift) => BinOp::LShift,
+                Some(Token::RShift) => BinOp::RShift,
                 _ => break,
             };
             self.advance();
@@ -475,6 +603,10 @@ impl Parser {
                 self.advance();
                 Ok(Expr::UnaryOp(UnaryOp::Not, Box::new(self.parse_unary()?)))
             }
+            Some(Token::Tilde) => {
+                self.advance();
+                Ok(Expr::UnaryOp(UnaryOp::BitNot, Box::new(self.parse_unary()?)))
+            }
             _ => self.parse_call(),
         }
     }
@@ -524,9 +656,32 @@ impl Parser {
                 // We don't check for it here to avoid conflicts with if/while/for statements
             } else if self.check(&Token::LBracket) {
                 self.advance();
-                let index = self.parse_expr()?;
-                self.expect(Token::RBracket)?;
-                expr = Expr::Index(Box::new(expr), Box::new(index));
+                
+                // Check for slice syntax: list[start:end] or list[:end] or list[start:]
+                let start = if self.check(&Token::Colon) {
+                    None
+                } else if self.check(&Token::RBracket) {
+                    // Empty brackets - error
+                    return Err("Empty index".to_string());
+                } else {
+                    Some(Box::new(self.parse_expr()?))
+                };
+                
+                if self.check(&Token::Colon) {
+                    // This is a slice
+                    self.advance();
+                    let end = if self.check(&Token::RBracket) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expr()?))
+                    };
+                    self.expect(Token::RBracket)?;
+                    expr = Expr::Slice(Box::new(expr), start, end);
+                } else {
+                    // Regular index
+                    self.expect(Token::RBracket)?;
+                    expr = Expr::Index(Box::new(expr), start.unwrap());
+                }
             } else if self.check(&Token::Dot) {
                 self.advance();
                 let attr = self.expect_identifier()?;
@@ -605,6 +760,21 @@ impl Parser {
                 Ok(Expr::Bool(false))
             }
             Some(Token::Integer(n)) => {
+                let n = *n;
+                self.advance();
+                Ok(Expr::Int(n))
+            }
+            Some(Token::BinaryInt(n)) => {
+                let n = *n;
+                self.advance();
+                Ok(Expr::Int(n))
+            }
+            Some(Token::OctalInt(n)) => {
+                let n = *n;
+                self.advance();
+                Ok(Expr::Int(n))
+            }
+            Some(Token::HexInt(n)) => {
                 let n = *n;
                 self.advance();
                 Ok(Expr::Int(n))

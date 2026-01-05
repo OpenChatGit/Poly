@@ -1,0 +1,445 @@
+/* UI Components - Dropdowns, menus, buttons */
+
+/* Tools Dropdown */
+.tools-dropdown {
+  position: relative;
+}
+
+.tools-btn {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 10px;
+  color: #888;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  overflow: hidden;
+}
+
+.tools-btn .icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.tools-btn .tools-label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: max-width 0.25s ease, margin 0.25s ease;
+  margin-left: 0;
+}
+
+.tools-btn:hover .tools-label {
+  max-width: 80px;
+  margin-left: 6px;
+}
+
+.tools-btn:hover {
+  background: #1e1e1e;
+  color: #ccc;
+  border-color: #444;
+}
+
+.tools-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 200px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 6px;
+  display: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 100;
+}
+
+.tools-menu.show {
+  display: block;
+  animation: slideUp 0.15s ease;
+}
+
+.tools-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #999;
+  transition: all 0.1s;
+}
+
+.tools-menu-item .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.tools-menu-item:hover {
+  background: #252525;
+  color: #fff;
+}
+
+.tools-menu-item.status-item {
+  cursor: default;
+}
+
+.tools-menu-item.status-item:hover {
+  background: transparent;
+  color: #999;
+}
+
+.toggle-status {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #252525;
+  color: #666;
+}
+
+.toggle-status.on {
+  background: #fff;
+  color: #000;
+}
+
+.tools-divider {
+  height: 1px;
+  background: #2a2a2a;
+  margin: 6px 0;
+}
+
+/* Status Indicator */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #666;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #666;
+}
+
+.status-indicator.online .status-dot {
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255,255,255,0.5);
+}
+
+.status-indicator.offline .status-dot {
+  background: #666;
+}
+
+/* Model Selector */
+.model-selector {
+  position: relative;
+}
+
+.model-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 10px;
+  color: #ccc;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.model-btn .chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.model-btn:hover {
+  background: #252525;
+  border-color: #444;
+}
+
+#model-name.disconnected {
+  color: #f87171;
+  font-style: italic;
+}
+
+.model-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 8px;
+  display: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 100;
+}
+
+.model-menu.show {
+  display: block;
+  animation: slideUp 0.15s ease;
+}
+
+.model-menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #666;
+  letter-spacing: 0.5px;
+}
+
+.model-count {
+  background: #252525;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.model-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.model-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #999;
+  transition: all 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-item:hover {
+  background: #252525;
+  color: #fff;
+}
+
+.model-item.selected {
+  background: #fff;
+  color: #000;
+}
+
+.model-item .model-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.model-item .model-name {
+  font-weight: 500;
+}
+
+.model-item .model-tag {
+  font-size: 11px;
+  color: #666;
+  background: #252525;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.model-item.selected .model-tag {
+  background: #e0e0e0;
+  color: #333;
+}
+
+.model-item .model-size {
+  font-size: 12px;
+  color: #ccc;
+  font-weight: 600;
+  margin-left: auto;
+}
+
+.model-item.selected .model-size {
+  color: #333;
+}
+
+/* Account Dropdown */
+.account-dropdown {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 100;
+}
+
+.account-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.account-btn:hover {
+  transform: scale(1.05);
+}
+
+.account-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #252525;
+  border: 2px solid #333;
+  transition: border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.account-avatar .avatar-icon {
+  width: 16px;
+  height: 16px;
+  color: #666;
+}
+
+.account-avatar.large {
+  width: 40px;
+  height: 40px;
+}
+
+.account-avatar.large .avatar-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.account-btn:hover .account-avatar {
+  border-color: #555;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 8px;
+  display: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.account-menu.show {
+  display: block;
+  animation: slideDown 0.15s ease;
+}
+
+.account-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  margin-bottom: 4px;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+}
+
+.account-email {
+  font-size: 12px;
+  color: #666;
+}
+
+.account-menu-divider {
+  height: 1px;
+  background: #2a2a2a;
+  margin: 4px 0;
+}
+
+.account-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #999;
+  transition: all 0.1s;
+}
+
+.account-menu-item:hover {
+  background: #252525;
+  color: #fff;
+}
+
+.account-menu-item .icon {
+  width: 16px;
+  height: 16px;
+}
+
+
+/* Model Adapter Badge */
+.model-item .model-adapter {
+  font-size: 10px;
+  color: #888;
+  background: #1a1a1a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.model-item.selected .model-adapter {
+  background: #d0d0d0;
+  color: #444;
+}
+
+/* Cloud Tag */
+.model-item .model-cloud {
+  font-size: 10px;
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.15);
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-left: auto;
+}
+
+.model-item.selected .model-cloud {
+  background: rgba(96, 165, 250, 0.25);
+  color: #3b82f6;
+}
+
+/* Empty Model List */
+.model-empty {
+  padding: 16px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+}

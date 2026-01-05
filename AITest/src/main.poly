@@ -1,0 +1,36 @@
+# AITest - Backend Logic
+# AI Chat backend with Poly language
+
+# ============================================
+# Ollama API functions
+# ============================================
+
+fn check_ollama():
+    let response = http_get("http://localhost:11434/api/tags")
+    return response["status"] == 200
+
+fn list_models():
+    let response = http_get("http://localhost:11434/api/tags")
+    if response["status"] == 200:
+        let data = json_parse(response["body"])
+        let models = []
+        for model in data["models"]:
+            models.append(model["name"])
+        return models
+    return []
+
+fn chat(model, messages, options):
+    let payload = {"model": model, "messages": messages, "stream": false}
+    let response = http_post_json("http://localhost:11434/api/chat", payload)
+    
+    if response["status"] == 200:
+        let data = response["body"]
+        return {"content": data["message"]["content"], "thinking": none}
+    
+    return {"error": "Failed to get response"}
+
+fn is_model_available(model_name):
+    return model_name in list_models()
+
+fn get_top_models(n):
+    return list_models()[:n]

@@ -1,0 +1,259 @@
+{
+  "@codemirror/language": {
+    "version": "6.12.1",
+    "integrity": "sha256-Qp5JB3xTQoC3Y/iRLyyMOcp5Oa3EvpRtwW2caTnCUD4=",
+    "dependencies": [
+      "@codemirror/view",
+      "@lezer/highlight",
+      "@lezer/lr",
+      "style-mod",
+      "@codemirror/state",
+      "@lezer/common"
+    ]
+  },
+  "@codemirror/lang-html": {
+    "version": "6.4.11",
+    "integrity": "sha256-u6ibtC5AZsNPiVc2S68mYNAjs9q2c8bNgXeXOKhkTw0=",
+    "dependencies": [
+      "@codemirror/lang-javascript",
+      "@codemirror/lang-css",
+      "@codemirror/language",
+      "@lezer/html",
+      "@codemirror/view",
+      "@codemirror/state",
+      "@codemirror/autocomplete",
+      "@lezer/common",
+      "@lezer/css"
+    ]
+  },
+  "w3c-keyname": {
+    "version": "2.2.8",
+    "integrity": "sha256-BdIUhAJtHy3YQshDGB45HmbWDx1d/yktViw/QDAtqzY=",
+    "dependencies": []
+  },
+  "@codemirror/view": {
+    "version": "6.39.8",
+    "integrity": "sha256-aPa+GGRf4QOKeMhOp/+AD55MN0lYCq4tam3hu2x/FG4=",
+    "dependencies": [
+      "w3c-keyname",
+      "crelt",
+      "@codemirror/state",
+      "style-mod"
+    ]
+  },
+  "file-icons": {
+    "version": "0.0.0",
+    "integrity": "sha256-md49H+pKkw60qC9GokH4b4Uon3p/4xCANWHF98iZH9c=",
+    "dependencies": []
+  },
+  "@lezer/html": {
+    "version": "1.3.13",
+    "integrity": "sha256-O1sids8u8R/O1qxWJK9H8ORFRdzdL/4dyG1cdzyE4JI=",
+    "dependencies": [
+      "@lezer/lr",
+      "@lezer/highlight",
+      "@lezer/common"
+    ]
+  },
+  "@marijn/find-cluster-break": {
+    "version": "1.0.2",
+    "integrity": "sha256-B0YkmlzMBI/GnbKSFiEMoKyORXejcknAZiSoFFstvyI=",
+    "dependencies": []
+  },
+  "@codemirror/lang-python": {
+    "version": "6.2.1",
+    "integrity": "sha256-AioHXs4GbDAV3OT73dTYtvWXZ551bVDml+wWzT5bWco=",
+    "dependencies": [
+      "@lezer/common",
+      "@codemirror/language",
+      "@codemirror/autocomplete",
+      "@lezer/python",
+      "@codemirror/state"
+    ]
+  },
+  "@lezer/lr": {
+    "version": "1.4.6",
+    "integrity": "sha256-TwP5kbwsrEt9EdWiz9qQIHksnndlZp7Jo+NMqr4gbVg=",
+    "dependencies": [
+      "@lezer/common"
+    ]
+  },
+  "@lezer/css": {
+    "version": "1.3.0",
+    "integrity": "sha256-Zb3fMG3L98koYyg4/xUVyHz1vtE8ACg+yNs6fNncynM=",
+    "dependencies": [
+      "@lezer/common",
+      "@lezer/lr",
+      "@lezer/highlight"
+    ]
+  },
+  "marked": {
+    "version": "17.0.1",
+    "integrity": "sha256-0JvEBndItxrxMaJhVQGTz++6AU9nlx84kPImkpP1pgs=",
+    "dependencies": []
+  },
+  "@codemirror/lang-javascript": {
+    "version": "6.2.4",
+    "integrity": "sha256-2Cznva6RLfo2koEjif6WfZ2837tfsMUNnASVCED+cwo=",
+    "dependencies": [
+      "@codemirror/view",
+      "@lezer/common",
+      "@lezer/javascript",
+      "@codemirror/autocomplete",
+      "@codemirror/lint",
+      "@codemirror/state",
+      "@codemirror/language"
+    ]
+  },
+  "devicon": {
+    "version": "2.17.0",
+    "integrity": "sha256-5hH1bvHusXwAlA+XDUTYyghkOa54krSWpGuBp/mjjVo=",
+    "dependencies": []
+  },
+  "@lezer/javascript": {
+    "version": "1.5.4",
+    "integrity": "sha256-6pwWFYhEIkzSJ/aymV7eKuGf/7zHZk7A8xS9A7uGCe8=",
+    "dependencies": [
+      "@lezer/lr",
+      "@lezer/common",
+      "@lezer/highlight"
+    ]
+  },
+  "@codemirror/lang-json": {
+    "version": "6.0.2",
+    "integrity": "sha256-z4lkh/myvJ+wymMxuEw6IMehJof1KuQXd9JO9xnhvMM=",
+    "dependencies": [
+      "@codemirror/language",
+      "@lezer/json"
+    ]
+  },
+  "highlight.js": {
+    "version": "11.11.1",
+    "integrity": "sha256-+8lEMmPpdlg71WQOVQt3+E2Nfhn8hAjf5Td2pbrn7Tk=",
+    "dependencies": []
+  },
+  "@codemirror/autocomplete": {
+    "version": "6.20.0",
+    "integrity": "sha256-0xTwNCcB7AtjrDDsGFcLBcoGQVY+JPlsANaLPyn09go=",
+    "dependencies": [
+      "@lezer/common",
+      "@codemirror/view",
+      "@codemirror/language",
+      "@codemirror/state"
+    ]
+  },
+  "@codemirror/theme-one-dark": {
+    "version": "6.1.3",
+    "integrity": "sha256-Dy8LGcjJpFNK4ZxvHZVIiMm6dHXNomQYdwkogu4SV0w=",
+    "dependencies": [
+      "@codemirror/state",
+      "@codemirror/view",
+      "@lezer/highlight",
+      "@codemirror/language"
+    ]
+  },
+  "@codemirror/lint": {
+    "version": "6.9.2",
+    "integrity": "sha256-OY9dTIeP9QrYSyJ0lD4fl+mMUiLeM72G6xXRj3GZeqQ=",
+    "dependencies": [
+      "@codemirror/view",
+      "crelt",
+      "@codemirror/state"
+    ]
+  },
+  "crelt": {
+    "version": "1.0.6",
+    "integrity": "sha256-BnAHLWIX1+UUklpaVYFO6XLvym8YdcTCOy5NHK/4OrE=",
+    "dependencies": []
+  },
+  "style-mod": {
+    "version": "4.1.3",
+    "integrity": "sha256-unHy21MPOHH6DUNcfppt3YKdj44BUgmCEJecGzlxQP0=",
+    "dependencies": []
+  },
+  "prismjs": {
+    "version": "1.30.0",
+    "integrity": "sha256-rBapEGooxTtqYxOZPIFqOgJSX9/v12FPwXA9+RWp/BE=",
+    "dependencies": []
+  },
+  "@lezer/highlight": {
+    "version": "1.2.3",
+    "integrity": "sha256-UlelMLlkc++n3P0CrfeQ1xvE1vIW5307WEL7JvC2dO8=",
+    "dependencies": [
+      "@lezer/common"
+    ]
+  },
+  "@codemirror/lang-css": {
+    "version": "6.3.1",
+    "integrity": "sha256-SNKbApexr6sfTmv9gAYXSd5G5wN+P5Q/HKNVvAivQA4=",
+    "dependencies": [
+      "@codemirror/autocomplete",
+      "@codemirror/language",
+      "@lezer/css",
+      "@lezer/common",
+      "@codemirror/state"
+    ]
+  },
+  "codemirror": {
+    "version": "6.0.2",
+    "integrity": "sha256-0vyDmxLEj59+FAXDn4xEiGKMMGv77HKLgc+VgCwiSsY=",
+    "dependencies": [
+      "@codemirror/lint",
+      "@codemirror/view",
+      "@codemirror/commands",
+      "@codemirror/autocomplete",
+      "@codemirror/language",
+      "@codemirror/search",
+      "@codemirror/state"
+    ]
+  },
+  "@lezer/common": {
+    "version": "1.5.0",
+    "integrity": "sha256-PyYtJN/OIzji7rh7vjrvOABFlbJFmTAWyiG3f+cIIVs=",
+    "dependencies": []
+  },
+  "@codemirror/state": {
+    "version": "6.5.3",
+    "integrity": "sha256-N2Y1h95Aejc2kHrSBfwoKf09HCYWREtyj1Qa8YIrczw=",
+    "dependencies": [
+      "@marijn/find-cluster-break"
+    ]
+  },
+  "@codemirror/search": {
+    "version": "6.5.11",
+    "integrity": "sha256-H5jf6JNv/iK40tpCCvjaoKy6DwxBBdM04hmfZTFF9iE=",
+    "dependencies": [
+      "crelt",
+      "@codemirror/view",
+      "@codemirror/state"
+    ]
+  },
+  "@lezer/json": {
+    "version": "1.0.3",
+    "integrity": "sha256-r5SHx8RIFvxA5sS1hsLLFATwb6xMcb7dB7UDFnV4L8E=",
+    "dependencies": [
+      "@lezer/lr",
+      "@lezer/highlight",
+      "@lezer/common"
+    ]
+  },
+  "@lezer/python": {
+    "version": "1.1.18",
+    "integrity": "sha256-7ySVQKByYcsY+HuyChvFr4Sv/zRw8fe0lfMafabgQJc=",
+    "dependencies": [
+      "@lezer/lr",
+      "@lezer/highlight",
+      "@lezer/common"
+    ]
+  },
+  "@codemirror/commands": {
+    "version": "6.10.1",
+    "integrity": "sha256-WBG0c++9rkyPgU1MLn6p9Q/X67aHv3eSAJFYRxwW7LI=",
+    "dependencies": [
+      "@lezer/common",
+      "@codemirror/view",
+      "@codemirror/state",
+      "@codemirror/language"
+    ]
+  }
+}

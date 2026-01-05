@@ -1,0 +1,8 @@
+/dist
+/target
+/packages
+
+# User data (don't commit personal settings/chats)
+aitest-settings.json
+aitest-chats.json
+aitest-canvas.json

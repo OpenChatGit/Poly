@@ -62,8 +62,16 @@ pub enum Token {
     With,
     #[token("as")]
     As,
+    #[token("is")]
+    Is,
     #[token("lambda")]
     Lambda,
+    #[token("assert")]
+    Assert,
+    #[token("global")]
+    Global,
+    #[token("del")]
+    Del,
     #[token("yield")]
     Yield,
     #[token("async")]
@@ -72,6 +80,21 @@ pub enum Token {
     Await,
 
     // Literals
+    #[regex(r"0b[01]+", |lex| {
+        let s = lex.slice();
+        i64::from_str_radix(&s[2..], 2).ok()
+    })]
+    BinaryInt(i64),
+    #[regex(r"0o[0-7]+", |lex| {
+        let s = lex.slice();
+        i64::from_str_radix(&s[2..], 8).ok()
+    })]
+    OctalInt(i64),
+    #[regex(r"0x[0-9a-fA-F]+", |lex| {
+        let s = lex.slice();
+        i64::from_str_radix(&s[2..], 16).ok()
+    })]
+    HexInt(i64),
     #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse::<f64>().ok())]
     Float(f64),
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
@@ -171,6 +194,20 @@ pub enum Token {
     Arrow,
     #[token("@")]
     At,
+    #[token(";")]
+    Semicolon,
+    #[token("&")]
+    Ampersand,
+    #[token("|")]
+    Pipe,
+    #[token("^")]
+    Caret,
+    #[token("~")]
+    Tilde,
+    #[token("<<")]
+    LShift,
+    #[token(">>")]
+    RShift,
 
     // Whitespace handling for Python-like indentation
     #[token("\n")]

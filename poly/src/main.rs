@@ -1500,6 +1500,76 @@ window.poly = {{
     }},
     // Check if PolyView is available
     isAvailable() {{ return typeof customElements !== 'undefined' && customElements.get('poly-view') !== undefined; }}
+  }},
+  // AI/LLM API - Chat with AI models
+  ai: {{
+    // Chat with Ollama (local)
+    async ollama(model, messages, options = {{}}) {{
+      return poly.invoke('__poly_ai_ollama', {{ model, messages, ...options }});
+    }},
+    // Chat with OpenAI
+    async openai(model, messages, apiKey, options = {{}}) {{
+      return poly.invoke('__poly_ai_openai', {{ model, messages, apiKey, ...options }});
+    }},
+    // Chat with Anthropic Claude
+    async anthropic(model, messages, apiKey, options = {{}}) {{
+      return poly.invoke('__poly_ai_anthropic', {{ model, messages, apiKey, ...options }});
+    }},
+    // Chat with custom OpenAI-compatible API
+    async custom(baseUrl, model, messages, options = {{}}) {{
+      return poly.invoke('__poly_ai_custom', {{ baseUrl, model, messages, ...options }});
+    }},
+    // Check if Ollama is running
+    async checkOllama() {{
+      return poly.invoke('__poly_ai_check_ollama', {{}});
+    }},
+    // List available Ollama models
+    async listModels() {{
+      return poly.invoke('__poly_ai_list_models', {{}});
+    }},
+    // Generic chat function (auto-detects provider)
+    async chat(options) {{
+      return poly.invoke('__poly_ai_chat', options);
+    }},
+    // Streaming API
+    stream: {{
+      // Start streaming chat with Ollama
+      async start(model, messages, options = {{}}) {{
+        return poly.invoke('__poly_ai_stream_start', {{ model, messages, ...options }});
+      }},
+      // Poll for new chunks (returns {{ chunks: [], done: bool }})
+      async poll(streamId) {{
+        return poly.invoke('__poly_ai_stream_poll', {{ streamId }});
+      }},
+      // Cancel/stop a stream
+      async cancel(streamId) {{
+        return poly.invoke('__poly_ai_stream_cancel', {{ streamId }});
+      }},
+      // List active streams
+      async list() {{
+        return poly.invoke('__poly_ai_stream_list', {{}});
+      }},
+      // Helper: Stream with callback (handles polling automatically)
+      async run(model, messages, options = {{}}, onChunk) {{
+        const result = await this.start(model, messages, options);
+        if (result.error) throw new Error(result.error);
+        const streamId = result.streamId;
+        
+        const poll = async () => {{
+          const {{ chunks, done }} = await this.poll(streamId);
+          for (const chunk of chunks) {{
+            if (onChunk) onChunk(chunk);
+          }}
+          if (!done) {{
+            await new Promise(r => setTimeout(r, 16)); // ~60fps polling
+            await poll();
+          }}
+        }};
+        
+        await poll();
+        return streamId;
+      }}
+    }}
   }}
 }};
 // Initialize Lucide Icons
@@ -1558,11 +1628,14 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                     let url_path = url.trim_start_matches('/');
                     let file_path = project_path_http.join(url_path);
                     let web_file_path = project_path_http.join("web").join(url_path);
+                    let packages_file_path = project_path_http.join(url_path);
                     
                     let actual_path = if file_path.exists() && file_path.is_file() {
                         Some(file_path)
                     } else if web_file_path.exists() && web_file_path.is_file() {
                         Some(web_file_path)
+                    } else if packages_file_path.exists() && packages_file_path.is_file() {
+                        Some(packages_file_path)
                     } else {
                         None
                     };
@@ -2584,6 +2657,440 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
         // HTTP API
         "__poly_http_get" | "__poly_http_post" | "__poly_http_put" | "__poly_http_patch" | "__poly_http_delete" | "__poly_http_request" => {
             handle_http_request(fn_name, args)
+        }
+        // AI/LLM API
+        "__poly_ai_check_ollama" => {
+            #[cfg(feature = "native")]
+            {
+                match poly::ai::check_ollama() {
+                    Ok(available) => serde_json::json!({"result": available}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_list_models" => {
+            #[cfg(feature = "native")]
+            {
+                match poly::ai::list_ollama_models() {
+                    Ok(models) => serde_json::json!({"result": models}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_ollama" => {
+            #[cfg(feature = "native")]
+            {
+                let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("llama3");
+                let messages = args.get("messages").and_then(|v| v.as_array());
+                let temperature = args.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+                let max_tokens = args.get("maxTokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let think = args.get("think").and_then(|v| v.as_bool()).unwrap_or(false);
+                let tools_json = args.get("tools").and_then(|v| v.as_array());
+                let tool_choice = args.get("toolChoice").and_then(|v| v.as_str()).unwrap_or("auto");
+                
+                let chat_messages: Vec<poly::ai::ChatMessage> = messages
+                    .map(|arr| arr.iter().filter_map(|m| {
+                        let role = m.get("role")?.as_str()?;
+                        let content = m.get("content")?.as_str()?;
+                        Some(poly::ai::ChatMessage {
+                            role: match role {
+                                "system" => poly::ai::MessageRole::System,
+                                "assistant" => poly::ai::MessageRole::Assistant,
+                                _ => poly::ai::MessageRole::User,
+                            },
+                            content: content.to_string(),
+                        })
+                    }).collect())
+                    .unwrap_or_default();
+                
+                // Parse tools from JSON
+                let tools: Vec<poly::ai::Tool> = tools_json
+                    .map(|arr| arr.iter().filter_map(|t| {
+                        serde_json::from_value(t.clone()).ok()
+                    }).collect())
+                    .unwrap_or_default();
+                
+                let request = poly::ai::ChatRequest {
+                    provider: poly::ai::AiProvider::Ollama,
+                    base_url: None,
+                    api_key: None,
+                    model: model.to_string(),
+                    messages: chat_messages,
+                    temperature,
+                    max_tokens,
+                    stream: false,
+                    enable_thinking: think,
+                    thinking_budget: None,
+                    tools,
+                    tool_choice: tool_choice.to_string(),
+                };
+                
+                match poly::ai::chat(&request) {
+                    Ok(resp) => serde_json::json!({
+                        "result": {
+                            "content": resp.content,
+                            "thinking": resp.thinking,
+                            "model": resp.model,
+                            "usage": resp.usage,
+                            "toolCalls": resp.tool_calls,
+                            "finishReason": resp.finish_reason
+                        }
+                    }).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_openai" => {
+            #[cfg(feature = "native")]
+            {
+                let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4");
+                let messages = args.get("messages").and_then(|v| v.as_array());
+                let api_key = args.get("apiKey").and_then(|v| v.as_str());
+                let temperature = args.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+                let max_tokens = args.get("maxTokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let tools_json = args.get("tools").and_then(|v| v.as_array());
+                let tool_choice = args.get("toolChoice").and_then(|v| v.as_str()).unwrap_or("auto");
+                
+                let chat_messages: Vec<poly::ai::ChatMessage> = messages
+                    .map(|arr| arr.iter().filter_map(|m| {
+                        let role = m.get("role")?.as_str()?;
+                        let content = m.get("content")?.as_str()?;
+                        Some(poly::ai::ChatMessage {
+                            role: match role {
+                                "system" => poly::ai::MessageRole::System,
+                                "assistant" => poly::ai::MessageRole::Assistant,
+                                _ => poly::ai::MessageRole::User,
+                            },
+                            content: content.to_string(),
+                        })
+                    }).collect())
+                    .unwrap_or_default();
+                
+                // Parse tools from JSON
+                let tools: Vec<poly::ai::Tool> = tools_json
+                    .map(|arr| arr.iter().filter_map(|t| {
+                        serde_json::from_value(t.clone()).ok()
+                    }).collect())
+                    .unwrap_or_default();
+                
+                let request = poly::ai::ChatRequest {
+                    provider: poly::ai::AiProvider::OpenAI,
+                    base_url: None,
+                    api_key: api_key.map(|s| s.to_string()),
+                    model: model.to_string(),
+                    messages: chat_messages,
+                    temperature,
+                    max_tokens,
+                    stream: false,
+                    enable_thinking: false,
+                    thinking_budget: None,
+                    tools,
+                    tool_choice: tool_choice.to_string(),
+                };
+                
+                match poly::ai::chat(&request) {
+                    Ok(resp) => serde_json::json!({
+                        "result": {
+                            "content": resp.content,
+                            "thinking": resp.thinking,
+                            "model": resp.model,
+                            "usage": resp.usage,
+                            "toolCalls": resp.tool_calls,
+                            "finishReason": resp.finish_reason
+                        }
+                    }).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_anthropic" => {
+            #[cfg(feature = "native")]
+            {
+                let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("claude-3-5-sonnet-20241022");
+                let messages = args.get("messages").and_then(|v| v.as_array());
+                let api_key = args.get("apiKey").and_then(|v| v.as_str());
+                let temperature = args.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+                let max_tokens = args.get("maxTokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let enable_thinking = args.get("enableThinking").and_then(|v| v.as_bool()).unwrap_or(false);
+                let thinking_budget = args.get("thinkingBudget").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let tools_json = args.get("tools").and_then(|v| v.as_array());
+                let tool_choice = args.get("toolChoice").and_then(|v| v.as_str()).unwrap_or("auto");
+                
+                let chat_messages: Vec<poly::ai::ChatMessage> = messages
+                    .map(|arr| arr.iter().filter_map(|m| {
+                        let role = m.get("role")?.as_str()?;
+                        let content = m.get("content")?.as_str()?;
+                        Some(poly::ai::ChatMessage {
+                            role: match role {
+                                "system" => poly::ai::MessageRole::System,
+                                "assistant" => poly::ai::MessageRole::Assistant,
+                                _ => poly::ai::MessageRole::User,
+                            },
+                            content: content.to_string(),
+                        })
+                    }).collect())
+                    .unwrap_or_default();
+                
+                // Parse tools from JSON
+                let tools: Vec<poly::ai::Tool> = tools_json
+                    .map(|arr| arr.iter().filter_map(|t| {
+                        serde_json::from_value(t.clone()).ok()
+                    }).collect())
+                    .unwrap_or_default();
+                
+                let request = poly::ai::ChatRequest {
+                    provider: poly::ai::AiProvider::Anthropic,
+                    base_url: None,
+                    api_key: api_key.map(|s| s.to_string()),
+                    model: model.to_string(),
+                    messages: chat_messages,
+                    temperature,
+                    max_tokens,
+                    stream: false,
+                    enable_thinking,
+                    thinking_budget,
+                    tools,
+                    tool_choice: tool_choice.to_string(),
+                };
+                
+                match poly::ai::chat(&request) {
+                    Ok(resp) => serde_json::json!({
+                        "result": {
+                            "content": resp.content,
+                            "thinking": resp.thinking,
+                            "model": resp.model,
+                            "usage": resp.usage,
+                            "toolCalls": resp.tool_calls,
+                            "finishReason": resp.finish_reason
+                        }
+                    }).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_custom" => {
+            #[cfg(feature = "native")]
+            {
+                let base_url = args.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("http://localhost:8080");
+                let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("default");
+                let messages = args.get("messages").and_then(|v| v.as_array());
+                let api_key = args.get("apiKey").and_then(|v| v.as_str());
+                let temperature = args.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+                let max_tokens = args.get("maxTokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let tools_json = args.get("tools").and_then(|v| v.as_array());
+                let tool_choice = args.get("toolChoice").and_then(|v| v.as_str()).unwrap_or("auto");
+                
+                let chat_messages: Vec<poly::ai::ChatMessage> = messages
+                    .map(|arr| arr.iter().filter_map(|m| {
+                        let role = m.get("role")?.as_str()?;
+                        let content = m.get("content")?.as_str()?;
+                        Some(poly::ai::ChatMessage {
+                            role: match role {
+                                "system" => poly::ai::MessageRole::System,
+                                "assistant" => poly::ai::MessageRole::Assistant,
+                                _ => poly::ai::MessageRole::User,
+                            },
+                            content: content.to_string(),
+                        })
+                    }).collect())
+                    .unwrap_or_default();
+                
+                // Parse tools from JSON
+                let tools: Vec<poly::ai::Tool> = tools_json
+                    .map(|arr| arr.iter().filter_map(|t| {
+                        serde_json::from_value(t.clone()).ok()
+                    }).collect())
+                    .unwrap_or_default();
+                
+                let request = poly::ai::ChatRequest {
+                    provider: poly::ai::AiProvider::Custom,
+                    base_url: Some(base_url.to_string()),
+                    api_key: api_key.map(|s| s.to_string()),
+                    model: model.to_string(),
+                    messages: chat_messages,
+                    temperature,
+                    max_tokens,
+                    stream: false,
+                    enable_thinking: false,
+                    thinking_budget: None,
+                    tools,
+                    tool_choice: tool_choice.to_string(),
+                };
+                
+                match poly::ai::chat(&request) {
+                    Ok(resp) => serde_json::json!({
+                        "result": {
+                            "content": resp.content,
+                            "thinking": resp.thinking,
+                            "model": resp.model,
+                            "usage": resp.usage,
+                            "toolCalls": resp.tool_calls,
+                            "finishReason": resp.finish_reason
+                        }
+                    }).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_chat" => {
+            #[cfg(feature = "native")]
+            {
+                let provider_str = args.get("provider").and_then(|v| v.as_str()).unwrap_or("ollama");
+                let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("llama3");
+                let messages = args.get("messages").and_then(|v| v.as_array());
+                let base_url = args.get("baseUrl").and_then(|v| v.as_str());
+                let api_key = args.get("apiKey").and_then(|v| v.as_str());
+                let temperature = args.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+                let max_tokens = args.get("maxTokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let enable_thinking = args.get("enableThinking").and_then(|v| v.as_bool()).unwrap_or(false);
+                let thinking_budget = args.get("thinkingBudget").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let tools_json = args.get("tools").and_then(|v| v.as_array());
+                let tool_choice = args.get("toolChoice").and_then(|v| v.as_str()).unwrap_or("auto");
+                
+                let provider = match provider_str {
+                    "openai" => poly::ai::AiProvider::OpenAI,
+                    "anthropic" => poly::ai::AiProvider::Anthropic,
+                    "custom" => poly::ai::AiProvider::Custom,
+                    _ => poly::ai::AiProvider::Ollama,
+                };
+                
+                let chat_messages: Vec<poly::ai::ChatMessage> = messages
+                    .map(|arr| arr.iter().filter_map(|m| {
+                        let role = m.get("role")?.as_str()?;
+                        let content = m.get("content")?.as_str()?;
+                        Some(poly::ai::ChatMessage {
+                            role: match role {
+                                "system" => poly::ai::MessageRole::System,
+                                "assistant" => poly::ai::MessageRole::Assistant,
+                                _ => poly::ai::MessageRole::User,
+                            },
+                            content: content.to_string(),
+                        })
+                    }).collect())
+                    .unwrap_or_default();
+                
+                // Parse tools from JSON
+                let tools: Vec<poly::ai::Tool> = tools_json
+                    .map(|arr| arr.iter().filter_map(|t| {
+                        serde_json::from_value(t.clone()).ok()
+                    }).collect())
+                    .unwrap_or_default();
+                
+                let request = poly::ai::ChatRequest {
+                    provider,
+                    base_url: base_url.map(|s| s.to_string()),
+                    api_key: api_key.map(|s| s.to_string()),
+                    model: model.to_string(),
+                    messages: chat_messages,
+                    temperature,
+                    max_tokens,
+                    stream: false,
+                    enable_thinking,
+                    thinking_budget,
+                    tools,
+                    tool_choice: tool_choice.to_string(),
+                };
+                
+                match poly::ai::chat(&request) {
+                    Ok(resp) => serde_json::json!({
+                        "result": {
+                            "content": resp.content,
+                            "thinking": resp.thinking,
+                            "model": resp.model,
+                            "usage": resp.usage,
+                            "provider": resp.provider,
+                            "toolCalls": resp.tool_calls,
+                            "finishReason": resp.finish_reason
+                        }
+                    }).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        // AI Streaming API
+        "__poly_ai_stream_start" => {
+            #[cfg(feature = "native")]
+            {
+                let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("llama3");
+                let messages = args.get("messages").and_then(|v| v.as_array());
+                let temperature = args.get("temperature").and_then(|v| v.as_f64()).unwrap_or(0.7) as f32;
+                let think = args.get("think").and_then(|v| v.as_bool()).unwrap_or(false);
+                
+                let chat_messages: Vec<poly::ai::ChatMessage> = messages
+                    .map(|arr| arr.iter().filter_map(|m| {
+                        let role = m.get("role")?.as_str()?;
+                        let content = m.get("content")?.as_str()?;
+                        Some(poly::ai::ChatMessage {
+                            role: match role {
+                                "system" => poly::ai::MessageRole::System,
+                                "assistant" => poly::ai::MessageRole::Assistant,
+                                _ => poly::ai::MessageRole::User,
+                            },
+                            content: content.to_string(),
+                        })
+                    }).collect())
+                    .unwrap_or_default();
+                
+                match poly::ai::stream_start_ollama(model, chat_messages, temperature, think) {
+                    Ok(stream_id) => serde_json::json!({"result": {"streamId": stream_id}}).to_string(),
+                    Err(e) => serde_json::json!({"error": e}).to_string(),
+                }
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
+        "__poly_ai_stream_poll" => {
+            let stream_id = args.get("streamId").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::ai::stream_poll(stream_id) {
+                Ok((chunks, done)) => serde_json::json!({
+                    "result": {
+                        "chunks": chunks,
+                        "done": done
+                    }
+                }).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_ai_stream_cancel" => {
+            let stream_id = args.get("streamId").and_then(|v| v.as_str()).unwrap_or("");
+            match poly::ai::stream_cancel(stream_id) {
+                Ok(_) => serde_json::json!({"result": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_ai_stream_list" => {
+            let streams = poly::ai::stream_list();
+            serde_json::json!({"result": streams}).to_string()
         }
         // Database API
         "__poly_db_open" | "__poly_db_close" | "__poly_db_execute" | "__poly_db_query" | "__poly_db_query_one" => {
@@ -4006,8 +4513,14 @@ fn run_native_app(project_path: &Path, _release: bool, browser_flag: bool, ui_he
         println!("  {}>{} Start URL: {}", DIM, RESET, start_url);
         println!();
         
+        // Load config for packages_dir
+        let config = poly::PolyConfig::load(project_path);
+        let packages_dir = effective_path.join(&config.web.packages_dir);
+        println!("  {}>{} Packages dir: {}", DIM, RESET, packages_dir.display());
+        
         // Start local HTTP server for UI assets
         let web_dir_clone = web_dir.clone();
+        let packages_dir_clone = packages_dir.clone();
         thread::spawn(move || {
             let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
                 .expect("Failed to start HTTP server");
@@ -4016,9 +4529,22 @@ fn run_native_app(project_path: &Path, _release: bool, browser_flag: bool, ui_he
                 let url = request.url().to_string();
                 let url_path = url.trim_start_matches('/');
                 
-                // Try to find the file
+                // Debug endpoint
+                if url_path == "__poly_debug" {
+                    let debug_info = format!("web_dir: {:?}\npackages_dir: {:?}", web_dir_clone, packages_dir_clone);
+                    let _ = request.respond(tiny_http::Response::from_string(debug_info));
+                    continue;
+                }
+                
+                // Try to find the file: web/ first, then packages/
                 let file_path = if url_path.is_empty() || url_path == "index.html" {
                     web_dir_clone.join("index.html")
+                } else if url_path.starts_with("packages/") {
+                    // Serve from packages directory
+                    let pkg_path = url_path.strip_prefix("packages/").unwrap_or(url_path);
+                    let full_path = packages_dir_clone.join(pkg_path);
+                    eprintln!("[HTTP] packages request: {} -> {} (exists: {})", url_path, full_path.display(), full_path.exists());
+                    full_path
                 } else {
                     web_dir_clone.join(url_path)
                 };
@@ -4491,10 +5017,15 @@ fn run_native_app(project_path: &Path, _release: bool, browser_flag: bool, ui_he
                 tiny_http::Response::from_string(result)
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
             } else {
+                // Try web dir first, then packages dir
+                let url_path = url.trim_start_matches('/');
                 let file_path = if url == "/" || url == "/index.html" {
                     web_dir_server.join("index.html")
+                } else if url_path.starts_with("packages/") {
+                    // Serve from packages directory (project root)
+                    project_path_owned.join(url_path)
                 } else {
-                    web_dir_server.join(url.trim_start_matches('/'))
+                    web_dir_server.join(url_path)
                 };
                 
                 if file_path.exists() && file_path.is_file() {
@@ -4968,6 +5499,64 @@ window.poly = {
     async list() { return poly.invoke('__poly_multiview_list', {}); },
     // Get window info
     async get(windowId) { return poly.invoke('__poly_multiview_get', { windowId }); }
+  },
+  // AI/LLM API - Chat with AI models
+  ai: {
+    async ollama(model, messages, options = {}) {
+      return poly.invoke('__poly_ai_ollama', { model, messages, ...options });
+    },
+    async openai(model, messages, apiKey, options = {}) {
+      return poly.invoke('__poly_ai_openai', { model, messages, apiKey, ...options });
+    },
+    async anthropic(model, messages, apiKey, options = {}) {
+      return poly.invoke('__poly_ai_anthropic', { model, messages, apiKey, ...options });
+    },
+    async custom(baseUrl, model, messages, options = {}) {
+      return poly.invoke('__poly_ai_custom', { baseUrl, model, messages, ...options });
+    },
+    async checkOllama() {
+      return poly.invoke('__poly_ai_check_ollama', {});
+    },
+    async listModels() {
+      return poly.invoke('__poly_ai_list_models', {});
+    },
+    async chat(options) {
+      return poly.invoke('__poly_ai_chat', options);
+    },
+    // Streaming API
+    stream: {
+      async start(model, messages, options = {}) {
+        return poly.invoke('__poly_ai_stream_start', { model, messages, ...options });
+      },
+      async poll(streamId) {
+        return poly.invoke('__poly_ai_stream_poll', { streamId });
+      },
+      async cancel(streamId) {
+        return poly.invoke('__poly_ai_stream_cancel', { streamId });
+      },
+      async list() {
+        return poly.invoke('__poly_ai_stream_list', {});
+      },
+      async run(model, messages, options = {}, onChunk) {
+        const result = await this.start(model, messages, options);
+        if (result.error) throw new Error(result.error);
+        const streamId = result.streamId;
+        
+        const poll = async () => {
+          const { chunks, done } = await this.poll(streamId);
+          for (const chunk of chunks) {
+            if (onChunk) onChunk(chunk);
+          }
+          if (!done) {
+            await new Promise(r => setTimeout(r, 16));
+            await poll();
+          }
+        };
+        
+        await poll();
+        return streamId;
+      }
+    }
   }
 };
 // Initialize Lucide Icons

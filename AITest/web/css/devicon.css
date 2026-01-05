@@ -1,0 +1,134 @@
+/* Devicon Font - Fixed paths for Poly */
+@font-face {
+  font-family: "devicon";
+  src: url("/packages/devicon/fonts/devicon.eot");
+  src: url("/packages/devicon/fonts/devicon.eot#iefix") format("embedded-opentype"),
+       url("/packages/devicon/fonts/devicon.ttf") format("truetype"),
+       url("/packages/devicon/fonts/devicon.woff") format("woff"),
+       url("/packages/devicon/fonts/devicon.svg#devicon") format("svg");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
+[class^="devicon-"], [class*=" devicon-"] {
+  font-family: "devicon" !important;
+  speak: never;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Icon definitions - extracted from devicon-base.css */
+/* JavaScript/TypeScript */
+.devicon-javascript-plain:before { content: "\ea81"; }
+.devicon-typescript-plain:before { content: "\ec63"; }
+
+/* Web */
+.devicon-html5-plain:before { content: "\ea67"; }
+.devicon-css3-plain:before { content: "\e9a1"; }
+.devicon-sass-original:before { content: "\ebee"; }
+
+/* Frameworks */
+.devicon-react-original:before { content: "\ebbc"; }
+.devicon-vuejs-plain:before { content: "\ec96"; }
+.devicon-svelte-plain:before { content: "\ec30"; }
+.devicon-angular-plain:before { content: "\e903"; }
+
+/* Data formats */
+.devicon-json-plain:before { content: "\ea94"; }
+.devicon-yaml-plain:before { content: "\ecb5"; }
+.devicon-xml-plain:before { content: "\ecb4"; }
+.devicon-markdown-original:before { content: "\eadb"; }
+
+/* Backend/Systems */
+.devicon-nodejs-plain:before { content: "\ed9e"; }
+.devicon-npm-original-wordmark:before { content: "\edb0"; }
+.devicon-python-plain:before { content: "\eb9c"; }
+.devicon-ruby-plain:before { content: "\ebe3"; }
+.devicon-php-plain:before { content: "\eb68"; }
+.devicon-java-plain:before { content: "\ea7f"; }
+.devicon-kotlin-plain:before { content: "\eab5"; }
+.devicon-scala-plain:before { content: "\ebef"; }
+.devicon-go-original-wordmark:before { content: "\ea3c"; }
+.devicon-rust-original:before { content: "\ebe6"; }
+.devicon-swift-plain:before { content: "\ec34"; }
+.devicon-dart-plain:before { content: "\e9aa"; }
+
+/* C family */
+.devicon-c-original:before, .devicon-c-plain:before { content: "\edae"; }
+.devicon-cplusplus-plain:before { content: "\e99a"; }
+.devicon-csharp-plain:before { content: "\e9a0"; }
+
+/* Functional */
+.devicon-elixir-plain:before { content: "\e9db"; }
+.devicon-erlang-plain:before { content: "\e9e6"; }
+.devicon-haskell-plain:before { content: "\ea58"; }
+.devicon-clojure-plain:before { content: "\e974"; }
+
+/* Scripting */
+.devicon-lua-plain:before { content: "\ead3"; }
+.devicon-r-plain:before { content: "\ebdb"; }
+.devicon-bash-plain:before { content: "\ed55"; }
+
+/* DevOps/Tools */
+.devicon-docker-plain:before { content: "\e9c3"; }
+.devicon-git-plain:before { content: "\ea2d"; }
+.devicon-github-original:before { content: "\ea30"; }
+
+/* Database */
+.devicon-mysql-plain:before { content: "\eafd"; }
+.devicon-postgresql-plain:before { content: "\eb6a"; }
+.devicon-mongodb-plain:before { content: "\eae0"; }
+.devicon-redis-plain:before { content: "\ebc0"; }
+.devicon-graphql-plain:before { content: "\ea45"; }
+
+/* Default */
+.devicon-devicon-plain:before { content: "\e9b7"; }
+
+/* Colored variants - add color to icons */
+.devicon-javascript-plain.colored { color: #f7df1e; }
+.devicon-typescript-plain.colored { color: #3178c6; }
+.devicon-html5-plain.colored { color: #e34f26; }
+.devicon-css3-plain.colored { color: #1572b6; }
+.devicon-sass-original.colored { color: #cc6699; }
+.devicon-react-original.colored { color: #61dafb; }
+.devicon-vuejs-plain.colored { color: #4fc08d; }
+.devicon-svelte-plain.colored { color: #ff3e00; }
+.devicon-angular-plain.colored { color: #dd0031; }
+.devicon-json-plain.colored { color: #5c5c5c; }
+.devicon-yaml-plain.colored { color: #cb171e; }
+.devicon-markdown-original.colored { color: #ffffff; }
+.devicon-nodejs-plain.colored { color: #339933; }
+.devicon-npm-original-wordmark.colored { color: #cb3837; }
+.devicon-python-plain.colored { color: #3776ab; }
+.devicon-ruby-plain.colored { color: #cc342d; }
+.devicon-php-plain.colored { color: #777bb4; }
+.devicon-java-plain.colored { color: #007396; }
+.devicon-kotlin-plain.colored { color: #7f52ff; }
+.devicon-scala-plain.colored { color: #dc322f; }
+.devicon-go-original-wordmark.colored { color: #00add8; }
+.devicon-rust-original.colored { color: #dea584; }
+.devicon-swift-plain.colored { color: #fa7343; }
+.devicon-dart-plain.colored { color: #0175c2; }
+.devicon-c-original.colored, .devicon-c-plain.colored { color: #a8b9cc; }
+.devicon-cplusplus-plain.colored { color: #00599c; }
+.devicon-csharp-plain.colored { color: #239120; }
+.devicon-elixir-plain.colored { color: #4b275f; }
+.devicon-erlang-plain.colored { color: #a90533; }
+.devicon-haskell-plain.colored { color: #5d4f85; }
+.devicon-clojure-plain.colored { color: #5881d8; }
+.devicon-lua-plain.colored { color: #000080; }
+.devicon-r-plain.colored { color: #276dc3; }
+.devicon-bash-plain.colored { color: #4eaa25; }
+.devicon-docker-plain.colored { color: #2496ed; }
+.devicon-git-plain.colored { color: #f05032; }
+.devicon-mysql-plain.colored { color: #4479a1; }
+.devicon-postgresql-plain.colored { color: #336791; }
+.devicon-mongodb-plain.colored { color: #47a248; }
+.devicon-redis-plain.colored { color: #dc382d; }
+.devicon-graphql-plain.colored { color: #e10098; }

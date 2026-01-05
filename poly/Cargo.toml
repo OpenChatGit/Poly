@@ -61,6 +61,9 @@ arboard = { version = "3.4", optional = true }
 notify-rust = { version = "4", optional = true }
 # SQLite database
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+# Async runtime for search
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros"], optional = true }
+futures = { version = "0.3", optional = true }
 # Windows API for frameless windows
 windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Console"], optional = true }
 # Raw window handle for WebView

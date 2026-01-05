@@ -173,6 +173,7 @@ pub enum Expr {
     // Variables & Access
     Identifier(String),
     Index(Box<Expr>, Box<Expr>),        // list[0], dict["key"]
+    Slice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),  // list[1:3], list[:3], list[1:]
     Attribute(Box<Expr>, String),        // obj.attr
     
     // Operations
@@ -205,12 +206,16 @@ pub enum BinOp {
     Eq, NotEq, Lt, Gt, LtEq, GtEq,
     And, Or,
     In,  // 'in' operator for membership
+    Is,  // 'is' operator for identity
+    // Bitwise operators
+    BitAnd, BitOr, BitXor, LShift, RShift,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     Neg,
     Not,
+    BitNot,  // Bitwise NOT (~)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -264,6 +269,15 @@ pub enum Statement {
     Pass,
     Break,
     Continue,
+    
+    // Assert statement
+    Assert(Expr, Option<Expr>),  // assert condition, optional message
+    
+    // Delete statement
+    Del(Expr),  // del variable or del list[index]
+    
+    // Global declaration
+    Global(Vec<String>),
     
     // Exception handling
     Try {
