@@ -19,6 +19,41 @@ static STREAM_SESSIONS: Lazy<Mutex<HashMap<u64, StreamSession>>> = Lazy::new(|| 
     Mutex::new(HashMap::new())
 });
 
+// Global HTTP server state for OAuth callbacks etc.
+#[cfg(feature = "native")]
+struct HttpServerState {
+    running: bool,
+    requests: Vec<HttpRequest>,
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone)]
+struct HttpRequest {
+    method: String,
+    path: String,
+    query: String,
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+#[cfg(feature = "native")]
+static HTTP_SERVER: Lazy<Mutex<HttpServerState>> = Lazy::new(|| {
+    Mutex::new(HttpServerState {
+        running: false,
+        requests: Vec::new(),
+    })
+});
+
+#[cfg(feature = "native")]
+static HTTP_SERVER_HANDLE: Lazy<Mutex<Option<std::thread::JoinHandle<()>>>> = Lazy::new(|| {
+    Mutex::new(None)
+});
+
+#[cfg(feature = "native")]
+static HTTP_SERVER_SHUTDOWN: Lazy<Mutex<bool>> = Lazy::new(|| {
+    Mutex::new(false)
+});
+
 /// Process escape sequences in a string
 fn process_escapes(s: &str) -> String {
     // Order matters: process \\ last to avoid double-processing
@@ -106,7 +141,7 @@ impl Interpreter {
             "round", "pow", "divmod", "slice", "iter", "next", "open",
             // String methods
             "upper", "lower", "strip", "split", "join", "replace", "startswith", "endswith",
-            "find", "count", "isdigit", "isalpha", "isalnum", "format",
+            "find", "find_from", "count", "isdigit", "isalpha", "isalnum", "format",
             // HTML generation
             "html", "html_escape", "html_tag",
             // Web framework - Routing, Components, State
@@ -114,11 +149,13 @@ impl Interpreter {
             // List methods  
             "push", "pop", "insert", "remove", "index", "clear", "copy", "extend",
             // File I/O
-            "read_file", "write_file", "file_exists", "list_dir", "mkdir", "remove_file",
+            "read_file", "read_file_base64", "write_file", "file_exists", "list_dir", "mkdir", "remove_file",
             // HTTP (low-level primitives - user implements their own logic)
-            "http_get", "http_post", "http_post_json",
+            "http_get", "http_get_steam", "http_get_parallel", "http_post", "http_post_json",
             // HTTP Streaming (for SSE/chunked responses)
             "http_stream_start", "http_stream_poll", "http_stream_close",
+            // HTTP Server (for OAuth callbacks, webhooks, etc.)
+            "http_server_start", "http_server_stop", "http_server_poll",
             // JSON
             "json_parse", "json_stringify",
             // System & Performance (Rust-powered)
@@ -970,6 +1007,30 @@ impl Interpreter {
                     _ => Err(self.error("find() requires a string")),
                 }
             }
+            "find_from" => {
+                match (args.get(0), args.get(1)) {
+                    (Some(Value::String(sub)), Some(Value::Int(start))) => {
+                        let start_idx = (*start).max(0) as usize;
+                        if start_idx >= s.len() {
+                            Ok(Value::Int(-1))
+                        } else {
+                            // Ensure we're at a valid UTF-8 boundary
+                            let safe_start = if s.is_char_boundary(start_idx) {
+                                start_idx
+                            } else {
+                                // Find next valid boundary
+                                (start_idx..s.len()).find(|&i| s.is_char_boundary(i)).unwrap_or(s.len())
+                            };
+                            if safe_start >= s.len() {
+                                Ok(Value::Int(-1))
+                            } else {
+                                Ok(Value::Int(s[safe_start..].find(sub.as_str()).map(|i| (i + safe_start) as i64).unwrap_or(-1)))
+                            }
+                        }
+                    }
+                    _ => Err(self.error("find_from() requires a string and start index")),
+                }
+            }
             "rfind" => {
                 match args.get(0) {
                     Some(Value::String(sub)) => {
@@ -977,6 +1038,51 @@ impl Interpreter {
                     }
                     _ => Err(self.error("rfind() requires a string")),
                 }
+            }
+            "extract_numbers" => {
+                // Extract all numbers from a string, returns list of ints
+                let mut numbers = Vec::new();
+                let mut current_num = String::new();
+                
+                for ch in s.chars() {
+                    if ch.is_ascii_digit() {
+                        current_num.push(ch);
+                    } else if !current_num.is_empty() {
+                        if let Ok(n) = current_num.parse::<i64>() {
+                            numbers.push(Value::Int(n));
+                        }
+                        current_num.clear();
+                    }
+                }
+                // Don't forget the last number
+                if !current_num.is_empty() {
+                    if let Ok(n) = current_num.parse::<i64>() {
+                        numbers.push(Value::Int(n));
+                    }
+                }
+                
+                Ok(Value::List(numbers))
+            }
+            "extract_number" => {
+                // Extract first number from a string, returns int or none
+                let mut current_num = String::new();
+                let mut found = false;
+                
+                for ch in s.chars() {
+                    if ch.is_ascii_digit() {
+                        current_num.push(ch);
+                        found = true;
+                    } else if found {
+                        break;
+                    }
+                }
+                
+                if !current_num.is_empty() {
+                    if let Ok(n) = current_num.parse::<i64>() {
+                        return Ok(Value::Int(n));
+                    }
+                }
+                Ok(Value::None)
             }
             "count" => {
                 match args.get(0) {
@@ -1579,6 +1685,73 @@ impl Interpreter {
                 }
                 _ => Err(self.error("read_file() requires a path string")),
             }
+            "read_file_base64" => {
+                // read_file_base64(path) -> data URL string (e.g., "data:image/png;base64,...")
+                match args.get(0) {
+                    Some(Value::String(path)) => {
+                        match std::fs::read(path) {
+                            Ok(bytes) => {
+                                // Determine MIME type from extension
+                                let mime = if path.ends_with(".png") {
+                                    "image/png"
+                                } else if path.ends_with(".jpg") || path.ends_with(".jpeg") {
+                                    "image/jpeg"
+                                } else if path.ends_with(".gif") {
+                                    "image/gif"
+                                } else if path.ends_with(".webp") {
+                                    "image/webp"
+                                } else if path.ends_with(".svg") {
+                                    "image/svg+xml"
+                                } else if path.ends_with(".ico") {
+                                    "image/x-icon"
+                                } else if path.ends_with(".mp3") {
+                                    "audio/mpeg"
+                                } else if path.ends_with(".wav") {
+                                    "audio/wav"
+                                } else if path.ends_with(".mp4") {
+                                    "video/mp4"
+                                } else if path.ends_with(".webm") {
+                                    "video/webm"
+                                } else if path.ends_with(".pdf") {
+                                    "application/pdf"
+                                } else if path.ends_with(".json") {
+                                    "application/json"
+                                } else {
+                                    "application/octet-stream"
+                                };
+                                
+                                // Base64 encode
+                                const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                                let mut result = String::new();
+                                for chunk in bytes.chunks(3) {
+                                    let b0 = chunk[0] as usize;
+                                    let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+                                    let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+                                    
+                                    result.push(CHARS[b0 >> 2] as char);
+                                    result.push(CHARS[((b0 & 0x03) << 4) | (b1 >> 4)] as char);
+                                    
+                                    if chunk.len() > 1 {
+                                        result.push(CHARS[((b1 & 0x0f) << 2) | (b2 >> 6)] as char);
+                                    } else {
+                                        result.push('=');
+                                    }
+                                    
+                                    if chunk.len() > 2 {
+                                        result.push(CHARS[b2 & 0x3f] as char);
+                                    } else {
+                                        result.push('=');
+                                    }
+                                }
+                                
+                                Ok(Value::String(format!("data:{};base64,{}", mime, result)))
+                            }
+                            Err(e) => Err(self.error(format!("Failed to read file: {}", e))),
+                        }
+                    }
+                    _ => Err(self.error("read_file_base64() requires a path string")),
+                }
+            }
             "write_file" => match (args.get(0), args.get(1)) {
                 (Some(Value::String(path)), Some(Value::String(content))) => {
                     let processed = process_escapes(content);
@@ -1625,6 +1798,140 @@ impl Interpreter {
                 #[cfg(not(feature = "native"))]
                 {
                     Err(self.error("http_get() requires native feature"))
+                }
+            }
+            "http_get_steam" => {
+                // http_get_steam(url) -> dict with response
+                // Makes HTTP request with Steam session cookies from WebView
+                #[cfg(feature = "native")]
+                {
+                    let url = match args.get(0) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("http_get_steam() requires a URL string")),
+                    };
+                    
+                    // Get Steam cookies from the cookie storage
+                    let cookies = crate::cookies::get_steam_cookies();
+                    
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .build()
+                        .map_err(|e| self.error(format!("HTTP client error: {}", e)))?;
+                    
+                    let mut request = client.get(&url)
+                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                        .header("Accept-Language", "en-US,en;q=0.9,de;q=0.8");
+                    
+                    // Add cookies if we have them
+                    if !cookies.is_empty() {
+                        request = request.header("Cookie", &cookies);
+                        println!("[Backend] http_get_steam with cookies: {}", 
+                            if cookies.contains("steamLoginSecure") { "has login" } else { "no login" });
+                    } else {
+                        println!("[Backend] http_get_steam: no cookies available");
+                    }
+                    
+                    match request.send() {
+                        Ok(resp) => {
+                            let status = resp.status().as_u16() as i64;
+                            let body = resp.text().unwrap_or_default();
+                            
+                            Ok(Value::Dict(vec![
+                                (Value::String("status".to_string()), Value::Int(status)),
+                                (Value::String("body".to_string()), Value::String(body)),
+                            ]))
+                        }
+                        Err(e) => Err(self.error(format!("HTTP request failed: {}", e))),
+                    }
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_get_steam() requires native feature"))
+                }
+            }
+            "http_get_parallel" => {
+                // http_get_parallel(urls_list) -> list of responses
+                // Executes multiple HTTP GET requests in parallel using threads
+                #[cfg(feature = "native")]
+                {
+                    let urls = match args.get(0) {
+                        Some(Value::List(list)) => {
+                            list.iter().filter_map(|v| {
+                                if let Value::String(s) = v {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            }).collect::<Vec<String>>()
+                        }
+                        _ => return Err(self.error("http_get_parallel() requires a list of URL strings")),
+                    };
+                    
+                    use std::thread;
+                    use std::sync::mpsc;
+                    
+                    let (tx, rx) = mpsc::channel();
+                    let mut handles = Vec::new();
+                    
+                    for (idx, url) in urls.iter().enumerate() {
+                        let url = url.clone();
+                        let tx = tx.clone();
+                        
+                        let handle = thread::spawn(move || {
+                            let client = reqwest::blocking::Client::builder()
+                                .timeout(std::time::Duration::from_secs(30))
+                                .build();
+                            
+                            let result = match client {
+                                Ok(client) => {
+                                    match client.get(&url).send() {
+                                        Ok(resp) => {
+                                            let status = resp.status().as_u16() as i64;
+                                            let body = resp.text().unwrap_or_default();
+                                            Value::Dict(vec![
+                                                (Value::String("status".to_string()), Value::Int(status)),
+                                                (Value::String("body".to_string()), Value::String(body)),
+                                                (Value::String("url".to_string()), Value::String(url)),
+                                            ])
+                                        }
+                                        Err(e) => Value::Dict(vec![
+                                            (Value::String("status".to_string()), Value::Int(0)),
+                                            (Value::String("body".to_string()), Value::String(format!("Error: {}", e))),
+                                            (Value::String("url".to_string()), Value::String(url)),
+                                        ]),
+                                    }
+                                }
+                                Err(e) => Value::Dict(vec![
+                                    (Value::String("status".to_string()), Value::Int(0)),
+                                    (Value::String("body".to_string()), Value::String(format!("Client error: {}", e))),
+                                    (Value::String("url".to_string()), Value::String(url)),
+                                ]),
+                            };
+                            
+                            let _ = tx.send((idx, result));
+                        });
+                        
+                        handles.push(handle);
+                    }
+                    
+                    // Drop the original sender so rx.iter() will complete
+                    drop(tx);
+                    
+                    // Collect results in order
+                    let mut results: Vec<(usize, Value)> = rx.iter().collect();
+                    results.sort_by_key(|(idx, _)| *idx);
+                    
+                    // Wait for all threads to complete
+                    for handle in handles {
+                        let _ = handle.join();
+                    }
+                    
+                    Ok(Value::List(results.into_iter().map(|(_, v)| v).collect()))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_get_parallel() requires native feature"))
                 }
             }
             "http_post" => {
@@ -2019,6 +2326,218 @@ impl Interpreter {
                 #[cfg(not(feature = "native"))]
                 {
                     Err(self.error("http_stream_close() requires native feature"))
+                }
+            }
+            // HTTP Server functions for OAuth callbacks, webhooks, etc.
+            "http_server_start" => {
+                // http_server_start(port, response_html?) -> bool
+                // Starts a simple HTTP server that captures incoming requests
+                #[cfg(feature = "native")]
+                {
+                    let port = match args.get(0) {
+                        Some(Value::Int(p)) => *p as u16,
+                        _ => return Err(self.error("http_server_start() requires a port number")),
+                    };
+                    
+                    let response_html = match args.get(1) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => r#"<!DOCTYPE html><html><head><meta charset="utf-8"><title>Success</title></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><script>window.close();</script></body></html>"#.to_string(),
+                    };
+                    
+                    // Check if already running
+                    {
+                        let state = HTTP_SERVER.lock().unwrap();
+                        if state.running {
+                            return Ok(Value::Bool(true)); // Already running
+                        }
+                    }
+                    
+                    // Reset shutdown flag
+                    {
+                        let mut shutdown = HTTP_SERVER_SHUTDOWN.lock().unwrap();
+                        *shutdown = false;
+                    }
+                    
+                    // Start server in background thread
+                    let handle = std::thread::spawn(move || {
+                        let addr = format!("127.0.0.1:{}", port);
+                        let server = match tiny_http::Server::http(&addr) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("[http_server] Failed to start: {}", e);
+                                return;
+                            }
+                        };
+                        
+                        println!("[http_server] Listening on http://{}", addr);
+                        
+                        // Mark as running
+                        {
+                            let mut state = HTTP_SERVER.lock().unwrap();
+                            state.running = true;
+                        }
+                        
+                        // Use non-blocking with timeout to check shutdown flag
+                        loop {
+                            // Check shutdown flag
+                            {
+                                let shutdown = HTTP_SERVER_SHUTDOWN.lock().unwrap();
+                                if *shutdown {
+                                    break;
+                                }
+                            }
+                            
+                            // Try to receive request with timeout
+                            match server.recv_timeout(std::time::Duration::from_millis(100)) {
+                                Ok(Some(mut request)) => {
+                                    let method = request.method().to_string();
+                                    let url = request.url().to_string();
+                                    
+                                    // Parse path and query
+                                    let (path, query) = if let Some(q_pos) = url.find('?') {
+                                        (url[..q_pos].to_string(), url[q_pos + 1..].to_string())
+                                    } else {
+                                        (url.clone(), String::new())
+                                    };
+                                    
+                                    // Collect headers
+                                    let headers: Vec<(String, String)> = request.headers()
+                                        .iter()
+                                        .map(|h| (h.field.to_string(), h.value.to_string()))
+                                        .collect();
+                                    
+                                    // Read body (for POST requests)
+                                    let mut body = String::new();
+                                    if method == "POST" {
+                                        let mut reader = request.as_reader();
+                                        let _ = std::io::Read::read_to_string(&mut reader, &mut body);
+                                    }
+                                    
+                                    // Store request
+                                    {
+                                        let mut state = HTTP_SERVER.lock().unwrap();
+                                        state.requests.push(HttpRequest {
+                                            method,
+                                            path,
+                                            query,
+                                            headers,
+                                            body,
+                                        });
+                                    }
+                                    
+                                    // Send response
+                                    let response = tiny_http::Response::from_string(response_html.clone())
+                                        .with_header(tiny_http::Header::from_bytes(
+                                            &b"Content-Type"[..],
+                                            &b"text/html; charset=utf-8"[..]
+                                        ).unwrap());
+                                    let _ = request.respond(response);
+                                }
+                                Ok(None) => {
+                                    // Timeout, continue loop
+                                }
+                                Err(_) => {
+                                    // Error, continue
+                                }
+                            }
+                        }
+                        
+                        // Mark as stopped
+                        {
+                            let mut state = HTTP_SERVER.lock().unwrap();
+                            state.running = false;
+                        }
+                        println!("[http_server] Stopped");
+                    });
+                    
+                    // Store handle
+                    {
+                        let mut h = HTTP_SERVER_HANDLE.lock().unwrap();
+                        *h = Some(handle);
+                    }
+                    
+                    // Wait a bit for server to start
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    
+                    Ok(Value::Bool(true))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_server_start() requires native feature"))
+                }
+            }
+            "http_server_stop" => {
+                // http_server_stop() -> bool
+                #[cfg(feature = "native")]
+                {
+                    // Signal shutdown
+                    {
+                        let mut shutdown = HTTP_SERVER_SHUTDOWN.lock().unwrap();
+                        *shutdown = true;
+                    }
+                    
+                    // Wait for thread to finish
+                    {
+                        let mut h = HTTP_SERVER_HANDLE.lock().unwrap();
+                        if let Some(handle) = h.take() {
+                            let _ = handle.join();
+                        }
+                    }
+                    
+                    Ok(Value::Bool(true))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_server_stop() requires native feature"))
+                }
+            }
+            "http_server_poll" => {
+                // http_server_poll() -> list of request dicts or None
+                // Returns and clears all pending requests
+                #[cfg(feature = "native")]
+                {
+                    let mut state = HTTP_SERVER.lock().unwrap();
+                    
+                    if state.requests.is_empty() {
+                        return Ok(Value::None);
+                    }
+                    
+                    let requests: Vec<Value> = state.requests.drain(..).map(|req| {
+                        // Parse query string into dict
+                        let query_pairs: Vec<(Value, Value)> = req.query
+                            .split('&')
+                            .filter(|s| !s.is_empty())
+                            .filter_map(|pair| {
+                                let mut parts = pair.splitn(2, '=');
+                                let key = parts.next()?;
+                                let value = parts.next().unwrap_or("");
+                                let decoded_key = urlencoding::decode(key).unwrap_or_else(|_| key.into()).to_string();
+                                let decoded_value = urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string();
+                                Some((Value::String(decoded_key), Value::String(decoded_value)))
+                            })
+                            .collect();
+                        
+                        // Convert headers to dict
+                        let headers_dict: Vec<(Value, Value)> = req.headers
+                            .iter()
+                            .map(|(k, v)| (Value::String(k.clone()), Value::String(v.clone())))
+                            .collect();
+                        
+                        Value::Dict(vec![
+                            (Value::String("method".to_string()), Value::String(req.method)),
+                            (Value::String("path".to_string()), Value::String(req.path)),
+                            (Value::String("query".to_string()), Value::String(req.query)),
+                            (Value::String("query_params".to_string()), Value::Dict(query_pairs)),
+                            (Value::String("headers".to_string()), Value::Dict(headers_dict)),
+                            (Value::String("body".to_string()), Value::String(req.body)),
+                        ])
+                    }).collect();
+                    
+                    Ok(Value::List(requests))
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("http_server_poll() requires native feature"))
                 }
             }
             // Additional utility functions
@@ -3029,7 +3548,10 @@ const {name_lower}Store = new {name}Store();
     }
 
     fn set_var(&mut self, name: String, value: Value) {
-        if let Some(scope) = self.scopes.last_mut() {
+        // If variable exists in globals (marked as global), update it there
+        if self.globals.contains_key(&name) {
+            self.globals.insert(name, value);
+        } else if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, value);
         }
     }

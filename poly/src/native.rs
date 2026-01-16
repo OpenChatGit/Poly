@@ -6,6 +6,21 @@ use wry::WebViewBuilder;
 
 use crate::config::PolyConfig;
 
+#[cfg(feature = "native")]
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Global window size tracking (for main window)
+#[cfg(feature = "native")]
+pub static MAIN_WINDOW_WIDTH: AtomicU32 = AtomicU32::new(1024);
+#[cfg(feature = "native")]
+pub static MAIN_WINDOW_HEIGHT: AtomicU32 = AtomicU32::new(768);
+
+/// Get main window size
+#[cfg(feature = "native")]
+pub fn get_main_window_size() -> (u32, u32) {
+    (MAIN_WINDOW_WIDTH.load(Ordering::Relaxed), MAIN_WINDOW_HEIGHT.load(Ordering::Relaxed))
+}
+
 /// Configuration for native window
 #[derive(Debug, Clone)]
 pub struct NativeConfig {
@@ -319,6 +334,10 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     let window = Arc::new(window);
     let window_clone = Arc::clone(&window);
     
+    // Initialize window size tracking
+    MAIN_WINDOW_WIDTH.store(config.width, Ordering::Relaxed);
+    MAIN_WINDOW_HEIGHT.store(config.height, Ordering::Relaxed);
+    
     // Create system tray if enabled
     let _tray = if config.tray_enabled {
         use crate::tray::{TrayConfig, TrayMenuItem, create_tray};
@@ -381,12 +400,19 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     
     // Get titlebar config and create injection script that runs on every page
     let titlebar_config = crate::titlebar::get_titlebar();
+    
+    // Get PolyView element JS (iframe2)
+    let polyview_js = crate::polyview::get_polyview_element_js();
+    
     let init_script = if titlebar_config.enabled {
         let html_escaped = titlebar_config.html.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
         let css_escaped = titlebar_config.css.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
         let js_escaped = titlebar_config.js.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
         
         format!(r#"
+// PolyView Element (iframe2)
+{polyview}
+
 (function() {{
     function injectTitlebar() {{
         if (document.getElementById('poly-titlebar')) return;
@@ -428,12 +454,14 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     }}
 }})();
 "#,
+            polyview = polyview_js,
             html = html_escaped,
             css = css_escaped,
             js = js_escaped,
         )
     } else {
-        String::new()
+        // Even without titlebar, inject PolyView element
+        polyview_js
     };
     
     let webview = wry::WebViewBuilder::new()
@@ -527,7 +555,10 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                     *control_flow = ControlFlow::Exit;
                 }
             }
-            Event::WindowEvent { event: WindowEvent::Resized(_size), .. } => {
+            Event::WindowEvent { event: WindowEvent::Resized(size), .. } => {
+                // Update global window size tracking
+                MAIN_WINDOW_WIDTH.store(size.width, Ordering::Relaxed);
+                MAIN_WINDOW_HEIGHT.store(size.height, Ordering::Relaxed);
                 // Don't auto-resize main WebView - let user control it via setMainBounds
                 // The user's JavaScript resize handler will update bounds as needed
             }

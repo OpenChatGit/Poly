@@ -54,6 +54,10 @@ pub struct WebViewConfig {
     pub user_agent: Option<String>,
     pub zoom_level: f64,
     pub autoplay: bool,
+    /// Scripts to run before page loads (like userscripts)
+    pub init_scripts: Vec<String>,
+    /// Background color (r, g, b, a) - defaults to dark
+    pub background_color: (u8, u8, u8, u8),
 }
 
 impl Default for WebViewConfig {
@@ -69,6 +73,8 @@ impl Default for WebViewConfig {
             user_agent: None,
             zoom_level: 1.0,
             autoplay: true,
+            init_scripts: Vec::new(),
+            background_color: (23, 26, 33, 255),  // Steam dark color
         }
     }
 }
@@ -166,6 +172,9 @@ pub enum WebViewOperation {
     Eval { id: String, script: String },
     SetZoom { id: String, level: f64 },
     SetUserAgent { id: String, user_agent: String },
+    
+    // Initialization Scripts (run before page loads)
+    AddInitScript { id: String, script: String },
     
     // Main WebView (the app's own WebView)
     SetMainBounds { bounds: WebViewBounds },
@@ -470,6 +479,22 @@ pub fn respond_to_permission(id: &str, permission: &str, granted: bool) -> Resul
             id: id.to_string(),
             permission: permission.to_string(),
             granted,
+        });
+    
+    Ok(())
+}
+
+/// Add an initialization script that runs before every page load
+/// This is the equivalent of WebView2's AddScriptToExecuteOnDocumentCreatedAsync
+/// The script runs before any other scripts on the page, perfect for injecting CSS
+pub fn add_init_script(id: &str, script: &str) -> Result<(), String> {
+    check_exists(id)?;
+    
+    PENDING_OPERATIONS.lock()
+        .map_err(|_| "Failed to acquire operations lock")?
+        .push(WebViewOperation::AddInitScript {
+            id: id.to_string(),
+            script: script.to_string(),
         });
     
     Ok(())

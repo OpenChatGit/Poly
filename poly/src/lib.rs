@@ -22,6 +22,7 @@ pub mod multiview;
 pub mod multiview_native;
 pub mod polyview;
 pub mod config;
+pub mod cookies;
 
 // Re-export WebView types
 pub use webview::{WebViewConfig, WebViewBounds, WebViewState, WebViewEvent, WebViewOperation};
@@ -41,6 +42,8 @@ use parser::Parser;
 use interpreter::Interpreter;
 
 pub use native::{NativeConfig, run_native_window, run_native_url, generate_native_bundle};
+#[cfg(feature = "native")]
+pub use native::get_main_window_size;
 pub use updater::{UpdateConfig, UpdateInfo, check_github_updates, check_custom_updates, download_update, install_update};
 pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
 pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, MessageRole, check_ollama, list_ollama_models, chat as ai_chat};

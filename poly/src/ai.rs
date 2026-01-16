@@ -1103,6 +1103,7 @@ lazy_static::lazy_static! {
 }
 
 /// Generate unique stream ID
+#[allow(dead_code)]
 fn generate_stream_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
@@ -1299,6 +1300,7 @@ fn stream_ollama_internal(
 }
 
 /// Add chunk to stream
+#[allow(dead_code)]
 fn add_chunk(stream_id: &str, chunk: StreamChunk) {
     if let Ok(mut streams) = STREAMS.lock() {
         if let Some(state) = streams.get_mut(stream_id) {

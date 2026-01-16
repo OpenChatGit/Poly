@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.3.2";
+const VERSION: &str = "0.3.6";
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -205,10 +205,19 @@ enum Commands {
     },
 }
 
-/// Cookie storage for PolyView proxy
-use std::sync::Mutex;
-lazy_static::lazy_static! {
-    static ref POLYVIEW_COOKIES: Mutex<std::collections::HashMap<String, Vec<String>>> = Mutex::new(std::collections::HashMap::new());
+/// Cookie storage for PolyView proxy - use the shared module
+fn normalize_cookie_domain(domain: &str) -> String {
+    poly::cookies::normalize_domain(domain)
+}
+
+/// Get all cookies for a domain, including shared Steam cookies
+fn get_cookies_for_domain(domain: &str) -> String {
+    poly::cookies::get_cookies_for_domain(domain)
+}
+
+/// Get Steam cookies as a string (for use in backend HTTP requests)
+pub fn get_steam_cookies() -> String {
+    poly::cookies::get_steam_cookies()
 }
 
 /// Handle PolyView proxy request - fetches URL and rewrites content to bypass iframe restrictions
@@ -232,15 +241,8 @@ fn handle_polyview_proxy(target_url: &str, proxy_port: u16) -> tiny_http::Respon
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build();
     
-    // Get stored cookies for this domain
-    let cookie_header = {
-        let cookies = POLYVIEW_COOKIES.lock().unwrap();
-        if let Some(domain_cookies) = cookies.get(&domain) {
-            domain_cookies.join("; ")
-        } else {
-            String::new()
-        }
-    };
+    // Get stored cookies for this domain (including shared Steam cookies)
+    let cookie_header = get_cookies_for_domain(&domain);
     
     let mut req = client.get(target_url)
         .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
@@ -311,11 +313,8 @@ fn handle_polyview_proxy(target_url: &str, proxy_port: u16) -> tiny_http::Respon
     }
 }
 
-/// Store cookies from response
+/// Store cookies from response (uses normalized domain for Steam cookie sharing)
 fn store_polyview_cookies(response: &ureq::Response, domain: &str) {
-    let mut cookies = POLYVIEW_COOKIES.lock().unwrap();
-    let entry = cookies.entry(domain.to_string()).or_insert_with(Vec::new);
-    
     // Get all Set-Cookie headers
     for name in response.headers_names() {
         if name.eq_ignore_ascii_case("set-cookie") {
@@ -324,9 +323,13 @@ fn store_polyview_cookies(response: &ureq::Response, domain: &str) {
                 let cookie = value.split(';').next().unwrap_or(value).to_string();
                 let cookie_name = cookie.split('=').next().unwrap_or("");
                 
-                // Update or add cookie
-                entry.retain(|c| !c.starts_with(&format!("{}=", cookie_name)));
-                entry.push(cookie);
+                // Store cookie using the shared module
+                poly::cookies::store_cookie(domain, &cookie);
+                
+                // Log important Steam session cookies
+                if cookie_name == "steamLoginSecure" || cookie_name == "sessionid" || cookie_name == "steamRememberLogin" {
+                    println!("[PolyView] Stored Steam cookie: {} for domain {}", cookie_name, domain);
+                }
             }
         }
     }
@@ -413,15 +416,8 @@ fn handle_polyview_proxy_post(target_url: &str, proxy_port: u16, body: &[u8], co
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         .build();
     
-    // Get stored cookies
-    let cookie_header = {
-        let cookies = POLYVIEW_COOKIES.lock().unwrap();
-        if let Some(domain_cookies) = cookies.get(&domain) {
-            domain_cookies.join("; ")
-        } else {
-            String::new()
-        }
-    };
+    // Get stored cookies (including shared Steam cookies)
+    let cookie_header = get_cookies_for_domain(&domain);
     
     let mut req = client.post(target_url)
         .set("Content-Type", content_type)
@@ -499,12 +495,13 @@ fn resolve_polyview_url(base: &str, relative: &str) -> String {
 
 /// Rewrite HTML to proxy all URLs through PolyView
 /// This is the core of "iframe2" - making the content work seamlessly in an iframe
+/// OPTIMIZATION: Only proxy HTML pages and AJAX, let static resources load directly
 fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String {
     let proxy_base = format!("http://localhost:{}/__polyview/?url=", proxy_port);
     
     let mut result = html.to_string();
     
-    // Inject base tag for relative URLs
+    // Inject base tag for relative URLs - this makes static resources load directly!
     let base_tag = format!(r#"<base href="{}">"#, base_url);
     if let Some(head_pos) = result.to_lowercase().find("<head") {
         if let Some(close_pos) = result[head_pos..].find('>') {
@@ -513,17 +510,43 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
         }
     }
     
-    // Rewrite href, src, action attributes
-    result = rewrite_polyview_attribute(&result, "href", base_url, &proxy_base);
-    result = rewrite_polyview_attribute(&result, "src", base_url, &proxy_base);
-    result = rewrite_polyview_attribute(&result, "action", base_url, &proxy_base);
+    // DON'T rewrite src attributes for static resources - let them load directly
+    // Only rewrite href for navigation links and action for forms
+    result = rewrite_polyview_links_only(&result, base_url, &proxy_base);
     
     // Inject PolyView client script - this is what makes iframe2 special
     // It intercepts navigation, form submissions, and reports state to parent
     let client_script = format!(r#"
+<style>
+/* Hide Steam's header/navigation - we have our own */
+#global_header, .responsive_header, #global_action_menu, 
+header.responsive_header_content, .supernav_container,
+#responsive_menu_logo, .header_installsteam_btn_content,
+#store_header, #store_controls, #store_nav_area,
+.responsive_page_menu_ctn, #footer, #footer_spacer, #footer_responsive_optin_spacer,
+.responsive_page_template_content > .responsive_local_menu_tab,
+.profile_header_actions, .profile_header_actions_ctn {{ 
+    display: none !important; 
+}}
+/* Adjust body to remove header space */
+body {{ 
+    padding-top: 0 !important; 
+    margin-top: 0 !important;
+}}
+.responsive_page_frame {{ 
+    padding-top: 0 !important; 
+}}
+.responsive_page_content {{
+    padding-top: 0 !important;
+}}
+/* Make profile content full width */
+.profile_page {{
+    padding-top: 0 !important;
+}}
+</style>
 <script>
 (function() {{
-    // PolyView Client - "iframe2" magic
+    // PolyView Client - "iframe2" magic (optimized - only proxy navigation)
     const PROXY_BASE = 'http://localhost:{}/__polyview/?url=';
     const BASE_URL = '{}';
     const PROXY_PORT = {};
@@ -535,7 +558,23 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
         }}
     }}
     
-    // Convert URL to proxy URL
+    // Check if URL is a page (needs proxy) vs static resource (load direct)
+    function needsProxy(url) {{
+        if (!url) return false;
+        const lower = url.toLowerCase();
+        // Static resources - load directly (faster!)
+        const staticExts = ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.mp3', '.mp4', '.webm', '.ogg'];
+        for (const ext of staticExts) {{
+            if (lower.includes(ext)) return false;
+        }}
+        // CDN domains - always direct
+        if (lower.includes('steamstatic.com') || lower.includes('akamai') || lower.includes('cloudflare')) {{
+            return false;
+        }}
+        return true;
+    }}
+    
+    // Convert URL to proxy URL (only for pages)
     function toProxyUrl(url) {{
         if (!url || url.startsWith('javascript:') || url.startsWith('data:') || 
             url.startsWith('mailto:') || url.startsWith('tel:') || url.startsWith('#') ||
@@ -545,22 +584,30 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
         // Make absolute
         try {{
             const absolute = new URL(url, BASE_URL).href;
+            // Only proxy if it needs it (HTML pages)
+            if (!needsProxy(absolute)) return absolute;
             return PROXY_BASE + encodeURIComponent(absolute);
         }} catch {{
             return url;
         }}
     }}
     
-    // Intercept link clicks
+    // Intercept link clicks - only proxy page navigation
     document.addEventListener('click', function(e) {{
         const link = e.target.closest('a[href]');
         if (link) {{
             const href = link.getAttribute('href');
             if (href && !href.startsWith('javascript:') && !href.startsWith('#') && 
                 !href.startsWith('mailto:') && !href.startsWith('tel:')) {{
-                e.preventDefault();
-                const proxyUrl = toProxyUrl(href);
-                window.location.href = proxyUrl;
+                // Check if this is a page link that needs proxying
+                try {{
+                    const absolute = new URL(href, BASE_URL).href;
+                    if (needsProxy(absolute)) {{
+                        e.preventDefault();
+                        window.location.href = PROXY_BASE + encodeURIComponent(absolute);
+                    }}
+                    // Otherwise let it navigate normally
+                }} catch {{}}
             }}
         }}
     }}, true);
@@ -588,17 +635,6 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
         return originalOpen.call(window, url, target, features);
     }};
     
-    // Intercept location changes
-    const locationProxy = new Proxy(window.location, {{
-        set: function(target, prop, value) {{
-            if (prop === 'href' && value && !value.includes('/__polyview/')) {{
-                value = toProxyUrl(value);
-            }}
-            target[prop] = value;
-            return true;
-        }}
-    }});
-    
     // Report page load
     window.addEventListener('load', function() {{
         reportToParent('loaded', {{ url: BASE_URL, title: document.title }});
@@ -615,26 +651,30 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
     // Report initial navigation
     reportToParent('navigate', {{ url: BASE_URL }});
     
-    // Override fetch to handle CORS
+    // Override fetch - only proxy API calls, not static resources
     const originalFetch = window.fetch;
     window.fetch = function(url, options) {{
         if (typeof url === 'string' && url.startsWith('http') && !url.includes('localhost')) {{
-            // Route through proxy for cross-origin requests
-            url = toProxyUrl(url);
+            // Only proxy if it's an API call (not static resource)
+            if (needsProxy(url)) {{
+                url = PROXY_BASE + encodeURIComponent(url);
+            }}
         }}
         return originalFetch.call(window, url, options);
     }};
     
-    // Override XMLHttpRequest
+    // Override XMLHttpRequest - only proxy API calls
     const originalXHROpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url, ...args) {{
         if (typeof url === 'string' && url.startsWith('http') && !url.includes('localhost')) {{
-            url = toProxyUrl(url);
+            if (needsProxy(url)) {{
+                url = PROXY_BASE + encodeURIComponent(url);
+            }}
         }}
         return originalXHROpen.call(this, method, url, ...args);
     }};
     
-    console.log('[PolyView] iframe2 client loaded for:', BASE_URL);
+    console.log('[PolyView] iframe2 client loaded (optimized) for:', BASE_URL);
 }})();
 </script>
 "#, proxy_port, base_url, proxy_port);
@@ -648,7 +688,14 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
     result
 }
 
-/// Rewrite a specific attribute in HTML for PolyView
+/// Rewrite only navigation links (href on <a> tags) and form actions - NOT static resources
+fn rewrite_polyview_links_only(html: &str, base_url: &str, proxy_base: &str) -> String {
+    // Don't rewrite anything in the HTML - let the base tag and JS handle it
+    // This is much faster and lets static resources load directly from CDN
+    html.to_string()
+}
+
+/// Rewrite a specific attribute in HTML for PolyView (DEPRECATED - kept for reference)
 fn rewrite_polyview_attribute(html: &str, attr: &str, base_url: &str, proxy_base: &str) -> String {
     let mut result = String::with_capacity(html.len() * 2);
     let mut remaining = html;
@@ -1398,6 +1445,7 @@ window.poly = {{
   // WebView API - Multi-WebView management for browser apps
   webview: {{
     // Create a new WebView
+    // Options: url, html, x, y, width, height, visible, transparent, devtools, initScripts (array of scripts to run before page loads)
     async create(id, options = {{}}) {{ return poly.invoke('__poly_webview_create', {{ id, ...options }}); }},
     // Navigate a WebView to URL
     async navigate(id, url) {{ return poly.invoke('__poly_webview_navigate', {{ id, url }}); }},
@@ -1622,6 +1670,43 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                     let output = execute_poly_for_web(&entry_http);
                     tiny_http::Response::from_string(output)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
+                }
+                _ if url.starts_with("/__polyview") => {
+                    // PolyView Proxy - "iframe2" that bypasses all iframe restrictions
+                    let target_url = url.strip_prefix("/__polyview/?url=")
+                        .or_else(|| url.strip_prefix("/__polyview?url="))
+                        .or_else(|| url.strip_prefix("/__polyview/"))
+                        .or_else(|| url.strip_prefix("/__polyview"))
+                        .unwrap_or("");
+                    
+                    // URL decode
+                    let target_url = urlencoding::decode(target_url).unwrap_or_default().to_string();
+                    
+                    if target_url.is_empty() {
+                        tiny_http::Response::from_string(r#"<html><body>Missing URL parameter</body></html>"#)
+                            .with_status_code(400)
+                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html"[..]).unwrap())
+                    } else {
+                        // Check request method
+                        let method = request.method().as_str();
+                        if method == "POST" {
+                            // Read POST body
+                            let mut body = Vec::new();
+                            request.as_reader().read_to_end(&mut body).ok();
+                            
+                            // Get content type
+                            let content_type = request.headers()
+                                .iter()
+                                .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("content-type"))
+                                .map(|h| h.value.as_str().to_string())
+                                .unwrap_or_else(|| "application/x-www-form-urlencoded".to_string());
+                            
+                            handle_polyview_proxy_post(&target_url, port, &body, &content_type)
+                        } else {
+                            // GET request
+                            handle_polyview_proxy(&target_url, port)
+                        }
+                    }
                 }
                 _ => {
                     // First try the exact path, then try in web/ folder, then packages/
@@ -2275,6 +2360,17 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
                 serde_json::json!({"error": "Native feature not enabled"}).to_string()
             }
         }
+        "__poly_window_get_size" => {
+            #[cfg(feature = "native")]
+            {
+                let (width, height) = poly::native::get_main_window_size();
+                serde_json::json!({"result": {"width": width, "height": height}}).to_string()
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                serde_json::json!({"error": "Native feature not enabled"}).to_string()
+            }
+        }
         "__poly_window_set_size" => {
             let id = args.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let width = args.get("width").and_then(|v| v.as_u64()).unwrap_or(800) as u32;
@@ -2518,10 +2614,16 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
         // Shell APIs
         "__poly_shell_open" => {
             let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            eprintln!("[DEBUG] shell.open URL: {}", url);
             #[cfg(target_os = "windows")]
             {
-                let _ = std::process::Command::new("cmd")
-                    .args(["/C", "start", "", url])
+                // Use PowerShell Start-Process which handles URLs with special chars correctly
+                use std::os::windows::process::CommandExt;
+                let cmd = format!("Start-Process '{}'", url.replace("'", "''"));
+                eprintln!("[DEBUG] PowerShell command: {}", cmd);
+                let _ = std::process::Command::new("powershell")
+                    .args(["-NoProfile", "-Command", &cmd])
+                    .creation_flags(0x08000000) // CREATE_NO_WINDOW
                     .spawn();
             }
             #[cfg(target_os = "macos")]
@@ -3342,6 +3444,25 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             let zoom_level = args.get("zoomLevel").and_then(|v| v.as_f64()).unwrap_or(1.0);
             let autoplay = args.get("autoplay").and_then(|v| v.as_bool()).unwrap_or(true);
             
+            // Parse backgroundColor - defaults to Steam dark
+            let background_color = if let Some(bg) = args.get("backgroundColor").and_then(|v| v.as_array()) {
+                let r = bg.get(0).and_then(|v| v.as_u64()).unwrap_or(23) as u8;
+                let g = bg.get(1).and_then(|v| v.as_u64()).unwrap_or(26) as u8;
+                let b = bg.get(2).and_then(|v| v.as_u64()).unwrap_or(33) as u8;
+                let a = bg.get(3).and_then(|v| v.as_u64()).unwrap_or(255) as u8;
+                (r, g, b, a)
+            } else {
+                (23, 26, 33, 255)  // Steam dark color
+            };
+            
+            // Parse initScripts array - scripts that run before page loads
+            let init_scripts: Vec<String> = args.get("initScripts")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect())
+                .unwrap_or_default();
+            
             let config = poly::webview::WebViewConfig {
                 id: id.to_string(),
                 url: url.to_string(),
@@ -3353,6 +3474,8 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
                 user_agent,
                 zoom_level,
                 autoplay,
+                init_scripts,
+                background_color,
             };
             
             match poly::webview::create(config) {
@@ -5410,6 +5533,7 @@ window.poly = {
   // WebView API - Multi-WebView management for browser apps
   webview: {
     // Create a new WebView
+    // Options: url, html, x, y, width, height, visible, transparent, devtools, initScripts (array of scripts to run before page loads)
     async create(id, options = {}) { return poly.invoke('__poly_webview_create', { id, ...options }); },
     // Navigate a WebView to URL
     async navigate(id, url) { return poly.invoke('__poly_webview_navigate', { id, url }); },

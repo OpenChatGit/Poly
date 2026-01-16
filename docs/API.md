@@ -2,7 +2,7 @@
 
 Complete reference for all Poly JavaScript APIs.
 
-**Version:** 0.3.2
+**Version:** 0.3.6
 
 > **Note:** This documentation is comprehensive and covers all available APIs in detail. Take your time - it's completely normal if you don't understand everything at first. Start with the basics and explore more advanced features as you need them.
 

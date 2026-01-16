@@ -96,6 +96,7 @@ mod native_impl {
                     WebViewOperation::Eval { id, script } => self.eval(&id, &script),
                     WebViewOperation::SetZoom { id, level } => self.set_zoom(&id, level),
                     WebViewOperation::SetUserAgent { id, user_agent } => self.set_user_agent(&id, &user_agent),
+                    WebViewOperation::AddInitScript { id, script } => self.add_init_script(&id, &script),
                     WebViewOperation::SetMainBounds { bounds } => self.set_main_bounds(bounds),
                     WebViewOperation::GrantPermission { .. } => Ok(()), // TODO: Implement
                 };
@@ -127,9 +128,15 @@ mod native_impl {
                     )),
                 })
                 .with_transparent(config.transparent)
+                .with_background_color(config.background_color)
                 .with_devtools(config.devtools)
                 .with_visible(config.visible)
                 .with_autoplay(config.autoplay);
+            
+            // Add initialization scripts (run before page loads)
+            for script in &config.init_scripts {
+                builder = builder.with_initialization_script(script);
+            }
             
             // Set URL or HTML
             if let Some(ref html) = config.html {
@@ -182,16 +189,17 @@ mod native_impl {
             self.instances.insert(id.clone(), webview);
             println!("[WebView] Created '{}'", id);
             
-            // On Windows, newly created WebViews appear on top.
-            // We need to bring the main webview back to front.
-            // Toggle visibility to force z-order refresh.
+            // On Windows, newly created WebViews appear BEHIND the main webview.
+            // We need to bring the new webview to front by toggling visibility.
             #[cfg(target_os = "windows")]
-            if let Some(ref main_wv) = self.main_webview {
-                // Hide and show to refresh z-order
-                let _ = main_wv.set_visible(false);
-                let _ = main_wv.set_visible(true);
-                // Also re-focus to ensure it's on top
-                let _ = main_wv.focus();
+            if let Some(wv) = self.instances.get(&id) {
+                // Toggle visibility to force z-order refresh
+                let _ = wv.set_visible(false);
+                let _ = wv.set_visible(config.visible);
+                // Focus the new webview to bring it to front
+                if config.visible {
+                    let _ = wv.focus();
+                }
             }
             
             Ok(())
@@ -309,6 +317,13 @@ mod native_impl {
             // Note: User agent must be set at creation time in wry
             // This is a limitation - we can't change it after creation
             Err("User agent can only be set at WebView creation time".to_string())
+        }
+
+        fn add_init_script(&self, _id: &str, _script: &str) -> Result<(), String> {
+            // Note: Initialization scripts must be set at creation time in wry
+            // For existing WebViews, use eval() instead, but it won't run before page load
+            // To add init scripts, destroy and recreate the WebView with the script
+            Err("Init scripts can only be set at WebView creation time. Pass init_scripts in create() options.".to_string())
         }
 
         fn set_main_bounds(&self, bounds: WebViewBounds) -> Result<(), String> {
