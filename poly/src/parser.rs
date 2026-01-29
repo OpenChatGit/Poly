@@ -212,13 +212,45 @@ impl Parser {
 
     fn parse_import(&mut self) -> Result<Statement, String> {
         self.advance(); // consume 'import'
-        let module = self.expect_identifier()?;
+        
+        // Support string-based imports: import "src/sidebars"
+        if let Some(Token::String(path)) = self.peek().cloned() {
+            self.advance();
+            return Ok(Statement::Import(path));
+        }
+        
+        let mut module = self.expect_identifier()?;
+        
+        // Support path-style imports: import src/sidebars or import foo.bar
+        while self.check(&Token::Slash) || self.check(&Token::Dot) {
+            let sep = if self.check(&Token::Slash) { "/" } else { "." };
+            self.advance(); // consume separator
+            let next = self.expect_identifier()?;
+            module = format!("{}{}{}", module, sep, next);
+        }
+        
         Ok(Statement::Import(module))
     }
 
     fn parse_from_import(&mut self) -> Result<Statement, String> {
         self.advance(); // consume 'from'
-        let module = self.expect_identifier()?;
+        
+        // Support string-based imports: from "src/sidebars" import func
+        let module = if let Some(Token::String(path)) = self.peek().cloned() {
+            self.advance();
+            path
+        } else {
+            let mut m = self.expect_identifier()?;
+            // Support path-style imports
+            while self.check(&Token::Slash) || self.check(&Token::Dot) {
+                let sep = if self.check(&Token::Slash) { "/" } else { "." };
+                self.advance();
+                let next = self.expect_identifier()?;
+                m = format!("{}{}{}", m, sep, next);
+            }
+            m
+        };
+        
         self.expect(Token::Import)?;
         
         let mut names = vec![self.expect_identifier()?];
