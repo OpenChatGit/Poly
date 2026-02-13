@@ -49,7 +49,7 @@ Then simply restart your editor.
 
 ## Features
 
-- Lightweight (~13MB binary)
+- Lightweight (~15MB binary)
 - **Typed Scripting Language** (Python-like syntax)
 - Multi-window support
 - Native dialogs, clipboard, notifications
