@@ -204,9 +204,14 @@ impl Interpreter {
         }
 
         match stmt {
-            Statement::Let(name, expr) => {
-                let value = self.evaluate(expr)?;
-                self.set_var(name.clone(), value);
+            Statement::Let { name, value, .. } => {
+                let val = self.evaluate(value)?;
+                self.set_var(name.clone(), val);
+                Ok(Value::None)
+            }
+            Statement::Var { name, value, .. } => {
+                let val = self.evaluate(value)?;
+                self.set_var(name.clone(), val);
                 Ok(Value::None)
             }
             Statement::Assign(name, expr) => {
@@ -229,7 +234,7 @@ impl Interpreter {
             Statement::For { var, iter, body } => {
                 self.execute_for(var, iter, body)
             }
-            Statement::FnDef { name, params, body } => {
+            Statement::FnDef { name, params, return_type: _, body } => {
                 let func = Value::Function {
                     name: name.clone(),
                     params: params.clone(),
@@ -247,6 +252,10 @@ impl Interpreter {
                 Ok(self.return_value.clone().unwrap_or(Value::None))
             }
             Statement::ClassDef { name, parent, methods } => {
+                self.define_class(name, parent, methods)
+            }
+            Statement::StructDef { name, parent, methods } => {
+                // Treat structs as classes for now in interpreter
                 self.define_class(name, parent, methods)
             }
             Statement::Expr(expr) => self.evaluate(expr),
@@ -919,7 +928,7 @@ impl Interpreter {
                 
                 // Clone the method info to avoid borrow issues
                 let init_method = self.classes.get(&name)
-                    .and_then(|c| c.methods.get("__init__"))
+                    .and_then(|c| c.methods.get("__init__").or(c.methods.get("init")))
                     .cloned();
                 
                 if let Some((params, body)) = init_method {
@@ -2969,6 +2978,62 @@ const {name_lower}Store = new {name}Store();
                     Err(self.error("exec() requires native feature"))
                 }
             }
+            "spawn" => {
+                // spawn(command, cwd?) -> { success: bool, message: string }
+                // Spawns a background process without waiting for it to complete
+                #[cfg(feature = "native")]
+                {
+                    let cmd = match args.get(0) {
+                        Some(Value::String(s)) => s.clone(),
+                        _ => return Err(self.error("spawn() requires a command string")),
+                    };
+                    
+                    let cwd = match args.get(1) {
+                        Some(Value::String(s)) => Some(s.clone()),
+                        _ => None,
+                    };
+                    
+                    #[cfg(target_os = "windows")]
+                    let mut command = std::process::Command::new("cmd");
+                    #[cfg(target_os = "windows")]
+                    command.args(["/C", &cmd]);
+                    
+                    #[cfg(not(target_os = "windows"))]
+                    let mut command = std::process::Command::new("sh");
+                    #[cfg(not(target_os = "windows"))]
+                    command.args(["-c", &cmd]);
+                    
+                    // Set working directory if provided
+                    if let Some(dir) = cwd {
+                        command.current_dir(&dir);
+                    }
+                    
+                    // Spawn without waiting
+                    command.stdout(std::process::Stdio::null());
+                    command.stderr(std::process::Stdio::null());
+                    command.stdin(std::process::Stdio::null());
+                    
+                    match command.spawn() {
+                        Ok(_child) => {
+                            // Process spawned successfully, don't wait for it
+                            Ok(Value::Dict(vec![
+                                (Value::String("success".to_string()), Value::Bool(true)),
+                                (Value::String("message".to_string()), Value::String("Process spawned successfully".to_string())),
+                            ]))
+                        }
+                        Err(e) => {
+                            Ok(Value::Dict(vec![
+                                (Value::String("success".to_string()), Value::Bool(false)),
+                                (Value::String("message".to_string()), Value::String(format!("Failed to spawn: {}", e))),
+                            ]))
+                        }
+                    }
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    Err(self.error("spawn() requires native feature"))
+                }
+            }
             "timestamp" => {
                 // timestamp() -> int (milliseconds since epoch)
                 use std::time::{SystemTime, UNIX_EPOCH};
@@ -3440,6 +3505,8 @@ const {name_lower}Store = new {name}Store();
             (Value::Float(a), BinOp::Mul, Value::Int(b)) => Ok(Value::Float(a * *b as f64)),
             (Value::Int(a), BinOp::Div, Value::Float(b)) => Ok(Value::Float(*a as f64 / b)),
             (Value::Float(a), BinOp::Div, Value::Int(b)) => Ok(Value::Float(a / *b as f64)),
+            (Value::Int(a), BinOp::Pow, Value::Float(b)) => Ok(Value::Float((*a as f64).powf(*b))),
+            (Value::Float(a), BinOp::Pow, Value::Int(b)) => Ok(Value::Float(a.powf(*b as f64))),
             
             // String operations
             (Value::String(a), BinOp::Add, Value::String(b)) => Ok(Value::String(format!("{}{}", a, b))),

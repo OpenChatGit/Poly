@@ -19,7 +19,7 @@ const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
 
-const VERSION: &str = "0.3.6";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[allow(dead_code)]
 const GITHUB_REPO: &str = "OpenChatGit/Poly";
 
@@ -156,6 +156,15 @@ enum Commands {
         #[arg(long)]
         verify: bool,
     },
+    
+    /// Install VSCode extension for Poly syntax highlighting
+    InstallVscode,
+    
+    /// Uninstall VSCode extension
+    UninstallVscode,
+    
+    /// Show VSCode extension information
+    VscodeInfo,
     
     /// Open a URL in a new Poly WebView window (internal use)
     #[command(hide = true)]
@@ -779,6 +788,31 @@ fn main() {
         Some(Commands::Add { package, version }) => packages::add_package(&package, version.as_deref()),
         Some(Commands::Remove { package }) => packages::remove_package(&package),
         Some(Commands::Install { verify }) => packages::install_packages(verify),
+        Some(Commands::InstallVscode) => {
+            match poly::vscode_extension::install_vscode_extension() {
+                Ok(()) => Ok(()),
+                Err(e) => { eprintln!("{}error{}: {}", RED, RESET, e); std::process::exit(1); }
+            }
+        },
+        Some(Commands::UninstallVscode) => {
+            match poly::vscode_extension::uninstall_vscode_extension() {
+                Ok(()) => Ok(()),
+                Err(e) => { eprintln!("{}error{}: {}", RED, RESET, e); std::process::exit(1); }
+            }
+        },
+        Some(Commands::VscodeInfo) => {
+            println!("📦 Poly VSCode Extension");
+            println!();
+            if poly::vscode_extension::is_extension_installed() {
+                println!("  {}✓ Extension is installed{}", GREEN, RESET);
+            } else {
+                println!("  {}✗ Extension is not installed{}", YELLOW, RESET);
+                println!();
+                println!("  Run: {}poly install-vscode{}", CYAN, RESET);
+            }
+            println!();
+            Ok(())
+        },
         Some(Commands::OpenUrl { url, title, width, height }) => {
             open_url_window(&url, &title, width, height);
             Ok(())
@@ -1516,6 +1550,25 @@ window.poly = {{
     onDownload(id, cb) {{ this.on('download', id, cb); }},
     onClose(id, cb) {{ this.on('close', id, cb); }},
     onHistoryChange(id, cb) {{ this.on('historyChange', id, cb); }}
+  }},
+  // Ad Blocking API
+  adblock: {{
+    // Initialize ad blocker with filter lists
+    async init(filterLists) {{ return poly.invoke('__poly_adblock_init', {{ filterLists }}); }},
+    // Check if a URL should be blocked
+    async shouldBlock(url, sourceUrl, resourceType = 'other') {{ 
+      return poly.invoke('__poly_adblock_should_block', {{ url, sourceUrl, resourceType }}); 
+    }},
+    // Download EasyList filter list
+    async downloadEasyList() {{ return poly.invoke('__poly_adblock_download_easylist', {{}}); }},
+    // Download EasyPrivacy filter list
+    async downloadEasyPrivacy() {{ return poly.invoke('__poly_adblock_download_easyprivacy', {{}}); }},
+    // Download Pi-hole block list
+    async downloadPiHole() {{ return poly.invoke('__poly_adblock_download_pihole', {{}}); }},
+    // Parse Pi-hole hosts file
+    async parsePiHole(content) {{ return poly.invoke('__poly_adblock_parse_pihole', {{ content }}); }},
+    // Get blocking statistics
+    async getStats() {{ return poly.invoke('__poly_adblock_get_stats', {{}}); }}
   }},
   // MultiView API - Create windows with multiple WebViews
   multiview: {{
@@ -3633,7 +3686,8 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
                         serde_json::json!({"type": "permission", "id": id, "permission": permission, "origin": origin}),
                 }
             }).collect();
-            serde_json::json!({"events": json_events}).to_string()
+            // Wrap in {"result": ...} format for poly.invoke()
+            serde_json::json!({"result": json_events}).to_string()
         }
         "__poly_webview_respond_permission" => {
             let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -3666,6 +3720,53 @@ fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> String {
             let height = args.get("height").and_then(|v| v.as_u64()).unwrap_or(600) as u32;
             poly::webview::set_main_bounds(poly::webview::WebViewBounds { x, y, width, height });
             serde_json::json!({"success": true}).to_string()
+        }
+        // Ad Blocking API
+        "__poly_adblock_init" => {
+            let filter_lists = args.get("filterLists")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_else(Vec::new);
+            
+            match poly::init_adblock(filter_lists) {
+                Ok(_) => serde_json::json!({"result": {"success": true}}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_adblock_should_block" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let source_url = args.get("sourceUrl").and_then(|v| v.as_str()).unwrap_or("");
+            let resource_type = args.get("resourceType").and_then(|v| v.as_str()).unwrap_or("other");
+            
+            let blocked = poly::should_block(url, source_url, resource_type);
+            serde_json::json!({"result": {"blocked": blocked}}).to_string()
+        }
+        "__poly_adblock_download_easylist" => {
+            match poly::download_easylist() {
+                Ok(content) => serde_json::json!({"result": {"content": content}}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_adblock_download_easyprivacy" => {
+            match poly::download_easyprivacy() {
+                Ok(content) => serde_json::json!({"result": {"content": content}}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_adblock_download_pihole" => {
+            match poly::download_pihole_blocklist() {
+                Ok(content) => serde_json::json!({"result": {"content": content}}).to_string(),
+                Err(e) => serde_json::json!({"error": e}).to_string(),
+            }
+        }
+        "__poly_adblock_parse_pihole" => {
+            let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let domains = poly::parse_pihole_hosts(content);
+            serde_json::json!({"result": {"domains": domains}}).to_string()
+        }
+        "__poly_adblock_get_stats" => {
+            let (blocked, total) = poly::adblock_stats();
+            serde_json::json!({"result": {"blocked": blocked, "total": total}}).to_string()
         }
         // MultiView API - Create windows with multiple WebViews
         "__poly_multiview_create" => {
@@ -4685,7 +4786,8 @@ fn run_native_app(project_path: &Path, _release: bool, browser_flag: bool, ui_he
                         _ => "text/plain",
                     };
                     
-                    if matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "ico") {
+                    // Read binary files as bytes, text files as strings
+                    if matches!(ext, "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg") {
                         match fs::read(&file_path) {
                             Ok(content) => tiny_http::Response::from_data(content)
                                 .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()),
@@ -5604,6 +5706,25 @@ window.poly = {
     onDownload(id, cb) { this.on('download', id, cb); },
     onClose(id, cb) { this.on('close', id, cb); },
     onHistoryChange(id, cb) { this.on('historyChange', id, cb); }
+  },
+  // Ad Blocking API
+  adblock: {
+    // Initialize ad blocker with filter lists
+    async init(filterLists) { return poly.invoke('__poly_adblock_init', { filterLists }); },
+    // Check if a URL should be blocked
+    async shouldBlock(url, sourceUrl, resourceType = 'other') { 
+      return poly.invoke('__poly_adblock_should_block', { url, sourceUrl, resourceType }); 
+    },
+    // Download EasyList filter list
+    async downloadEasyList() { return poly.invoke('__poly_adblock_download_easylist', {}); },
+    // Download EasyPrivacy filter list
+    async downloadEasyPrivacy() { return poly.invoke('__poly_adblock_download_easyprivacy', {}); },
+    // Download Pi-hole block list
+    async downloadPiHole() { return poly.invoke('__poly_adblock_download_pihole', {}); },
+    // Parse Pi-hole hosts file
+    async parsePiHole(content) { return poly.invoke('__poly_adblock_parse_pihole', { content }); },
+    // Get blocking statistics
+    async getStats() { return poly.invoke('__poly_adblock_get_stats', {}); }
   },
   // MultiView API - Create windows with multiple WebViews
   multiview: {

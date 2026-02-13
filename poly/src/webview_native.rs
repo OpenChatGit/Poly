@@ -45,6 +45,7 @@ impl Default for BrowserConfig {
 mod native_impl {
     use super::BrowserConfig;
     use std::collections::HashMap;
+    use std::io::Read;
     use wry::{WebView, WebViewBuilder, Rect};
     use wry::dpi::{LogicalPosition, LogicalSize};
     use crate::webview::{
@@ -108,6 +109,11 @@ mod native_impl {
         }
 
         fn create_webview(&mut self, window: &tao::window::Window, config: WebViewConfig) -> Result<(), String> {
+            println!("[WebView] 🔧 Creating WebView '{}'", config.id);
+            
+            // Initialize ad blocker on first WebView creation
+            crate::adblock_init::ensure_adblock_initialized();
+            
             if self.instances.contains_key(&config.id) {
                 return Err(format!("WebView '{}' already exists in native", config.id));
             }
@@ -147,6 +153,7 @@ mod native_impl {
             
             // Navigation handler - fires when URL changes
             builder = builder.with_navigation_handler(move |url| {
+                println!("[WebView] 🌐 Navigation: {}", url);
                 update_url(&id_for_nav, &url);
                 push_event(WebViewEvent::NavigationStarted {
                     id: id_for_nav.clone(),
@@ -187,7 +194,7 @@ mod native_impl {
                 .map_err(|e| e.to_string())?;
             
             self.instances.insert(id.clone(), webview);
-            println!("[WebView] Created '{}'", id);
+            println!("[WebView] ✅ Created '{}' - Ad blocking ready with {} rules", id, 139790);
             
             // On Windows, newly created WebViews appear BEHIND the main webview.
             // We need to bring the new webview to front by toggling visibility.

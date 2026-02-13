@@ -80,11 +80,15 @@
       "patterns": [
         {
           "name": "keyword.control.poly",
-          "match": "\\b(if|else|elif|for|while|break|continue|return|match|case|try|except|finally|with|pass)\\b"
+          "match": "\\b(if|else|elif|for|while|break|continue|return|match|case|try|except|finally|with|pass|raise|assert|del|global)\\b"
         },
         {
           "name": "keyword.declaration.poly",
-          "match": "\\b(fn|let|const|class|import|from|as|export)\\b"
+          "match": "\\b(fn|def|let|var|const|class|struct|import|from|as|export|alias)\\b"
+        },
+        {
+          "name": "keyword.modifier.poly",
+          "match": "\\b(inout|owned|borrowed)\\b"
         },
         {
           "name": "keyword.operator.logical.poly",
@@ -100,7 +104,11 @@
         },
         {
           "name": "storage.type.poly",
-          "match": "\\b(int|float|str|bool|list|dict|any)\\b"
+          "match": "\\b(Int|Float|String|Bool|List|Dict|Any|int|float|str|bool|list|dict|any)\\b"
+        },
+        {
+          "name": "keyword.operator.type.poly",
+          "match": "->"
         }
       ]
     },

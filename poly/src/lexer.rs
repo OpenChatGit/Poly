@@ -78,6 +78,20 @@ pub enum Token {
     Async,
     #[token("await")]
     Await,
+    
+    // Mojo-like keywords
+    #[token("struct")]
+    Struct,
+    #[token("var")]
+    Var,
+    #[token("alias")]
+    Alias,
+    #[token("inout")]
+    Inout,
+    #[token("owned")]
+    Owned,
+    #[token("borrowed")]
+    Borrowed,
 
     // Literals
     #[regex(r"0b[01]+", |lex| {

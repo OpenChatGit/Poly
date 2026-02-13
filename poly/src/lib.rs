@@ -23,9 +23,29 @@ pub mod multiview_native;
 pub mod polyview;
 pub mod config;
 pub mod cookies;
+pub mod adblock;
+pub mod adblock_engine;
+pub mod adblock_init;
+pub mod vscode_extension;
 
 // Re-export WebView types
 pub use webview::{WebViewConfig, WebViewBounds, WebViewState, WebViewEvent, WebViewOperation};
+
+// Re-export WebView functions for JavaScript API
+pub use webview::{
+    create as webview_create,
+    navigate as webview_navigate,
+    go_back as webview_go_back,
+    go_forward as webview_go_forward,
+    reload as webview_reload,
+    set_bounds as webview_set_bounds,
+    set_visible as webview_set_visible,
+    focus as webview_focus,
+    destroy as webview_destroy,
+    take_events as webview_poll_events,  // Expose take_events as pollEvents
+    take_events_json as webview_poll_events_json,  // JSON version for easier JS integration
+    execute_script as webview_execute_script,  // Execute JS and get result
+};
 
 // Re-export browser mode types (BrowserConfig is always available, run_browser_window only with native)
 pub use webview_native::BrowserConfig;
@@ -50,6 +70,9 @@ pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, Me
 pub use single_instance::{SingleInstanceConfig, try_acquire_instance, release_instance, is_primary_instance, check_single_instance};
 pub use sovereignty::{SovereigntyConfig, Permission, check_permission, is_enabled as sovereignty_enabled};
 pub use config::{PolyConfig, init_global_config, get_config};
+pub use adblock::{init_adblock, should_block, download_easylist, download_easyprivacy, download_pihole_blocklist, parse_pihole_hosts, get_stats as adblock_stats};
+pub use adblock_engine::{init_brave_adblock, should_block_brave, get_cosmetic_filters, get_stats as brave_adblock_stats};
+pub use adblock_init::ensure_adblock_initialized;
 
 /// Run Poly source code and return the output
 pub fn run(source: &str) -> Result<Vec<String>, String> {

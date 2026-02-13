@@ -114,7 +114,8 @@ impl Default for WebViewState {
 // ============================================
 
 /// Events emitted by WebViews
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum WebViewEvent {
     /// Navigation started to a new URL
     NavigationStarted { id: String, url: String },
@@ -289,17 +290,11 @@ pub fn load_html(id: &str, html: &str) -> Result<(), String> {
 
 /// Go back in history
 pub fn go_back(id: &str) -> Result<(), String> {
-    let registry = WEBVIEW_REGISTRY.lock()
-        .map_err(|_| "Failed to acquire registry lock")?;
+    // Check if WebView exists
+    check_exists(id)?;
     
-    let state = registry.get(id)
-        .ok_or_else(|| format!("WebView '{}' not found", id))?;
-    
-    if !state.can_go_back {
-        return Err("Cannot go back - no history".to_string());
-    }
-    drop(registry);
-    
+    // Don't check can_go_back - let the browser handle it
+    // The browser's history.back() will do nothing if there's no history
     PENDING_OPERATIONS.lock()
         .map_err(|_| "Failed to acquire operations lock")?
         .push(WebViewOperation::GoBack { id: id.to_string() });
@@ -309,17 +304,11 @@ pub fn go_back(id: &str) -> Result<(), String> {
 
 /// Go forward in history
 pub fn go_forward(id: &str) -> Result<(), String> {
-    let registry = WEBVIEW_REGISTRY.lock()
-        .map_err(|_| "Failed to acquire registry lock")?;
+    // Check if WebView exists
+    check_exists(id)?;
     
-    let state = registry.get(id)
-        .ok_or_else(|| format!("WebView '{}' not found", id))?;
-    
-    if !state.can_go_forward {
-        return Err("Cannot go forward - no history".to_string());
-    }
-    drop(registry);
-    
+    // Don't check can_go_forward - let the browser handle it
+    // The browser's history.forward() will do nothing if there's no forward history
     PENDING_OPERATIONS.lock()
         .map_err(|_| "Failed to acquire operations lock")?
         .push(WebViewOperation::GoForward { id: id.to_string() });
@@ -389,6 +378,16 @@ pub fn eval(id: &str, script: &str) -> Result<(), String> {
         });
     
     Ok(())
+}
+
+/// Execute JavaScript and get result (synchronous evaluation)
+/// Note: This is a simplified version that uses eval internally
+/// For async results, use eval() and listen for events
+pub fn execute_script(id: &str, script: &str) -> Result<String, String> {
+    // For now, this is just an alias to eval
+    // In the future, we could implement proper return value handling
+    eval(id, script)?;
+    Ok(String::new())
 }
 
 /// Destroy a WebView
@@ -544,6 +543,12 @@ pub fn take_events() -> Vec<WebViewEvent> {
     EVENT_QUEUE.lock()
         .map(|mut events| std::mem::take(&mut *events))
         .unwrap_or_default()
+}
+
+/// Take pending events as JSON (for JavaScript API)
+pub fn take_events_json() -> String {
+    let events = take_events();
+    serde_json::to_string(&events).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Push an event (called by native code when something happens)

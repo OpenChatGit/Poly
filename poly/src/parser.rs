@@ -9,7 +9,12 @@ enum CallArg {
 
 /// Helper to create a simple param without default
 fn simple_param(name: &str) -> Param {
-    Param { name: name.to_string(), default: None }
+    Param { 
+        name: name.to_string(), 
+        type_annotation: None, 
+        modifier: None, 
+        default: None 
+    }
 }
 
 pub struct Parser {
@@ -40,8 +45,10 @@ impl Parser {
         
         match self.peek() {
             Some(Token::Let) => self.parse_let(),
+            Some(Token::Var) => self.parse_var(),
             Some(Token::Fn) | Some(Token::Def) => self.parse_fn_def(),
             Some(Token::Class) => self.parse_class(),
+            Some(Token::Struct) => self.parse_struct(),
             Some(Token::If) => self.parse_if(),
             Some(Token::While) => self.parse_while(),
             Some(Token::For) => self.parse_for(),
@@ -63,9 +70,56 @@ impl Parser {
     fn parse_let(&mut self) -> Result<Statement, String> {
         self.advance(); // consume 'let'
         let name = self.expect_identifier()?;
+        
+        // Optional type annotation
+        let type_annotation = if self.check(&Token::Colon) {
+            self.advance();
+            Some(self.parse_type_annotation()?)
+        } else {
+            None
+        };
+
         self.expect(Token::Eq)?;
         let value = self.parse_expr()?;
-        Ok(Statement::Let(name, value))
+        Ok(Statement::Let { name, type_annotation, value })
+    }
+
+    fn parse_var(&mut self) -> Result<Statement, String> {
+        self.advance(); // consume 'var'
+        let name = self.expect_identifier()?;
+        
+        // Optional type annotation
+        let type_annotation = if self.check(&Token::Colon) {
+            self.advance();
+            Some(self.parse_type_annotation()?)
+        } else {
+            None
+        };
+
+        self.expect(Token::Eq)?;
+        let value = self.parse_expr()?;
+        Ok(Statement::Var { name, type_annotation, value })
+    }
+
+    // Helper to parse type annotations which might be complex (e.g. List[Int])
+    fn parse_type_annotation(&mut self) -> Result<String, String> {
+        let mut type_name = self.expect_identifier()?;
+        
+        // Handle generics: List[Int]
+        if self.check(&Token::LBracket) {
+            self.advance();
+            type_name.push('[');
+            type_name.push_str(&self.parse_type_annotation()?);
+            while self.check(&Token::Comma) {
+                self.advance();
+                type_name.push_str(", ");
+                type_name.push_str(&self.parse_type_annotation()?);
+            }
+            self.expect(Token::RBracket)?;
+            type_name.push(']');
+        }
+        
+        Ok(type_name)
     }
 
     fn parse_fn_def(&mut self) -> Result<Statement, String> {
@@ -87,8 +141,30 @@ impl Parser {
             }
             
             while !self.check(&Token::RParen) {
-                let param_name = self.expect_identifier()?;
+                // Check if we hit end
+                if self.check(&Token::RParen) { break; }
+
+                // Check for modifiers
+                let modifier = if self.check(&Token::Inout) { self.advance(); Some("inout".to_string()) }
+                             else if self.check(&Token::Owned) { self.advance(); Some("owned".to_string()) }
+                             else if self.check(&Token::Borrowed) { self.advance(); Some("borrowed".to_string()) }
+                             else { None };
+
+                let param_name = if self.check(&Token::SelfKw) {
+                    self.advance();
+                    "self".to_string()
+                } else {
+                    self.expect_identifier()?
+                };
                 
+                // Parse optional type annotation
+                let type_annotation = if self.check(&Token::Colon) {
+                    self.advance();
+                    Some(self.parse_type_annotation()?)
+                } else {
+                    None
+                };
+
                 // Check for default value: param=value
                 let default = if self.check(&Token::Eq) {
                     self.advance();
@@ -101,7 +177,12 @@ impl Parser {
                     None
                 };
                 
-                params.push(Param { name: param_name, default });
+                params.push(Param { 
+                    name: param_name, 
+                    type_annotation, 
+                    modifier, 
+                    default 
+                });
                 
                 if !self.check(&Token::Comma) {
                     break;
@@ -110,11 +191,20 @@ impl Parser {
             }
         }
         self.expect(Token::RParen)?;
+        
+        // Optional return type: -> Type
+        let return_type = if self.check(&Token::Arrow) {
+            self.advance();
+            Some(self.parse_type_annotation()?)
+        } else {
+            None
+        };
+
         self.expect(Token::Colon)?;
         
         let body = self.parse_block()?;
         
-        Ok(Statement::FnDef { name, params, body })
+        Ok(Statement::FnDef { name, params, return_type, body })
     }
 
     fn parse_class(&mut self) -> Result<Statement, String> {
@@ -139,12 +229,42 @@ impl Parser {
         // Extract methods from body
         let mut methods = Vec::new();
         for stmt in body {
-            if let Statement::FnDef { name, params, body } = stmt {
-                methods.push(Method { name, params, body });
+            if let Statement::FnDef { name, params, return_type, body } = stmt {
+                methods.push(Method { name, params, return_type, body });
             }
         }
         
         Ok(Statement::ClassDef { name, parent, methods })
+    }
+
+    fn parse_struct(&mut self) -> Result<Statement, String> {
+        self.advance(); // consume 'struct'
+        let name = self.expect_identifier()?;
+        
+        // Optional parent class/struct
+        let parent = if self.check(&Token::LParen) {
+            self.advance();
+            let parent_name = self.expect_identifier()?;
+            self.expect(Token::RParen)?;
+            Some(parent_name)
+        } else {
+            None
+        };
+        
+        self.expect(Token::Colon)?;
+        
+        // Parse struct body
+        let body = self.parse_block()?;
+        
+        // Extract methods from body
+        let mut methods = Vec::new();
+        for stmt in body {
+            if let Statement::FnDef { name, params, return_type, body } = stmt {
+                methods.push(Method { name, params, return_type, body });
+            }
+        }
+        
+        Ok(Statement::StructDef { name, parent, methods })
     }
 
     fn parse_if(&mut self) -> Result<Statement, String> {

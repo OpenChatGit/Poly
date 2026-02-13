@@ -125,10 +125,12 @@ impl Value {
     }
 }
 
-/// Function parameter with optional default value
+/// Function parameter with optional default value and type annotation
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: String,
+    pub type_annotation: Option<String>,
+    pub modifier: Option<String>, // inout, owned, borrowed
     pub default: Option<Expr>,
 }
 
@@ -136,6 +138,7 @@ pub struct Param {
 pub struct Method {
     pub name: String,
     pub params: Vec<Param>,
+    pub return_type: Option<String>,
     pub body: Vec<Statement>,
 }
 
@@ -221,7 +224,16 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     // Variable declaration/assignment
-    Let(String, Expr),
+    Let {
+        name: String,
+        type_annotation: Option<String>,
+        value: Expr,
+    },
+    Var {
+        name: String,
+        type_annotation: Option<String>,
+        value: Expr,
+    },
     Assign(String, Expr),
     IndexAssign(Expr, Expr, Expr),  // list[i] = value
     AttrAssign(Expr, String, Expr), // obj.attr = value
@@ -247,12 +259,19 @@ pub enum Statement {
     FnDef {
         name: String,
         params: Vec<Param>,
+        return_type: Option<String>,
         body: Vec<Statement>,
     },
     Return(Option<Expr>),
     
     // Classes
     ClassDef {
+        name: String,
+        parent: Option<String>,
+        methods: Vec<Method>,
+    },
+    // Structs (Mojo-style)
+    StructDef {
         name: String,
         parent: Option<String>,
         methods: Vec<Method>,
