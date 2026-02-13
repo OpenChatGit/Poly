@@ -1271,6 +1271,7 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
 
 // Poly IPC Bridge
 window.poly = {{
+  async call(fn, ...args) {{ return poly.invoke(fn, args); }},
   async invoke(fn, args = {{}}) {{
     const r = await fetch('/__poly_invoke', {{
       method: 'POST',
@@ -1929,8 +1930,11 @@ fn handle_ipc_invoke_stateful(interpreter: &std::sync::Arc<std::sync::Mutex<poly
         return handle_system_api(fn_name, &args);
     }
     
-    // Build argument string from JSON - skip empty objects
-    let args_str = if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+    // Build argument string from JSON - support array unpacking or skip empty objects
+    let args_str = if let Some(arr) = args.as_array() {
+        // Unpack array arguments: [1, 2] -> "1, 2"
+        arr.iter().map(json_to_poly_value).collect::<Vec<_>>().join(", ")
+    } else if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
         String::new() // No arguments
     } else {
         json_to_poly_value(&args)
@@ -1972,8 +1976,11 @@ fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
         Err(e) => return serde_json::json!({"error": format!("Failed to read: {}", e)}).to_string(),
     };
     
-    // Build argument string from JSON - skip empty objects
-    let args_str = if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+    // Build argument string from JSON - support array unpacking or skip empty objects
+    let args_str = if let Some(arr) = args.as_array() {
+        // Unpack array arguments: [1, 2] -> "1, 2"
+        arr.iter().map(json_to_poly_value).collect::<Vec<_>>().join(", ")
+    } else if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
         String::new() // No arguments
     } else {
         json_to_poly_value(&args)

@@ -1,6 +1,6 @@
 # Poly
 
-![Version](https://img.shields.io/badge/version-0.4.0-blue)
+![Version](https://img.shields.io/badge/version-0.4.1-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Language](https://img.shields.io/badge/poly--lang-beta-orange)
 ![License](https://img.shields.io/badge/license-Custom-green)
@@ -9,35 +9,30 @@ Build native desktop apps with web technologies, using a powerful, typed, Python
 
 Poly is a lightweight framework for creating cross-platform desktop applications using HTML, CSS, and JavaScript, now powered by a significantly enhanced Poly scripting language.
 
-## 🚀 New in 0.4.0: Mojo-Inspired Syntax
+## New in 0.4.1: Frontend-Backend Communication
 
-Poly 0.4.0 introduces major syntax improvements inspired by Mojo to bring safety and performance:
+Call Poly functions directly from JavaScript with seamless type conversion!
 
-- **Strict Typing**: Optional type annotations for variables and functions.
-- **Structs**: Define data structures with methods and efficient memory layout.
-- **Ownership/Borrowing**: `inout`, `borrowed`, and `owned` keywords for memory management control.
-- **VSCode Integration**: Auto-installing syntax highlighting extension.
-
-### Example
+```javascript
+// Frontend (JavaScript)
+const greeting = await poly.call('greet', 'Alice');
+const sum = await poly.call('add_numbers', 42, 58);
+```
 
 ```python
-struct Point:
-    fn init(inout self, x: Int, y: Int):
-        self.x = x
-        self.y = y
-    
-    fn distance(self) -> Float:
-        return (self.x ** 2 + self.y ** 2) ** 0.5
+# Backend (Poly - src/main.poly)
+fn greet(name: String) -> String:
+    return "Hello, " + name + "!"
 
-fn main():
-    var p: Point = Point(3, 4)
-    let d: Float = p.distance()
-    print(f"Distance: {d}")
+fn add_numbers(a: Int, b: Int) -> Int:
+    return a + b
 ```
+
+Perfect for building full-stack apps where you want the performance and type safety of Poly on the backend!
 
 ## 🛠️ Tooling & VSCode Setup
 
-Poly 0.4.0 comes with a built-in VSCode extension installer. It supports **VSCode**, **Antigravity**, **Cursor**, and **VSCodium**.
+Poly 0.4.1 comes with a built-in VSCode extension installer. It supports **VSCode**, **Antigravity**, **Cursor**, and **VSCodium**.
 
 To install syntax highlighting and language support:
 
