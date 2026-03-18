@@ -1,0 +1,19 @@
+# OS Theme API Test
+
+let current_theme = theme()
+print(f"OS Theme: {current_theme}")
+
+let accent = theme_accent()
+print(f"Accent Color: {accent}")
+
+let info = theme_info()
+let scheme = info["scheme"]
+let accent_color = info["accent"]
+print(f"Scheme: {scheme}")
+print(f"Accent: {accent_color}")
+
+# Conditional styling based on theme
+if current_theme == "dark":
+    print("Using dark mode styles")
+else:
+    print("Using light mode styles")

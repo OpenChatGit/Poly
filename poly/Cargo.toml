@@ -1,6 +1,6 @@
 [package]
 name = "poly"
-version = "0.4.1"
+version = "0.4.3"
 edition = "2021"
 description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
 authors = ["Poly Team"]
@@ -69,7 +69,7 @@ rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros"], optional = true }
 futures = { version = "0.3", optional = true }
 # Windows API for frameless windows
-windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Console"], optional = true }
+windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Input_KeyboardAndMouse"], optional = true }
 # Raw window handle for WebView
 raw-window-handle = { version = "0.6", optional = true }
 # Window shadows (from Tauri team) for frameless windows

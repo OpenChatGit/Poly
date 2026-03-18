@@ -30,6 +30,25 @@ fn add_numbers(a: Int, b: Int) -> Int:
 
 Perfect for building full-stack apps where you want the performance and type safety of Poly on the backend!
 
+### Streaming Support 🌊
+
+Poly now supports true streaming from backend to frontend! Perfect for LLM token generation.
+
+```javascript
+// Frontend
+await poly.stream('generate_text', 'Hello', (chunk) => {
+    console.log("Received chunk:", chunk);
+});
+```
+
+```python
+// Backend
+fn generate_text(prompt: String):
+    stream("Processing...")
+    sleep(500)
+    stream("Done!")
+```
+
 ## 🛠️ Tooling & VSCode Setup
 
 Poly 0.4.1 comes with a built-in VSCode extension installer. It supports **VSCode**, **Antigravity**, **Cursor**, and **VSCodium**.

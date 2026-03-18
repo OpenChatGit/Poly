@@ -103,6 +103,7 @@ pub struct Interpreter {
     should_break: bool,
     should_continue: bool,
     current_line: Option<usize>,
+    pub stream_sender: Option<std::sync::mpsc::Sender<String>>,
 }
 
 #[derive(Clone)]
@@ -126,15 +127,21 @@ impl Interpreter {
             should_break: false,
             should_continue: false,
             current_line: None,
+            stream_sender: None,
         };
         interp.register_builtins();
         interp
+    }
+
+    pub fn set_stream_sender(&mut self, sender: Option<std::sync::mpsc::Sender<String>>) {
+        self.stream_sender = sender;
     }
 
     fn register_builtins(&mut self) {
         let builtins = [
             "print", "len", "range", "str", "int", "float", "type",
             "input", "append", "abs", "min", "max", "sum", "sorted",
+            "stream",
             "reversed", "enumerate", "zip", "map", "filter", "any", "all",
             "isinstance", "hasattr", "getattr", "setattr", "list", "dict",
             "set", "tuple", "bool", "chr", "ord", "hex", "bin", "oct",
@@ -159,7 +166,7 @@ impl Interpreter {
             // JSON
             "json_parse", "json_stringify",
             // System & Performance (Rust-powered)
-            "env", "env_get", "env_set", "exec", "spawn",
+            "env", "env_get", "env_set", "exec", "spawn", "include",
             "hash_md5", "hash_sha256", "base64_encode", "base64_decode",
             "uuid", "timestamp", "datetime", "sleep_ms",
             // Parallel Processing (Rust threads)
@@ -170,6 +177,12 @@ impl Interpreter {
             "path_join", "path_exists", "path_basename", "path_dirname", "path_ext",
             // Regex
             "regex_match", "regex_find", "regex_replace",
+            // OS Theme
+            "theme", "theme_accent", "theme_info",
+            // SQLite
+            "db_open", "db_exec", "db_query", "db_close", "db_last_id",
+            // Global Hotkeys
+            "hotkey_register", "hotkey_unregister", "hotkey_poll",
         ];
         for name in builtins {
             self.globals.insert(name.to_string(), Value::NativeFunction(name.to_string()));
@@ -254,9 +267,9 @@ impl Interpreter {
             Statement::ClassDef { name, parent, methods } => {
                 self.define_class(name, parent, methods)
             }
-            Statement::StructDef { name, parent, methods } => {
-                // Treat structs as classes for now in interpreter
-                self.define_class(name, parent, methods)
+            Statement::StructDef { name, parent, fields, methods } => {
+                // Register struct as a class with typed fields
+                self.define_struct(name, parent, fields, methods)
             }
             Statement::Expr(expr) => self.evaluate(expr),
             Statement::Import(module) => self.import_module(module),
@@ -320,6 +333,9 @@ impl Interpreter {
                     }
                 }
                 Ok(Value::None)
+            }
+            Statement::Match { subject, arms } => {
+                self.execute_match(subject, arms)
             }
         }
     }
@@ -537,6 +553,152 @@ impl Interpreter {
         });
         
         Ok(Value::None)
+    }
+
+    fn define_struct(
+        &mut self,
+        name: &str,
+        parent: &Option<String>,
+        fields: &[crate::ast::StructField],
+        methods: &[Method],
+    ) -> Result<Value, String> {
+        // Register methods like a class
+        let mut method_map = HashMap::new();
+        for m in methods {
+            method_map.insert(m.name.clone(), (m.params.clone(), m.body.clone()));
+        }
+
+        // Build a synthetic __init__ that accepts all fields as keyword args
+        // and stores them on self
+        let mut init_params = vec![crate::ast::Param {
+            name: "self".to_string(),
+            type_annotation: None,
+            modifier: None,
+            default: None,
+        }];
+        let mut init_body = Vec::new();
+
+        for field in fields {
+            init_params.push(crate::ast::Param {
+                name: field.name.clone(),
+                type_annotation: field.type_annotation.clone(),
+                modifier: None,
+                default: field.default.clone(),
+            });
+            // self.field_name = field_name
+            init_body.push(Statement::AttrAssign(
+                Expr::Identifier("self".to_string()),
+                field.name.clone(),
+                Expr::Identifier(field.name.clone()),
+            ));
+        }
+
+        method_map.insert("__init__".to_string(), (init_params.clone(), init_body.clone()));
+
+        self.classes.insert(name.to_string(), ClassDef {
+            name: name.to_string(),
+            parent: parent.clone(),
+            methods: method_map,
+        });
+
+        // Also expose as a callable class value
+        let mut all_methods = methods.to_vec();
+        all_methods.push(Method {
+            name: "__init__".to_string(),
+            params: init_params,
+            return_type: None,
+            body: init_body,
+        });
+
+        self.globals.insert(name.to_string(), Value::Class {
+            name: name.to_string(),
+            parent: parent.clone(),
+            methods: all_methods,
+        });
+
+        Ok(Value::None)
+    }
+
+    fn execute_match(&mut self, subject: &Expr, arms: &[crate::ast::MatchArm]) -> Result<Value, String> {
+        let val = self.evaluate(subject)?;
+
+        for arm in arms {
+            if let Some(bindings) = self.match_pattern(&arm.pattern, &val)? {
+                // Push a new scope with bindings
+                self.scopes.push(HashMap::new());
+                for (k, v) in bindings {
+                    self.set_var(k, v);
+                }
+                for stmt in &arm.body {
+                    self.execute_statement(stmt)?;
+                    if self.should_return || self.should_break || self.should_continue { break; }
+                }
+                self.scopes.pop();
+                return Ok(Value::None);
+            }
+        }
+        Ok(Value::None)
+    }
+
+    /// Returns Some(bindings) if pattern matches, None otherwise
+    fn match_pattern(
+        &mut self,
+        pattern: &crate::ast::MatchPattern,
+        val: &Value,
+    ) -> Result<Option<Vec<(String, Value)>>, String> {
+        use crate::ast::MatchPattern;
+        match pattern {
+            MatchPattern::Wildcard => Ok(Some(vec![])),
+            MatchPattern::Bind(name) => Ok(Some(vec![(name.clone(), val.clone())])),
+            MatchPattern::Literal(expr) => {
+                let lit = self.evaluate(expr)?;
+                if lit == *val { Ok(Some(vec![])) } else { Ok(None) }
+            }
+            MatchPattern::Type(type_name) => {
+                let tag = crate::ast::TypeTag::from_str(type_name);
+                if tag.check(val) {
+                    Ok(Some(vec![]))
+                } else {
+                    Ok(None)
+                }
+            }
+            MatchPattern::Range(start_expr, end_expr) => {
+                let start = self.evaluate(start_expr)?;
+                let end = self.evaluate(end_expr)?;
+                let matches = match (val, &start, &end) {
+                    (Value::Int(v), Value::Int(s), Value::Int(e)) => v >= s && v < e,
+                    (Value::Float(v), Value::Float(s), Value::Float(e)) => v >= s && v < e,
+                    _ => false,
+                };
+                if matches { Ok(Some(vec![])) } else { Ok(None) }
+            }
+            MatchPattern::Or(patterns) => {
+                for p in patterns {
+                    if let Some(bindings) = self.match_pattern(p, val)? {
+                        return Ok(Some(bindings));
+                    }
+                }
+                Ok(None)
+            }
+            MatchPattern::Guard(inner, guard_expr) => {
+                if let Some(bindings) = self.match_pattern(inner, val)? {
+                    // Temporarily bind variables to evaluate guard
+                    self.scopes.push(HashMap::new());
+                    for (k, v) in &bindings {
+                        self.set_var(k.clone(), v.clone());
+                    }
+                    let guard_val = self.evaluate(guard_expr)?;
+                    self.scopes.pop();
+                    if self.is_truthy(&guard_val) {
+                        Ok(Some(bindings))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+        }
     }
 
     fn evaluate(&mut self, expr: &Expr) -> Result<Value, String> {
@@ -883,7 +1045,7 @@ impl Interpreter {
                 self.scopes.push(HashMap::new());
                 
                 // Bind parameters with default value support
-                let required_count = params.iter().filter(|p| p.default.is_none()).count();
+                let required_count = params.iter().filter(|p| p.default.is_none() && p.name != "self").count();
                 if args.len() < required_count {
                     return Err(self.error(format!(
                         "{}() takes at least {} argument(s) but {} were given",
@@ -905,6 +1067,19 @@ impl Interpreter {
                     } else {
                         return Err(self.error(format!("Missing required argument: {}", param.name)));
                     };
+
+                    // Type-check if annotation is present
+                    if let Some(ann) = &param.type_annotation {
+                        let tag = crate::ast::TypeTag::from_str(ann);
+                        if !tag.check(&value) {
+                            let actual = crate::ast::TypeTag::of_value(&value);
+                            return Err(self.error(format!(
+                                "{}(): argument '{}' expected {} but got {}",
+                                name, param.name, tag.name(), actual.name()
+                            )));
+                        }
+                    }
+
                     self.set_var(param.name.clone(), value);
                 }
                 
@@ -1353,6 +1528,24 @@ impl Interpreter {
                 self.output.push(line.clone());
                 #[cfg(not(target_arch = "wasm32"))]
                 println!("{}", line);
+                Ok(Value::None)
+            }
+            "stream" => {
+                let text = match args.get(0) {
+                    Some(v) => format!("{}", v),
+                    None => String::new(),
+                };
+                // Process escapes just like print
+                let text = text.replace("\\n", "\n")
+                     .replace("\\t", "\t")
+                     .replace("\\r", "\r")
+                     .replace("\\\"", "\"")
+                     .replace("\\'", "'")
+                     .replace("\\\\", "\\");
+                     
+                if let Some(sender) = &self.stream_sender {
+                    let _ = sender.send(text);
+                }
                 Ok(Value::None)
             }
             "len" => match args.get(0) {
@@ -3034,6 +3227,45 @@ const {name_lower}Store = new {name}Store();
                     Err(self.error("spawn() requires native feature"))
                 }
             }
+            "eval" => {
+                let code = match args.get(0) {
+                     Some(Value::String(s)) => s.clone(),
+                     _ => return Err(self.error("eval() requires a code string")),
+                };
+                
+                use crate::parser::Parser;
+                use crate::lexer::Lexer;
+                let tokens = Lexer::new(&code).tokenize();
+                let mut parser = Parser::new(tokens);
+                match parser.parse() {
+                    Ok(program) => {
+                         self.run(&program)
+                    },
+                    Err(e) => Err(self.error(format!("Parse error in eval: {}", e)))
+                }
+            }
+            "include" => {
+                let path = match args.get(0) {
+                     Some(Value::String(s)) => s.clone(),
+                     _ => return Err(self.error("include() requires a path string")),
+                };
+                
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        use crate::parser::Parser;
+                        use crate::lexer::Lexer;
+                        let tokens = Lexer::new(&content).tokenize();
+                        let mut parser = Parser::new(tokens);
+                        match parser.parse() {
+                            Ok(program) => {
+                                 self.run(&program).map(|_| Value::None)
+                            },
+                            Err(e) => Err(self.error(format!("Parse error in {}: {}", path, e)))
+                        }
+                    },
+                    Err(e) => Err(self.error(format!("Failed to read {}: {}", path, e)))
+                }
+            }
             "timestamp" => {
                 // timestamp() -> int (milliseconds since epoch)
                 use std::time::{SystemTime, UNIX_EPOCH};
@@ -3475,6 +3707,153 @@ const {name_lower}Store = new {name}Store();
                 }
             }
             
+            // ============================================
+            // OS Theme API
+            // ============================================
+
+            "theme" => {
+                // theme() -> "dark" | "light"
+                let scheme = crate::theme::get_color_scheme();
+                Ok(Value::String(scheme.as_str().to_string()))
+            }
+
+            "theme_accent" => {
+                // theme_accent() -> "#rrggbb"
+                Ok(Value::String(crate::theme::get_accent_color()))
+            }
+
+            "theme_info" => {
+                // theme_info() -> {"scheme": "dark"|"light", "accent": "#rrggbb"}
+                let info = crate::theme::get_theme_info();
+                Ok(Value::Dict(vec![
+                    (Value::String("scheme".to_string()), Value::String(info.scheme.as_str().to_string())),
+                    (Value::String("accent".to_string()), Value::String(info.accent)),
+                ]))
+            }
+
+            // ── SQLite ──────────────────────────────────────────────────────────
+            #[cfg(feature = "native")]
+            "db_open" => {
+                let path = match args.first() {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err(self.error("db_open(path: str)".to_string())),
+                };
+                match crate::db::db_open(&path) {
+                    Ok(handle) => Ok(Value::Int(handle as i64)),
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            #[cfg(feature = "native")]
+            "db_exec" => {
+                let handle = match args.first() {
+                    Some(Value::Int(h)) => *h as u64,
+                    _ => return Err(self.error("db_exec(handle, sql, params?)".to_string())),
+                };
+                let sql = match args.get(1) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err(self.error("db_exec: sql must be a string".to_string())),
+                };
+                let params = if let Some(Value::List(list)) = args.get(2) {
+                    list.iter().map(poly_value_to_db_value).collect()
+                } else {
+                    vec![]
+                };
+                match crate::db::db_exec(handle, &sql, params) {
+                    Ok(rows) => Ok(Value::Int(rows)),
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            #[cfg(feature = "native")]
+            "db_query" => {
+                let handle = match args.first() {
+                    Some(Value::Int(h)) => *h as u64,
+                    _ => return Err(self.error("db_query(handle, sql, params?)".to_string())),
+                };
+                let sql = match args.get(1) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err(self.error("db_query: sql must be a string".to_string())),
+                };
+                let params = if let Some(Value::List(list)) = args.get(2) {
+                    list.iter().map(poly_value_to_db_value).collect()
+                } else {
+                    vec![]
+                };
+                match crate::db::db_query(handle, &sql, params) {
+                    Ok(rows) => {
+                        let list = rows.into_iter().map(|row| {
+                            let dict: Vec<(Value, Value)> = row.into_iter()
+                                .map(|(k, v)| (Value::String(k), db_value_to_poly_value(v)))
+                                .collect();
+                            Value::Dict(dict)
+                        }).collect();
+                        Ok(Value::List(list))
+                    }
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            #[cfg(feature = "native")]
+            "db_close" => {
+                let handle = match args.first() {
+                    Some(Value::Int(h)) => *h as u64,
+                    _ => return Err(self.error("db_close(handle)".to_string())),
+                };
+                match crate::db::db_close(handle) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            #[cfg(feature = "native")]
+            "db_last_id" => {
+                let handle = match args.first() {
+                    Some(Value::Int(h)) => *h as u64,
+                    _ => return Err(self.error("db_last_id(handle)".to_string())),
+                };
+                match crate::db::db_last_id(handle) {
+                    Ok(id) => Ok(Value::Int(id)),
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            // ── Global Hotkeys ──────────────────────────────────────────────────
+            #[cfg(feature = "native")]
+            "hotkey_register" => {
+                let combo = match args.first() {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err(self.error("hotkey_register(combo: str, callback: str)".to_string())),
+                };
+                let callback = match args.get(1) {
+                    Some(Value::String(s)) => s.clone(),
+                    _ => return Err(self.error("hotkey_register: callback must be a string".to_string())),
+                };
+                match crate::hotkeys::register_hotkey(&combo, &callback) {
+                    Ok(id) => Ok(Value::Int(id as i64)),
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            #[cfg(feature = "native")]
+            "hotkey_unregister" => {
+                let id = match args.first() {
+                    Some(Value::Int(i)) => *i as i32,
+                    _ => return Err(self.error("hotkey_unregister(id: int)".to_string())),
+                };
+                match crate::hotkeys::unregister_hotkey(id) {
+                    Ok(_) => Ok(Value::None),
+                    Err(e) => Err(self.error(e)),
+                }
+            }
+
+            #[cfg(feature = "native")]
+            "hotkey_poll" => {
+                // Returns list of callback names that were triggered since last poll
+                let events = crate::hotkeys::poll_hotkey_events();
+                Ok(Value::List(events.into_iter().map(Value::String).collect()))
+            }
+
             _ => Err(self.error(format!("Unknown native function: {}", name))),
         }
     }
@@ -3626,4 +4005,28 @@ const {name_lower}Store = new {name}Store();
 
 impl Default for Interpreter {
     fn default() -> Self { Self::new() }
+}
+
+// ── DB value conversion helpers ─────────────────────────────────────────────
+#[cfg(feature = "native")]
+fn poly_value_to_db_value(v: &Value) -> crate::db::DbValue {
+    match v {
+        Value::None => crate::db::DbValue::Null,
+        Value::Int(i) => crate::db::DbValue::Int(*i),
+        Value::Float(f) => crate::db::DbValue::Float(*f),
+        Value::String(s) => crate::db::DbValue::Text(s.clone()),
+        Value::Bool(b) => crate::db::DbValue::Int(if *b { 1 } else { 0 }),
+        _ => crate::db::DbValue::Null,
+    }
+}
+
+#[cfg(feature = "native")]
+fn db_value_to_poly_value(v: crate::db::DbValue) -> Value {
+    match v {
+        crate::db::DbValue::Null => Value::None,
+        crate::db::DbValue::Int(i) => Value::Int(i),
+        crate::db::DbValue::Float(f) => Value::Float(f),
+        crate::db::DbValue::Text(s) => Value::String(s),
+        crate::db::DbValue::Blob(b) => Value::String(format!("<blob {} bytes>", b.len())),
+    }
 }

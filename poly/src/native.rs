@@ -403,6 +403,9 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     
     // Get PolyView element JS (iframe2)
     let polyview_js = crate::polyview::get_polyview_element_js();
+
+    // Get OS theme injection JS
+    let theme_js = crate::theme::get_theme_inject_js();
     
     let init_script = if titlebar_config.enabled {
         let html_escaped = titlebar_config.html.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
@@ -412,6 +415,9 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         format!(r#"
 // PolyView Element (iframe2)
 {polyview}
+
+// OS Theme CSS Variables
+{theme}
 
 (function() {{
     function injectTitlebar() {{
@@ -455,13 +461,14 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
 }})();
 "#,
             polyview = polyview_js,
+            theme = theme_js,
             html = html_escaped,
             css = css_escaped,
             js = js_escaped,
         )
     } else {
-        // Even without titlebar, inject PolyView element
-        polyview_js
+        // Even without titlebar, inject PolyView element + theme
+        format!("{}\n{}", polyview_js, theme_js)
     };
     
     let webview = wry::WebViewBuilder::new()

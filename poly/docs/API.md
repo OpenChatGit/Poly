@@ -886,3 +886,116 @@ poly run . --native
 # Build project
 poly build .
 ```
+
+---
+
+## Language Features
+
+### Type Annotations
+
+Functions and variables support optional type annotations. Types are checked at runtime when annotations are present.
+
+```poly
+fn greet(name: String) -> String:
+    return "Hello, " + name + "!"
+
+fn add(a: Int, b: Int) -> Int:
+    return a + b
+
+let x: Int = 42
+```
+
+Supported types: `Int`, `Float`, `String`, `Bool`, `None`, `Any`, `List[T]`, `Dict[K, V]`, and any class/struct name.
+
+---
+
+### Structs
+
+Structs are value-type containers with typed fields and methods.
+
+```poly
+struct Point:
+    var x: Float = 0.0
+    var y: Float = 0.0
+
+    fn distance(self) -> Float:
+        return math_sqrt(self.x * self.x + self.y * self.y)
+
+import math
+let p = Point(3.0, 4.0)
+print(p.distance())  # 5.0
+```
+
+---
+
+### Match Statement
+
+Pattern matching with `match`/`case`:
+
+```poly
+# Type patterns
+match value:
+    case Int:
+        print("integer")
+    case String:
+        print("string")
+    case _:
+        print("other")
+
+# Literal patterns
+match status:
+    case 200:
+        print("OK")
+    case 404:
+        print("Not Found")
+    case _:
+        print("Unknown")
+
+# OR patterns
+match day:
+    case 6 | 7:
+        print("Weekend")
+    case _:
+        print("Weekday")
+
+# Guard conditions
+match n:
+    case x if x < 0:
+        print("negative")
+    case 0:
+        print("zero")
+    case x:
+        print("positive")
+
+# Range patterns
+match score:
+    case 90..101:
+        print("A")
+    case 80..90:
+        print("B")
+    case _:
+        print("F")
+
+# Bind to variable
+match value:
+    case x:
+        print(f"Got: {x}")
+```
+
+---
+
+### Ownership Modifiers (Mojo-style)
+
+Function parameters can have ownership modifiers:
+
+```poly
+fn process(inout data: List[Int]):
+    data.append(42)
+
+fn consume(owned text: String):
+    print(text)
+
+fn read(borrowed config: Dict):
+    print(config["key"])
+```
+

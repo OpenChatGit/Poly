@@ -1,0 +1,22 @@
+# Global Hotkeys Beispiel
+# Registriert Ctrl+Shift+H und pollt Events
+
+fn on_hello():
+    print("Hotkey ausgelöst: Ctrl+Shift+H")
+
+let id = hotkey_register("ctrl+shift+h", "on_hello")
+print("Hotkey registriert mit ID:", id)
+print("Drücke Ctrl+Shift+H ...")
+
+# Poll-Loop (in echter App im WebView-Event-Loop)
+let i = 0
+while i < 100:
+    let events = hotkey_poll()
+    for cb in events:
+        if cb == "on_hello":
+            on_hello()
+    sleep_ms(100)
+    i = i + 1
+
+hotkey_unregister(id)
+print("Hotkey entfernt")

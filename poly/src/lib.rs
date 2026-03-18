@@ -27,6 +27,9 @@ pub mod adblock;
 pub mod adblock_engine;
 pub mod adblock_init;
 pub mod vscode_extension;
+pub mod theme;
+pub mod db;
+pub mod hotkeys;
 
 // Re-export WebView types
 pub use webview::{WebViewConfig, WebViewBounds, WebViewState, WebViewEvent, WebViewOperation};

@@ -1,0 +1,20 @@
+# SQLite Beispiel
+let db = db_open(":memory:")
+
+db_exec(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)")
+db_exec(db, "INSERT INTO users (name, age) VALUES (?, ?)", ["Alice", 30])
+db_exec(db, "INSERT INTO users (name, age) VALUES (?, ?)", ["Bob", 25])
+
+let last = db_last_id(db)
+print("Letzter Insert-ID:", last)
+
+let rows = db_query(db, "SELECT * FROM users WHERE age > ?", [20])
+for row in rows:
+    print(row["name"], "ist", row["age"], "Jahre alt")
+
+db_exec(db, "UPDATE users SET age = ? WHERE name = ?", [31, "Alice"])
+let updated = db_query(db, "SELECT age FROM users WHERE name = 'Alice'")
+print("Alice neues Alter:", updated[0]["age"])
+
+db_close(db)
+print("Fertig!")

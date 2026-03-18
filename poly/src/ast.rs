@@ -1,5 +1,94 @@
 /// Abstract Syntax Tree for Poly
 
+/// Runtime type tag for type-checking
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeTag {
+    None,
+    Bool,
+    Int,
+    Float,
+    String,
+    List(Box<TypeTag>),
+    Dict(Box<TypeTag>, Box<TypeTag>),
+    Any,
+    Custom(String), // user-defined class/struct name
+}
+
+impl TypeTag {
+    /// Parse a type annotation string into a TypeTag
+    pub fn from_str(s: &str) -> TypeTag {
+        match s.trim() {
+            "None" | "none" => TypeTag::None,
+            "Bool" | "bool" => TypeTag::Bool,
+            "Int" | "int" => TypeTag::Int,
+            "Float" | "float" => TypeTag::Float,
+            "String" | "str" | "Str" => TypeTag::String,
+            "Any" | "any" => TypeTag::Any,
+            other => {
+                // Handle List[T]
+                if let Some(inner) = other.strip_prefix("List[").and_then(|s| s.strip_suffix(']')) {
+                    return TypeTag::List(Box::new(TypeTag::from_str(inner)));
+                }
+                // Handle Dict[K, V]
+                if let Some(inner) = other.strip_prefix("Dict[").and_then(|s| s.strip_suffix(']')) {
+                    if let Some(comma) = inner.find(',') {
+                        let k = TypeTag::from_str(&inner[..comma]);
+                        let v = TypeTag::from_str(&inner[comma + 1..]);
+                        return TypeTag::Dict(Box::new(k), Box::new(v));
+                    }
+                }
+                TypeTag::Custom(other.to_string())
+            }
+        }
+    }
+
+    /// Get the type name of a Value
+    pub fn of_value(v: &Value) -> TypeTag {
+        match v {
+            Value::None => TypeTag::None,
+            Value::Bool(_) => TypeTag::Bool,
+            Value::Int(_) => TypeTag::Int,
+            Value::Float(_) => TypeTag::Float,
+            Value::String(_) => TypeTag::String,
+            Value::List(_) => TypeTag::List(Box::new(TypeTag::Any)),
+            Value::Dict(_) => TypeTag::Dict(Box::new(TypeTag::Any), Box::new(TypeTag::Any)),
+            Value::Instance { class_name, .. } => TypeTag::Custom(class_name.clone()),
+            Value::Class { name, .. } => TypeTag::Custom(name.clone()),
+            _ => TypeTag::Any,
+        }
+    }
+
+    /// Check if a value is compatible with this type
+    pub fn check(&self, v: &Value) -> bool {
+        match (self, v) {
+            (TypeTag::Any, _) => true,
+            (TypeTag::None, Value::None) => true,
+            (TypeTag::Bool, Value::Bool(_)) => true,
+            (TypeTag::Int, Value::Int(_)) => true,
+            (TypeTag::Float, Value::Float(_)) | (TypeTag::Float, Value::Int(_)) => true,
+            (TypeTag::String, Value::String(_)) => true,
+            (TypeTag::List(_), Value::List(_)) => true,
+            (TypeTag::Dict(_, _), Value::Dict(_)) => true,
+            (TypeTag::Custom(name), Value::Instance { class_name, .. }) => name == class_name,
+            _ => false,
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            TypeTag::None => "None".to_string(),
+            TypeTag::Bool => "Bool".to_string(),
+            TypeTag::Int => "Int".to_string(),
+            TypeTag::Float => "Float".to_string(),
+            TypeTag::String => "String".to_string(),
+            TypeTag::List(inner) => format!("List[{}]", inner.name()),
+            TypeTag::Dict(k, v) => format!("Dict[{}, {}]", k.name(), v.name()),
+            TypeTag::Any => "Any".to_string(),
+            TypeTag::Custom(name) => name.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     None,
@@ -270,11 +359,18 @@ pub enum Statement {
         parent: Option<String>,
         methods: Vec<Method>,
     },
-    // Structs (Mojo-style)
+    // Structs (Mojo-style value types with typed fields)
     StructDef {
         name: String,
         parent: Option<String>,
+        fields: Vec<StructField>,
         methods: Vec<Method>,
+    },
+
+    // Match statement: match expr { pattern => body, ... }
+    Match {
+        subject: Expr,
+        arms: Vec<MatchArm>,
     },
     
     // Expression statement
@@ -310,4 +406,38 @@ pub enum Statement {
 #[derive(Debug, Clone)]
 pub struct Program {
     pub statements: Vec<Statement>,
+}
+
+/// A typed field in a struct definition
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub name: String,
+    pub type_annotation: Option<String>,
+    pub default: Option<Expr>,
+}
+
+/// A single arm in a match statement
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: Vec<Statement>,
+}
+
+/// Pattern variants for match arms
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    /// Literal value: 42, "hello", true, none
+    Literal(Expr),
+    /// Wildcard: _
+    Wildcard,
+    /// Bind to variable: x
+    Bind(String),
+    /// Type check: Int, String, Bool, ...
+    Type(String),
+    /// Guard: pattern if condition
+    Guard(Box<MatchPattern>, Box<Expr>),
+    /// Range: 1..10
+    Range(Box<Expr>, Box<Expr>),
+    /// Multiple patterns: 1 | 2 | 3
+    Or(Vec<MatchPattern>),
 }

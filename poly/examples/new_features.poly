@@ -1,0 +1,97 @@
+# Test new Poly language features
+
+# 1. Typed function parameters
+fn greet(name: String) -> String:
+    return "Hello, " + name + "!"
+
+fn add(a: Int, b: Int) -> Int:
+    return a + b
+
+print(greet("World"))
+print(add(10, 32))
+
+# 2. Struct with typed fields
+struct Point:
+    var x: Float = 0.0
+    var y: Float = 0.0
+
+    fn distance(self) -> Float:
+        return math_sqrt(self.x * self.x + self.y * self.y)
+
+import math
+let p = Point(3.0, 4.0)
+print(p.x)
+print(p.y)
+print(p.distance())
+
+# 3. Match statement
+fn describe(value):
+    match value:
+        case Int:
+            print("it's an integer")
+        case String:
+            print("it's a string")
+        case Bool:
+            print("it's a boolean")
+        case _:
+            print("something else")
+
+describe(42)
+describe("hello")
+describe(true)
+
+# 4. Match with literal patterns
+fn day_name(n: Int) -> String:
+    match n:
+        case 1:
+            return "Monday"
+        case 2:
+            return "Tuesday"
+        case 3:
+            return "Wednesday"
+        case 4:
+            return "Thursday"
+        case 5:
+            return "Friday"
+        case 6 | 7:
+            return "Weekend"
+        case _:
+            return "Invalid"
+
+print(day_name(1))
+print(day_name(5))
+print(day_name(6))
+print(day_name(9))
+
+# 5. Match with guard
+fn classify(n: Int):
+    match n:
+        case x if x < 0:
+            print(f"{x} is negative")
+        case 0:
+            print("zero")
+        case x if x > 100:
+            print(f"{x} is large")
+        case x:
+            print(f"{x} is positive")
+
+classify(-5)
+classify(0)
+classify(42)
+classify(200)
+
+# 6. Match with range
+fn grade(score: Int) -> String:
+    match score:
+        case 90..101:
+            return "A"
+        case 80..90:
+            return "B"
+        case 70..80:
+            return "C"
+        case _:
+            return "F"
+
+print(grade(95))
+print(grade(85))
+print(grade(55))

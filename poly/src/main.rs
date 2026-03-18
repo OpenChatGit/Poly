@@ -166,6 +166,13 @@ enum Commands {
     /// Show VSCode extension information
     VscodeInfo,
     
+    /// Show API information for AI assistants (JSON format)
+    AiInfo {
+        /// Output format
+        #[arg(short, long, default_value = "json")]
+        format: String,
+    },
+    
     /// Open a URL in a new Poly WebView window (internal use)
     #[command(hide = true)]
     OpenUrl {
@@ -755,8 +762,186 @@ fn rewrite_polyview_attribute(html: &str, attr: &str, base_url: &str, proxy_base
             break;
         }
     }
-    
     result
+}
+
+/// Generate AI-friendly API documentation
+fn generate_ai_info(format: &str) {
+    let info = serde_json::json!({
+        "poly_version": VERSION,
+        "description": "Poly language API reference for AI assistants",
+        "frontend_apis": {
+            "poly.call": {
+                "description": "Call Poly backend functions from JavaScript",
+                "syntax": "await poly.call(functionName, ...args)",
+                "example": "const result = await poly.call('greet', 'Alice');"
+            },
+            "poly.fs": {
+                "methods": ["read", "write", "exists", "readDir"],
+                "example": "const content = await poly.fs.read('file.txt');"
+            },
+            "poly.dialog": {
+                "methods": ["open", "openMultiple", "save", "folder", "message", "confirm", "custom"],
+                "example": "const file = await poly.dialog.open({ filters: [{ name: 'Text', extensions: ['txt'] }] });"
+            },
+            "poly.http": {
+                "methods": ["get", "post", "put", "patch", "delete", "request"],
+                "example": "const response = await poly.http.get('https://api.example.com');"
+            },
+            "poly.db": {
+                "methods": ["open", "close", "execute", "query", "queryOne"],
+                "example": "const db = await poly.db.open('db.sqlite'); const rows = await poly.db.query(db, 'SELECT * FROM users');"
+            },
+            "poly.window": {
+                "methods": ["setTitle", "getTitle", "center", "setSize", "getSize", "setPosition", "getPosition", "setMinSize", "setMaxSize", "setAlwaysOnTop", "setFullscreen", "isFullscreen", "isMaximized", "isMinimized"],
+                "example": "await poly.window.setTitle('My App');"
+            },
+            "poly.clipboard": {
+                "methods": ["read", "write", "clear"],
+                "example": "await poly.clipboard.write('Hello');"
+            },
+            "poly.webview": {
+                "methods": ["create", "navigate", "loadHtml", "goBack", "goForward", "reload", "stop", "setBounds", "getBounds", "eval", "destroy", "list", "get", "setVisible", "focus", "setZoom", "setMainBounds", "pollEvents", "respondToPermission"],
+                "example": "await poly.webview.create('my-view', { url: 'https://example.com', width: 800, height: 600 });"
+            },
+            "poly.notification": {
+                "methods": ["show", "showWithTimeout"],
+                "example": "await poly.notification.show('Title', 'Message');"
+            },
+            "poly.shell": {
+                "methods": ["open", "openPath", "openWith"],
+                "example": "await poly.shell.open('https://example.com');"
+            }
+        },
+        "backend_syntax": {
+            "variables": {
+                "var": "Mutable variable with optional type annotation",
+                "let": "Immutable variable with optional type annotation",
+                "example": "var x: Int = 10\nlet name: String = \"Poly\""
+            },
+            "functions": {
+                "syntax": "fn name(param: Type) -> ReturnType:",
+                "example": "fn add(a: Int, b: Int) -> Int:\n    return a + b"
+            },
+            "structs": {
+                "syntax": "struct Name:\n    fn init(inout self, ...):",
+                "example": "struct Point:\n    fn init(inout self, x: Int, y: Int):\n        self.x = x\n        self.y = y"
+            },
+            "parameter_modifiers": {
+                "inout": "Pass by mutable reference",
+                "borrowed": "Pass by immutable reference",
+                "owned": "Transfer ownership",
+                "example": "fn increment(inout x: Int):\n    x = x + 1"
+            },
+            "types": ["Int", "Float", "String", "Bool", "List", "Dict"],
+            "control_flow": ["if/elif/else", "for", "while", "match"],
+            "operators": ["+", "-", "*", "/", "**", "%", "==", "!=", "<", ">", "<=", ">=", "and", "or", "not"]
+        },
+        "builtin_functions": [
+            "print", "len", "range", "str", "int", "float", "bool",
+            "html_escape", "url_encode", "url_decode",
+            "json_parse", "json_stringify",
+            "sleep", "timestamp", "format_date"
+        ],
+        "cli_commands": [
+            "poly run <file>",
+            "poly dev [path]",
+            "poly build [path]",
+            "poly test [path]",
+            "poly init <name>",
+            "poly add <package>",
+            "poly install",
+            "poly install-vscode",
+            "poly uninstall-vscode",
+            "poly vscode-info",
+            "poly ai-info [--format json|markdown]",
+            "poly --version",
+            "poly --help"
+        ],
+        "project_structure": {
+            "poly.toml": "Project configuration file",
+            "src/main.poly": "Default entry point for applications",
+            "web/": "Frontend files (HTML, CSS, JS)",
+            "web/index.html": "Main HTML file for GUI apps"
+        },
+        "dev_workflow": {
+            "create_project": "poly init my-app",
+            "run_dev_server": "poly dev (starts on http://localhost:3000)",
+            "build_release": "poly build",
+            "test": "poly test"
+        }
+    });
+
+    match format {
+        "json" => {
+            println!("{}", serde_json::to_string_pretty(&info).unwrap());
+        },
+        "markdown" | "md" => {
+            println!("# Poly API Reference for AI Assistants");
+            println!();
+            println!("**Version:** {}", VERSION);
+            println!();
+            println!("## Frontend APIs (JavaScript)");
+            println!();
+            println!("### `poly.call(functionName, ...args)`");
+            println!("Call Poly backend functions from JavaScript.");
+            println!("```javascript");
+            println!("const result = await poly.call('greet', 'Alice');");
+            println!("```");
+            println!();
+            println!("### File System (`poly.fs`)");
+            println!("- `read(path)` - Read file content");
+            println!("- `write(path, content)` - Write to file");
+            println!("- `exists(path)` - Check if file exists");
+            println!("- `readDir(path)` - List directory contents");
+            println!();
+            println!("### Dialogs (`poly.dialog`)");
+            println!("- `open(options)` - File open dialog");
+            println!("- `save(options)` - File save dialog");
+            println!("- `folder(options)` - Folder selection dialog");
+            println!("- `message(title, message)` - Show message");
+            println!("- `confirm(title, message)` - Confirmation dialog");
+            println!();
+            println!("### HTTP Requests (`poly.http`)");
+            println!("- `get(url, options)` - GET request");
+            println!("- `post(url, body, options)` - POST request");
+            println!("- `put(url, body, options)` - PUT request");
+            println!("- `delete(url, options)` - DELETE request");
+            println!();
+            println!("## Backend Syntax (Poly)");
+            println!();
+            println!("### Variables");
+            println!("```python");
+            println!("var x: Int = 10  # Mutable");
+            println!("let name: String = \"Poly\"  # Immutable");
+            println!("```");
+            println!();
+            println!("### Functions");
+            println!("```python");
+            println!("fn add(a: Int, b: Int) -> Int:");
+            println!("    return a + b");
+            println!("```");
+            println!();
+            println!("### Structs");
+            println!("```python");
+            println!("struct Point:");
+            println!("    fn init(inout self, x: Int, y: Int):");
+            println!("        self.x = x");
+            println!("        self.y = y");
+            println!("```");
+            println!();
+            println!("## CLI Commands");
+            println!("- `poly run <file>` - Run a Poly script");
+            println!("- `poly dev` - Start development server");
+            println!("- `poly build` - Build for production");
+            println!("- `poly init <name>` - Create new project");
+            println!("- `poly ai-info` - Show this information");
+        },
+        _ => {
+            eprintln!("Unknown format: {}. Use 'json' or 'markdown'", format);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn main() {
@@ -811,6 +996,10 @@ fn main() {
                 println!("  Run: {}poly install-vscode{}", CYAN, RESET);
             }
             println!();
+            Ok(())
+        },
+        Some(Commands::AiInfo { format }) => {
+            generate_ai_info(&format);
             Ok(())
         },
         Some(Commands::OpenUrl { url, title, width, height }) => {
@@ -1174,6 +1363,44 @@ fn run_dev_server(path: &str, port: u16, open_browser: bool) {
         
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
+            
+            // Handle streaming endpoint separately (different response type)
+            if url.as_str() == "/__poly_invoke_stream" {
+                let mut body = String::new();
+                request.as_reader().read_to_string(&mut body).ok();
+                
+                let response = match handle_ipc_invoke_streaming(&interpreter_http, &body) {
+                    Ok(reader) => {
+                        tiny_http::Response::new(
+                            tiny_http::StatusCode(200),
+                            vec![
+                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
+                                tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap()
+                            ],
+                            reader,
+                            None,
+                            None
+                        )
+                    },
+                    Err(e) => {
+                        let error_json = serde_json::json!({"error": e}).to_string();
+                        let error_reader: Box<dyn std::io::Read + Send> = Box::new(std::io::Cursor::new(error_json.into_bytes()));
+                        tiny_http::Response::new(
+                            tiny_http::StatusCode(400),
+                            vec![
+                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
+                                tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap()
+                            ],
+                            error_reader,
+                            None,
+                            None
+                        )
+                    }
+                };
+                let _ = request.respond(response);
+                continue;
+            }
+            
             let response = match url.as_str() {
                 "/" | "/index.html" => {
                     // Check for custom index.html in web folder
@@ -1281,6 +1508,30 @@ window.poly = {{
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     return d.result;
+  }},
+  async stream(fn, ...args) {{
+      const onData = args.pop();
+      if (typeof onData !== 'function') throw new Error("Last argument must be callback");
+      
+      const r = await fetch('/__poly_invoke_stream', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ fn, args }})
+      }});
+      
+      if (!r.ok) {{
+        const e = await r.json();
+        throw new Error(e.error || 'Stream failed');
+      }}
+      
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      
+      while (true) {{
+          const {{ done, value }} = await reader.read();
+          if (done) break;
+          onData(decoder.decode(value, {{ stream: true }}));
+      }}
   }},
   dialog: {{
     async open(options = {{}}) {{ return poly.invoke('__poly_dialog_open', options); }},
@@ -1911,6 +2162,71 @@ fn execute_poly_for_web(entry: &Path) -> String {
 }
 
 /// Handle IPC invoke with a persistent (stateful) interpreter
+struct ChannelReader {
+    rx: std::sync::mpsc::Receiver<String>,
+    buffer: Vec<u8>,
+}
+
+impl std::io::Read for ChannelReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        while self.buffer.is_empty() {
+             match self.rx.recv() {
+                 Ok(data) => {
+                     if !data.is_empty() {
+                        self.buffer.extend_from_slice(data.as_bytes());
+                        break;
+                     }
+                 }
+                 Err(_) => return Ok(0),
+             }
+        }
+        let len = std::cmp::min(self.buffer.len(), buf.len());
+        buf[0..len].copy_from_slice(&self.buffer[0..len]);
+        self.buffer.drain(0..len);
+        Ok(len)
+    }
+}
+
+fn handle_ipc_invoke_streaming(
+    interpreter: &std::sync::Arc<std::sync::Mutex<poly::interpreter::Interpreter>>, 
+    body: &str
+) -> Result<Box<dyn std::io::Read + Send>, String> {
+    // Parse JSON
+    let request: serde_json::Value = serde_json::from_str(body).map_err(|e| format!("Invalid JSON: {}", e))?;
+    let fn_name = request.get("fn").and_then(|v| v.as_str()).ok_or("Missing 'fn' field")?.to_string();
+    let args = request.get("args").cloned().unwrap_or(serde_json::json!({}));
+    
+    // Build args string
+    let args_str = if let Some(arr) = args.as_array() {
+        arr.iter().map(json_to_poly_value).collect::<Vec<_>>().join(", ")
+    } else if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
+        String::new()
+    } else {
+        json_to_poly_value(&args)
+    };
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let interpreter_clone = interpreter.clone();
+    
+    std::thread::spawn(move || {
+        // Lock interpreter
+        // Note: This blocks until interpreter is free
+        let mut interp = interpreter_clone.lock().unwrap();
+        
+        // Set up streaming
+        interp.set_stream_sender(Some(tx.clone()));
+        
+        // Execute
+        let _ = poly::call_function(&mut interp, &fn_name, &args_str);
+        
+        // Clean up
+        interp.set_stream_sender(None);
+        // tx is dropped here, closing channel
+    });
+    
+    Ok(Box::new(ChannelReader { rx, buffer: Vec::new() }))
+}
+
 fn handle_ipc_invoke_stateful(interpreter: &std::sync::Arc<std::sync::Mutex<poly::interpreter::Interpreter>>, body: &str) -> String {
     // Parse the request: { "fn": "function_name", "args": { ... } }
     let request: serde_json::Value = match serde_json::from_str(body) {

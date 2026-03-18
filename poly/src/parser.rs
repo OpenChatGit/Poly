@@ -63,8 +63,8 @@ impl Parser {
             Some(Token::Global) => self.parse_global(),
             Some(Token::Try) => self.parse_try(),
             Some(Token::Raise) => self.parse_raise(),
-            _ => self.parse_expr_or_assign(),
-        }
+            Some(Token::Match) => self.parse_match(),
+            _ => self.parse_expr_or_assign(),        }
     }
 
     fn parse_let(&mut self) -> Result<Statement, String> {
@@ -253,18 +253,136 @@ impl Parser {
         
         self.expect(Token::Colon)?;
         
-        // Parse struct body
+        // Parse struct body - can have typed fields AND methods
         let body = self.parse_block()?;
         
-        // Extract methods from body
+        let mut fields = Vec::new();
         let mut methods = Vec::new();
+
         for stmt in body {
-            if let Statement::FnDef { name, params, return_type, body } = stmt {
-                methods.push(Method { name, params, return_type, body });
+            match stmt {
+                Statement::FnDef { name, params, return_type, body } => {
+                    methods.push(Method { name, params, return_type, body });
+                }
+                // `var name: Type = default` or `let name: Type = default` as field declarations
+                Statement::Let { name, type_annotation, value } => {
+                    fields.push(crate::ast::StructField {
+                        name,
+                        type_annotation,
+                        default: Some(value),
+                    });
+                }
+                Statement::Var { name, type_annotation, value } => {
+                    fields.push(crate::ast::StructField {
+                        name,
+                        type_annotation,
+                        default: Some(value),
+                    });
+                }
+                // bare `name: Type` (parsed as expr statement with colon - handle as field)
+                _ => {}
             }
         }
         
-        Ok(Statement::StructDef { name, parent, methods })
+        Ok(Statement::StructDef { name, parent, fields, methods })
+    }
+
+    fn parse_match(&mut self) -> Result<Statement, String> {
+        self.advance(); // consume 'match'
+        let subject = self.parse_expr()?;
+        self.expect(Token::Colon)?;
+        self.skip_newlines();
+        self.expect(Token::Indent)?;
+
+        let mut arms = Vec::new();
+
+        while !self.is_at_end() && !self.check(&Token::Dedent) {
+            self.skip_newlines();
+            if self.check(&Token::Dedent) || self.is_at_end() { break; }
+
+            // Parse `case pattern:`  or  `case pattern if guard:`
+            self.expect(Token::Case)?;
+            let pattern = self.parse_match_pattern()?;
+            self.expect(Token::Colon)?;
+            let body = self.parse_block()?;
+
+            arms.push(crate::ast::MatchArm { pattern, body });
+            self.skip_newlines();
+        }
+
+        if self.check(&Token::Dedent) { self.advance(); }
+
+        Ok(Statement::Match { subject, arms })
+    }
+
+    fn parse_match_pattern(&mut self) -> Result<crate::ast::MatchPattern, String> {
+        let mut patterns = vec![self.parse_single_pattern()?];
+
+        // Handle `pat1 | pat2 | pat3`
+        while self.check(&Token::Pipe) {
+            self.advance();
+            patterns.push(self.parse_single_pattern()?);
+        }
+
+        let base = if patterns.len() == 1 {
+            patterns.remove(0)
+        } else {
+            crate::ast::MatchPattern::Or(patterns)
+        };
+
+        // Handle guard: `pattern if condition`
+        if self.check(&Token::If) {
+            self.advance();
+            let guard = self.parse_expr()?;
+            return Ok(crate::ast::MatchPattern::Guard(
+                Box::new(base),
+                Box::new(guard),
+            ));
+        }
+
+        Ok(base)
+    }
+
+    fn parse_single_pattern(&mut self) -> Result<crate::ast::MatchPattern, String> {
+        match self.peek() {
+            // Wildcard: _
+            Some(Token::Identifier(name)) if name == "_" => {
+                self.advance();
+                Ok(crate::ast::MatchPattern::Wildcard)
+            }
+            // Type names start with uppercase: Int, String, Bool, etc.
+            Some(Token::Identifier(name)) if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) => {
+                let name = name.clone();
+                self.advance();
+                Ok(crate::ast::MatchPattern::Type(name))
+            }
+            // Bind variable (lowercase)
+            Some(Token::Identifier(name)) => {
+                let name = name.clone();
+                self.advance();
+                Ok(crate::ast::MatchPattern::Bind(name))
+            }
+            // Literal: number, string, bool, none
+            Some(Token::None) => { self.advance(); Ok(crate::ast::MatchPattern::Literal(Expr::None)) }
+            Some(Token::True) => { self.advance(); Ok(crate::ast::MatchPattern::Literal(Expr::Bool(true))) }
+            Some(Token::False) => { self.advance(); Ok(crate::ast::MatchPattern::Literal(Expr::Bool(false))) }
+            Some(Token::Integer(_)) | Some(Token::Float(_)) | Some(Token::String(_)) | Some(Token::StringSingle(_)) => {
+                let expr = self.parse_primary()?;
+                // Check for range: 1..10
+                if self.check(&Token::DotDot) {
+                    self.advance();
+                    let end = self.parse_primary()?;
+                    return Ok(crate::ast::MatchPattern::Range(Box::new(expr), Box::new(end)));
+                }
+                Ok(crate::ast::MatchPattern::Literal(expr))
+            }
+            Some(Token::Minus) => {
+                // Negative number literal
+                let expr = self.parse_unary()?;
+                Ok(crate::ast::MatchPattern::Literal(expr))
+            }
+            _ => Err(format!("Expected match pattern, got {:?}", self.peek())),
+        }
     }
 
     fn parse_if(&mut self) -> Result<Statement, String> {
@@ -1175,6 +1293,11 @@ impl Parser {
                 let name = name.clone();
                 self.advance();
                 Ok(name)
+            }
+            // Allow keywords that are commonly used as identifiers in patterns
+            Some(Token::Case) => {
+                self.advance();
+                Ok("case".to_string())
             }
             _ => Err(format!("Expected identifier, got {:?}", self.peek())),
         }

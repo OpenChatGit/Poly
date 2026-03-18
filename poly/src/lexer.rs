@@ -92,6 +92,11 @@ pub enum Token {
     Owned,
     #[token("borrowed")]
     Borrowed,
+    // Match/pattern keywords
+    #[token("match")]
+    Match,
+    #[token("case")]
+    Case,
 
     // Literals
     #[regex(r"0b[01]+", |lex| {
@@ -206,6 +211,10 @@ pub enum Token {
     Dot,
     #[token("->")]
     Arrow,
+    #[token("=>")]
+    FatArrow,
+    #[token("..")]
+    DotDot,
     #[token("@")]
     At,
     #[token(";")]
