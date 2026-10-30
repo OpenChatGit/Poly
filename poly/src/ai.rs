@@ -461,7 +461,7 @@ fn chat_ollama(base_url: &str, request: &ChatRequest) -> Result<ChatResponse, St
     #[derive(Deserialize, Debug)]
     struct OllamaResponseToolCall {
         #[serde(rename = "type", default)]
-        call_type: Option<String>,
+        _call_type: Option<String>,
         function: OllamaResponseFunction,
     }
     

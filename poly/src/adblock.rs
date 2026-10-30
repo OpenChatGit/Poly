@@ -6,7 +6,9 @@
 //! This is a simplified but functional implementation that handles the most
 //! common filter types used by Brave and other ad blockers.
 
+#[cfg(feature = "native")]
 use std::sync::{Arc, RwLock};
+#[cfg(feature = "native")]
 use once_cell::sync::Lazy;
 
 #[cfg(feature = "native")]
@@ -18,20 +20,13 @@ use regex::Regex;
 enum FilterType {
     /// Block network requests
     Network {
-        pattern: String,
         regex: Regex,
         options: FilterOptions,
     },
     /// Exception rule (whitelist)
     Exception {
-        pattern: String,
         regex: Regex,
         options: FilterOptions,
-    },
-    /// Element hiding rule (cosmetic)
-    ElementHiding {
-        domains: Vec<String>,
-        selector: String,
     },
 }
 
@@ -53,7 +48,7 @@ struct FilterOptions {
 
 /// Global ad blocker with parsed rules
 #[cfg(feature = "native")]
-pub static AD_BLOCKER: Lazy<Arc<RwLock<Vec<FilterType>>>> = Lazy::new(|| {
+static AD_BLOCKER: Lazy<Arc<RwLock<Vec<FilterType>>>> = Lazy::new(|| {
     Arc::new(RwLock::new(Vec::new()))
 });
 
@@ -102,18 +97,8 @@ pub fn init_adblock(filter_lists: Vec<String>) -> Result<(), String> {
 fn parse_filter_rule(line: &str) -> Option<FilterType> {
     // Element hiding rule: example.com##.ad-banner
     if line.contains("##") {
-        let parts: Vec<&str> = line.split("##").collect();
-        if parts.len() == 2 {
-            let domains = if parts[0].is_empty() {
-                vec![]
-            } else {
-                parts[0].split(',').map(|s| s.to_string()).collect()
-            };
-            return Some(FilterType::ElementHiding {
-                domains,
-                selector: parts[1].to_string(),
-            });
-        }
+        // Cosmetic filtering has no consumer in Poly, so don't retain inert rules.
+        return None;
     }
     
     // Exception rule: @@pattern
@@ -139,13 +124,11 @@ fn parse_filter_rule(line: &str) -> Option<FilterType> {
     
     if is_exception {
         Some(FilterType::Exception {
-            pattern: pattern.to_string(),
             regex,
             options,
         })
     } else {
         Some(FilterType::Network {
-            pattern: pattern.to_string(),
             regex,
             options,
         })
@@ -167,11 +150,10 @@ fn parse_filter_options(options_str: Option<&str>) -> FilterOptions {
                 options.third_party = Some(false);
             } else if opt == "match-case" {
                 options.match_case = true;
-            } else if opt.starts_with("domain=") {
-                let domains_str = &opt[7..];
+            } else if let Some(domains_str) = opt.strip_prefix("domain=") {
                 for domain in domains_str.split('|') {
-                    if domain.starts_with('~') {
-                        options.exclude_domains.push(domain[1..].to_string());
+                    if let Some(domain) = domain.strip_prefix('~') {
+                        options.exclude_domains.push(domain.to_string());
                     } else {
                         options.domains.push(domain.to_string());
                     }
@@ -206,7 +188,7 @@ fn pattern_to_regex(pattern: &str) -> Option<Regex> {
                     regex_pattern.push_str("^https?://([^/]+\\.)?");
                 } else {
                     // Start/end anchor
-                    regex_pattern.push_str("^");
+                    regex_pattern.push('^');
                 }
             }
             // Regex special characters - escape them
@@ -270,10 +252,6 @@ pub fn should_block(url: &str, source_url: &str, resource_type: &str) -> bool {
                 
                 // Exception rule - don't block
                 return false;
-            }
-            FilterType::ElementHiding { .. } => {
-                // Element hiding rules are handled separately (cosmetic filtering)
-                continue;
             }
         }
     }

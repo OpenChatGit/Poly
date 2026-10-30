@@ -3,7 +3,9 @@
 //! This module integrates Brave's high-performance adblock-rust engine
 //! for network-level ad blocking without JavaScript interference.
 
+#[cfg(feature = "native")]
 use std::sync::{Arc, RwLock};
+#[cfg(feature = "native")]
 use once_cell::sync::Lazy;
 
 #[cfg(feature = "native")]

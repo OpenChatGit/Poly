@@ -221,7 +221,7 @@ pub fn add_package(package: &str, version: Option<&str>) -> Result<(), String> {
         let pkg = fetch_npm_package(&client, &job.name, job.version.as_deref())?;
         
         // Add dependencies to queue
-        for (dep_name, _) in &pkg.dependencies {
+        for dep_name in pkg.dependencies.keys() {
             if !seen.contains(dep_name) {
                 queue.push(PackageJob { name: dep_name.clone(), version: None });
             }
@@ -240,7 +240,8 @@ pub fn add_package(package: &str, version: Option<&str>) -> Result<(), String> {
     // Phase 2: Parallel download and extract
     println!("  {}Downloading...{}", DIM, RESET);
     
-    let results: Arc<Mutex<Vec<(String, String, String, Vec<String>)>>> = Arc::new(Mutex::new(Vec::new()));
+    type PackageDownloadResult = (String, String, String, Vec<String>);
+    let results: Arc<Mutex<Vec<PackageDownloadResult>>> = Arc::new(Mutex::new(Vec::new()));
     let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let counter: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
     let total = to_install.len();

@@ -5,15 +5,50 @@
 use wry::WebViewBuilder;
 
 use crate::config::PolyConfig;
+#[cfg(feature = "native")]
+use std::sync::Mutex;
 
 #[cfg(feature = "native")]
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 
 /// Global window size tracking (for main window)
 #[cfg(feature = "native")]
 pub static MAIN_WINDOW_WIDTH: AtomicU32 = AtomicU32::new(1024);
 #[cfg(feature = "native")]
 pub static MAIN_WINDOW_HEIGHT: AtomicU32 = AtomicU32::new(768);
+#[cfg(feature = "native")]
+static NATIVE_HOST_HWND: AtomicIsize = AtomicIsize::new(0);
+#[cfg(feature = "native")]
+static NATIVE_EXIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "native")]
+static NATIVE_SHUTDOWN_HOOK: Mutex<Option<Box<dyn Fn() + Send + Sync>>> = Mutex::new(None);
+
+#[cfg(feature = "native")]
+fn run_native_shutdown_hook() {
+    let hook = NATIVE_SHUTDOWN_HOOK.lock().ok().and_then(|mut current| current.take());
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+/// Register application-owned cleanup to run as the native event loop exits.
+#[cfg(feature = "native")]
+pub fn register_shutdown_hook(hook: impl Fn() + Send + Sync + 'static) {
+    if let Ok(mut current) = NATIVE_SHUTDOWN_HOOK.lock() { *current = Some(Box::new(hook)); }
+}
+
+/// Store the native shell window used as the parent for embedded Windows apps.
+#[cfg(feature = "native")]
+pub fn set_native_host_window(hwnd: isize) {
+    NATIVE_HOST_HWND.store(hwnd, Ordering::Release);
+}
+
+/// Return the registered native shell HWND for app embedding.
+#[cfg(feature = "native")]
+pub fn native_host_window() -> Option<isize> {
+    let hwnd = NATIVE_HOST_HWND.load(Ordering::Acquire);
+    (hwnd != 0).then_some(hwnd)
+}
 
 /// Get main window size
 #[cfg(feature = "native")]
@@ -41,6 +76,7 @@ pub struct NativeConfig {
     pub close_to_tray: bool,
     pub tray_menu_items: Vec<(String, String)>,
     pub single_instance: bool,
+    pub polyview_enabled: bool,
     pub background_color: (u8, u8, u8, u8),
 }
 
@@ -64,6 +100,7 @@ impl Default for NativeConfig {
             close_to_tray: false,
             tray_menu_items: Vec::new(),
             single_instance: false,
+            polyview_enabled: true,
             background_color: (26, 26, 26, 255),
         }
     }
@@ -73,13 +110,13 @@ impl NativeConfig {
     pub fn new(title: &str) -> Self {
         Self { title: title.to_string(), ..Default::default() }
     }
-    
+
     /// Create NativeConfig from PolyConfig (poly.toml)
     pub fn from_poly_config(config: &PolyConfig) -> Self {
         // Use window.icon_path first, fallback to build.icon_path
         let icon_path = config.window.icon_path.clone()
             .or_else(|| config.build.icon_path.clone());
-        
+
         Self {
             title: config.get_title().to_string(),
             width: config.window.width,
@@ -98,50 +135,55 @@ impl NativeConfig {
             close_to_tray: config.tray.close_to_tray,
             tray_menu_items: Vec::new(),
             single_instance: false,
+            polyview_enabled: true,
             background_color: config.get_background_rgba(),
         }
     }
-    
+
     pub fn with_size(mut self, width: u32, height: u32) -> Self {
         self.width = width; self.height = height; self
     }
-    
+
     pub fn with_dev_tools(mut self, enabled: bool) -> Self {
         self.dev_tools = enabled; self
     }
-    
+
     pub fn with_icon(mut self, path: &str) -> Self {
         self.icon_path = Some(path.to_string()); self
     }
-    
+
     pub fn with_tray(mut self, enabled: bool) -> Self {
         self.tray_enabled = enabled; self
     }
-    
+
     pub fn with_tray_icon(mut self, path: &str) -> Self {
         self.tray_icon_path = Some(path.to_string()); self
     }
-    
+
     pub fn with_minimize_to_tray(mut self, enabled: bool) -> Self {
         self.minimize_to_tray = enabled; self
     }
-    
+
     pub fn with_close_to_tray(mut self, enabled: bool) -> Self {
         self.close_to_tray = enabled; self
     }
-    
+
     pub fn with_decorations(mut self, enabled: bool) -> Self {
         self.decorations = enabled; self
     }
-    
+
     pub fn with_transparent(mut self, enabled: bool) -> Self {
         self.transparent = enabled; self
     }
-    
+
     pub fn with_single_instance(mut self, enabled: bool) -> Self {
         self.single_instance = enabled; self
     }
-    
+
+    pub fn with_polyview(mut self, enabled: bool) -> Self {
+        self.polyview_enabled = enabled; self
+    }
+
     pub fn with_background_color(mut self, r: u8, g: u8, b: u8, a: u8) -> Self {
         self.background_color = (r, g, b, a); self
     }
@@ -228,22 +270,33 @@ fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>
     use std::fs::File;
     use std::io::BufReader;
     use image::GenericImageView;
-    
+
     let file = File::open(path)?;
     let img = image::load(BufReader::new(file), image::ImageFormat::Png)?;
     let (w, h) = img.dimensions();
     let size = w.max(h);
-    
+
     let mut square = image::RgbaImage::new(size, size);
     for p in square.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
-    
+
     let (xo, yo) = ((size - w) / 2, (size - h) / 2);
     for (x, y, p) in img.to_rgba8().enumerate_pixels() {
         square.put_pixel(x + xo, y + yo, *p);
     }
-    
+
     let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
     Ok(tao::window::Icon::from_rgba(resized.into_raw(), 64, 64)?)
+}
+
+#[cfg(all(feature = "native", target_os = "windows"))]
+fn register_native_host_window(window: &tao::window::Window) -> Result<(), Box<dyn std::error::Error>> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = window.window_handle()?.as_raw();
+    let RawWindowHandle::Win32(handle) = handle else {
+        return Err("The native shell did not provide a Win32 window handle.".into());
+    };
+    set_native_host_window(handle.hwnd.get());
+    Ok(())
 }
 
 /// Run a native window with HTML content
@@ -254,9 +307,9 @@ pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn
         event_loop::{ControlFlow, EventLoop},
         window::WindowBuilder,
     };
-    
+
     let event_loop = EventLoop::new();
-    
+
     let mut builder = WindowBuilder::new()
         .with_title(&config.title)
         .with_inner_size(tao::dpi::LogicalSize::new(config.width, config.height))
@@ -264,32 +317,34 @@ pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn
         .with_decorations(config.decorations)
         .with_always_on_top(config.always_on_top)
         .with_transparent(config.transparent);
-    
+
     if let Some(ref icon_path) = config.icon_path {
         if let Ok(icon) = load_icon(icon_path) {
             builder = builder.with_window_icon(Some(icon));
         }
     }
-    
+
     let window = builder.build(&event_loop)?;
-    
+    #[cfg(target_os = "windows")]
+    register_native_host_window(&window)?;
+
     // Set background color to prevent flickering/shadow pulsing
     let bg_color = if config.transparent {
         (0, 0, 0, 0)
     } else {
         config.background_color
     };
-    
+
     let webview = WebViewBuilder::new()
         .with_html(html)
         .with_devtools(config.dev_tools)
         .with_transparent(config.transparent)
         .with_background_color(bg_color)
         .build(&window)?;
-    
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        
+
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 *control_flow = ControlFlow::Exit;
@@ -314,34 +369,38 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         window::WindowBuilder,
     };
     use std::sync::{Arc, Mutex};
-    
+    use std::rc::Rc;
+
     let event_loop = EventLoop::new();
-    
+    NATIVE_EXIT_REQUESTED.store(false, Ordering::Release);
+
     let mut builder = WindowBuilder::new()
         .with_title(&config.title)
         .with_inner_size(tao::dpi::LogicalSize::new(config.width as f64, config.height as f64))
         .with_resizable(config.resizable)
         .with_decorations(config.decorations)
         .with_transparent(config.transparent);
-    
+
     if let Some(ref icon_path) = config.icon_path {
         if let Ok(icon) = load_icon(icon_path) {
             builder = builder.with_window_icon(Some(icon));
         }
     }
-    
+
     let window = builder.build(&event_loop)?;
+    #[cfg(target_os = "windows")]
+    register_native_host_window(&window)?;
     let window = Arc::new(window);
     let window_clone = Arc::clone(&window);
-    
+
     // Initialize window size tracking
     MAIN_WINDOW_WIDTH.store(config.width, Ordering::Relaxed);
     MAIN_WINDOW_HEIGHT.store(config.height, Ordering::Relaxed);
-    
+
     // Create system tray if enabled
     let _tray = if config.tray_enabled {
         use crate::tray::{TrayConfig, TrayMenuItem, create_tray};
-        
+
         // Build menu items from config
         let mut menu_items = Vec::new();
         for (id, label) in &config.tray_menu_items {
@@ -355,7 +414,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                 });
             }
         }
-        
+
         // Add default items if none specified
         if menu_items.is_empty() {
             menu_items = vec![
@@ -364,16 +423,16 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                 TrayMenuItem::Item { id: "quit".to_string(), label: "Quit".to_string(), enabled: true },
             ];
         }
-        
+
         let mut tray_config = TrayConfig::new(&config.tray_tooltip.clone().unwrap_or_else(|| config.title.clone()))
             .with_menu(menu_items);
-        
+
         if let Some(ref icon_path) = config.tray_icon_path {
             tray_config = tray_config.with_icon(icon_path);
         } else if let Some(ref icon_path) = config.icon_path {
             tray_config = tray_config.with_icon(icon_path);
         }
-        
+
         match create_tray(tray_config) {
             Ok(handle) => Some(handle),
             Err(e) => {
@@ -384,36 +443,37 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     } else {
         None
     };
-    
+
     // Store tray handle and config for event handling
-    let tray_handle = Arc::new(Mutex::new(_tray));
+    let tray_handle = Rc::new(Mutex::new(_tray));
     let close_to_tray = config.close_to_tray;
     let minimize_to_tray = config.minimize_to_tray;
     let tray_enabled = config.tray_enabled;
-    
+
     // Set background color to prevent flickering/shadow pulsing
     let bg_color = if config.transparent {
         (0, 0, 0, 0)
     } else {
         config.background_color
     };
-    
+
     // Get titlebar config and create injection script that runs on every page
     let titlebar_config = crate::titlebar::get_titlebar();
-    
-    // Get PolyView element JS (iframe2)
-    let polyview_js = crate::polyview::get_polyview_element_js();
+
+    // Keep PolyView available to regular Poly apps. NCOS opts out because its
+    // app and browser surfaces are hosted by the native window manager.
+    let polyview_js = if config.polyview_enabled { crate::polyview::get_polyview_element_js() } else { String::new() };
 
     // Get OS theme injection JS
     let theme_js = crate::theme::get_theme_inject_js();
-    
+
     let init_script = if titlebar_config.enabled {
         let html_escaped = titlebar_config.html.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
         let css_escaped = titlebar_config.css.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
         let js_escaped = titlebar_config.js.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
-        
+
         format!(r#"
-// PolyView Element (iframe2)
+// PolyView compatibility helper
 {polyview}
 
 // OS Theme CSS Variables
@@ -422,35 +482,35 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
 (function() {{
     function injectTitlebar() {{
         if (document.getElementById('poly-titlebar')) return;
-        
+
         const titlebar = document.createElement('div');
         titlebar.id = 'poly-titlebar';
         titlebar.innerHTML = `{html}`;
-        
+
         const style = document.createElement('style');
         style.id = 'poly-titlebar-style';
         style.textContent = `{css}`;
-        
+
         if (document.head) document.head.appendChild(style);
         if (document.body) document.body.insertBefore(titlebar, document.body.firstChild);
-        
+
         {js}
     }}
-    
+
     // Inject immediately if DOM is ready
     if (document.readyState === 'loading') {{
         document.addEventListener('DOMContentLoaded', injectTitlebar);
     }} else {{
         injectTitlebar();
     }}
-    
+
     // Also inject on any dynamic content changes
     const observer = new MutationObserver(() => {{
         if (!document.getElementById('poly-titlebar') && document.body) {{
             injectTitlebar();
         }}
     }});
-    
+
     if (document.body) {{
         observer.observe(document.body, {{ childList: true, subtree: false }});
     }} else {{
@@ -460,26 +520,27 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     }}
 }})();
 "#,
-            polyview = polyview_js,
             theme = theme_js,
+            polyview = polyview_js,
             html = html_escaped,
             css = css_escaped,
             js = js_escaped,
         )
     } else {
-        // Even without titlebar, inject PolyView element + theme
         format!("{}\n{}", polyview_js, theme_js)
     };
-    
+
     let webview = wry::WebViewBuilder::new()
         .with_url(url)
         .with_devtools(config.dev_tools)
         .with_transparent(config.transparent)
         .with_background_color(bg_color)
         .with_initialization_script(&init_script)
+        .with_initialization_script(crate::webview_native::FULLSCREEN_SHORTCUT_SCRIPT)
         .with_ipc_handler(move |msg: wry::http::Request<String>| {
             let body = msg.body();
             match body.as_str() {
+                "poly:ncos:toggle-fullscreen" => crate::webview_native::request_fullscreen_toggle(),
                 "minimize" => {
                     if minimize_to_tray && tray_enabled {
                         window_clone.set_visible(false);
@@ -494,7 +555,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                     if close_to_tray && tray_enabled {
                         window_clone.set_visible(false);
                     } else {
-                        std::process::exit(0);
+                        NATIVE_EXIT_REQUESTED.store(true, Ordering::Release);
                     }
                 }
                 "drag" => {
@@ -511,19 +572,23 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
             }
         })
         .build(&window)?;
-    
+
     let window_for_tray = Arc::clone(&window);
-    
+
     // WebView manager for multi-webview support
     let mut webview_manager = crate::webview_native::WebViewManager::new();
     webview_manager.set_main_webview(webview);
-    
+    let mut restore_maximized_after_fullscreen = false;
+
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll; // Use Poll to process pending operations
-        
+        let cadence_ms = if crate::webview_native::native_surface_interaction_active() { 8 } else { 50 };
+        *control_flow = ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(cadence_ms),
+        );
+
         // Process pending WebView operations
         webview_manager.process_pending_operations(&window);
-        
+
         // Handle tray events
         if let Some(ref tray) = *tray_handle.lock().unwrap() {
             while let Some(tray_event) = tray.poll_event() {
@@ -535,6 +600,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                                 window_for_tray.set_focus();
                             }
                             "quit" | "exit" => {
+                                run_native_shutdown_hook();
                                 *control_flow = ControlFlow::Exit;
                             }
                             _ => {
@@ -553,12 +619,13 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                 }
             }
         }
-        
+
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 if close_to_tray && tray_enabled {
                     window_for_tray.set_visible(false);
                 } else {
+                    run_native_shutdown_hook();
                     *control_flow = ControlFlow::Exit;
                 }
             }
@@ -566,12 +633,40 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                 // Update global window size tracking
                 MAIN_WINDOW_WIDTH.store(size.width, Ordering::Relaxed);
                 MAIN_WINDOW_HEIGHT.store(size.height, Ordering::Relaxed);
-                // Don't auto-resize main WebView - let user control it via setMainBounds
-                // The user's JavaScript resize handler will update bounds as needed
+                webview_manager.resize_main_to_window(&window_for_tray);
+            }
+            Event::WindowEvent { event: WindowEvent::ScaleFactorChanged { .. }, .. } => {
+                webview_manager.resize_main_to_window(&window_for_tray);
             }
             Event::MainEventsCleared => {
-                // Small sleep to prevent busy-waiting when using Poll
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                if NATIVE_EXIT_REQUESTED.swap(false, Ordering::AcqRel) {
+                    run_native_shutdown_hook();
+                    *control_flow = ControlFlow::Exit;
+                }
+                if crate::webview_native::take_fullscreen_toggle_request() {
+                    if window_for_tray.fullscreen().is_none() {
+                        // Tao's Windows non-client calculation uses rcWork for maximized
+                        // windows, even after fullscreen is requested. Temporarily clear
+                        // maximized state so the fullscreen client area covers the monitor.
+                        restore_maximized_after_fullscreen = window_for_tray.is_maximized();
+                        if restore_maximized_after_fullscreen {
+                            window_for_tray.set_maximized(false);
+                        }
+                        window_for_tray.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
+                    } else {
+                        window_for_tray.set_fullscreen(None);
+                        if restore_maximized_after_fullscreen {
+                            window_for_tray.set_maximized(true);
+                        }
+                        restore_maximized_after_fullscreen = false;
+                    }
+                }
+            }
+            Event::LoopDestroyed => {
+                // Tear down child apps before CEF and keep this on the native
+                // application thread, as required by CEF's lifecycle contract.
+                run_native_shutdown_hook();
+                crate::cef_osr::shutdown();
             }
             _ => {}
         }
@@ -588,23 +683,23 @@ fn load_tray_icon_from_file(path: &str) -> Result<tray_icon::Icon, Box<dyn std::
     use std::fs::File;
     use std::io::BufReader;
     use image::GenericImageView;
-    
+
     let file = File::open(path)?;
     let format = if path.ends_with(".ico") { image::ImageFormat::Ico } else { image::ImageFormat::Png };
     let img = image::load(BufReader::new(file), format)?;
     let (w, h) = img.dimensions();
-    
+
     let size = 32u32;
     let mut canvas = image::RgbaImage::new(size, size);
     for p in canvas.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
-    
+
     let scale = (size as f32 / w as f32).min(size as f32 / h as f32);
     let (nw, nh) = ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
     let resized = image::imageops::resize(&img.to_rgba8(), nw, nh, image::imageops::FilterType::Lanczos3);
-    
+
     let (xo, yo) = ((size - nw) / 2, (size - nh) / 2);
     for (x, y, p) in resized.enumerate_pixels() { canvas.put_pixel(x + xo, y + yo, *p); }
-    
+
     Ok(tray_icon::Icon::from_rgba(canvas.into_raw(), size, size)?)
 }
 

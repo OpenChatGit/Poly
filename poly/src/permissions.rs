@@ -1,4 +1,4 @@
-//! SovereigntyEngine - Permission enforcement system
+//! PermissionsEngine - Permission enforcement system
 //! 
 //! Ensures apps can only use APIs they have declared in poly.toml.
 //! Protects end-users from malicious or privacy-invasive apps.
@@ -8,9 +8,9 @@ use std::path::Path;
 use std::sync::RwLock;
 use once_cell::sync::Lazy;
 
-/// Global sovereignty configuration
-pub static SOVEREIGNTY: Lazy<RwLock<SovereigntyConfig>> = Lazy::new(|| {
-    RwLock::new(SovereigntyConfig::default())
+/// Global permissions configuration
+pub static PERMISSIONS: Lazy<RwLock<PermissionsConfig>> = Lazy::new(|| {
+    RwLock::new(PermissionsConfig::default())
 });
 
 /// Permission types that can be requested
@@ -89,10 +89,10 @@ pub enum DomainScope {
     Localhost,
 }
 
-/// Sovereignty configuration loaded from poly.toml
+/// Permissions configuration loaded from poly.toml
 #[derive(Debug, Clone, Default)]
-pub struct SovereigntyConfig {
-    /// Whether sovereignty is enabled (default: true for built apps)
+pub struct PermissionsConfig {
+    /// Whether permissions is enabled (default: true for built apps)
     pub enabled: bool,
     /// Set of granted permissions
     pub permissions: HashSet<Permission>,
@@ -108,7 +108,7 @@ pub struct SovereigntyConfig {
     pub app_name: String,
 }
 
-impl SovereigntyConfig {
+impl PermissionsConfig {
     /// Create a permissive config for development mode
     pub fn development() -> Self {
         Self {
@@ -122,7 +122,7 @@ impl SovereigntyConfig {
         }
     }
     
-    /// Parse sovereignty config from poly.toml content
+    /// Parse permissions config from poly.toml content
     pub fn from_toml(content: &str, app_name: &str) -> Self {
         let mut config = Self {
             enabled: true,
@@ -130,8 +130,9 @@ impl SovereigntyConfig {
             ..Default::default()
         };
         
-        let mut in_sovereignty = false;
-        let mut in_permissions = false;
+        let mut in_section = false;
+        let mut saw_permissions_section = false;
+        let mut in_permission_list = false;
         let mut in_http_allowlist = false;
         let mut in_http_blocklist = false;
         let mut in_fs_allowlist = false;
@@ -140,33 +141,34 @@ impl SovereigntyConfig {
             let line = line.trim();
             
             // Section detection
-            if line == "[sovereignty]" {
-                in_sovereignty = true;
-                in_permissions = false;
+            if line == "[permissions]" {
+                in_section = true;
+                saw_permissions_section = true;
+                in_permission_list = false;
                 in_http_allowlist = false;
                 in_http_blocklist = false;
                 in_fs_allowlist = false;
                 continue;
-            } else if line.starts_with('[') && line != "[sovereignty]" {
-                in_sovereignty = false;
-                in_permissions = false;
+            } else if line.starts_with('[') && line != "[permissions]" {
+                in_section = false;
+                in_permission_list = false;
                 in_http_allowlist = false;
                 in_http_blocklist = false;
                 in_fs_allowlist = false;
                 continue;
             }
             
-            if !in_sovereignty {
+            if !in_section {
                 continue;
             }
             
-            // Parse sovereignty options
+            // Parse permissions options
             if let Some(val) = line.strip_prefix("enabled").and_then(|s| s.trim().strip_prefix('=')) {
                 config.enabled = val.trim() == "true";
             } else if let Some(val) = line.strip_prefix("audit_log").and_then(|s| s.trim().strip_prefix('=')) {
                 config.audit_log = val.trim() == "true";
             } else if line.starts_with("permissions") && line.contains('[') {
-                in_permissions = true;
+                in_permission_list = true;
             } else if line.starts_with("http_allowlist") && line.contains('[') {
                 in_http_allowlist = true;
             } else if line.starts_with("http_blocklist") && line.contains('[') {
@@ -174,11 +176,11 @@ impl SovereigntyConfig {
             } else if line.starts_with("fs_allowlist") && line.contains('[') {
                 in_fs_allowlist = true;
             } else if line == "]" {
-                in_permissions = false;
+                in_permission_list = false;
                 in_http_allowlist = false;
                 in_http_blocklist = false;
                 in_fs_allowlist = false;
-            } else if in_permissions {
+            } else if in_permission_list {
                 // Parse permission string
                 let perm = line.trim().trim_matches('"').trim_matches(',').trim_matches('"');
                 if !perm.is_empty() {
@@ -206,8 +208,9 @@ impl SovereigntyConfig {
             }
         }
         
-        // If no sovereignty section, use permissive defaults for backwards compatibility
-        if config.permissions.is_empty() && config.http_allowlist.is_empty() {
+        // Preserve permissive development behavior only when no policy section exists.
+        // An explicitly empty policy is a deny-all policy, not an opt-out.
+        if !saw_permissions_section {
             config.enabled = false;
         }
         
@@ -318,9 +321,9 @@ fn parse_domain_scope(s: &str) -> DomainScope {
 
 /// Check if a permission is granted
 pub fn check_permission(permission: &Permission) -> Result<(), String> {
-    let config = SOVEREIGNTY.read().unwrap();
+    let config = PERMISSIONS.read().unwrap();
     
-    // If sovereignty is disabled, allow everything
+    // If permissions is disabled, allow everything
     if !config.enabled {
         return Ok(());
     }
@@ -360,14 +363,14 @@ pub fn check_permission(permission: &Permission) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Permission denied: {} not declared in poly.toml [sovereignty] section",
+            "Permission denied: {} not declared in poly.toml [permissions] section",
             permission_to_string(permission)
         ))
     }
 }
 
 /// Check file system permission with path scope
-fn check_fs_permission(config: &SovereigntyConfig, scope: &PathScope, write: bool) -> bool {
+fn check_fs_permission(config: &PermissionsConfig, scope: &PathScope, write: bool) -> bool {
     // Check if any matching permission exists
     for allowed in &config.fs_allowlist {
         if scope_matches(allowed, scope) {
@@ -391,12 +394,36 @@ fn check_fs_permission(config: &SovereigntyConfig, scope: &PathScope, write: boo
 fn scope_matches(allowed: &PathScope, requested: &PathScope) -> bool {
     match allowed {
         PathScope::Any => true,
+        PathScope::Custom(allowed_path) => {
+            let normalize = |path: &str| {
+                let path = path.replace('\\', "/").to_lowercase();
+                let absolute = path.starts_with('/');
+                let mut parts: Vec<&str> = Vec::new();
+                for part in path.split('/') {
+                    match part {
+                        "" | "." => {}
+                        ".." if parts.last().is_some_and(|last| *last != ".." && !last.ends_with(':')) => { parts.pop(); }
+                        ".." if !absolute => parts.push(part),
+                        ".." => {}
+                        _ => parts.push(part),
+                    }
+                }
+                let joined = parts.join("/");
+                if absolute { format!("/{joined}") } else { joined }
+            };
+            let allowed_path = normalize(allowed_path);
+            let requested_path = match requested {
+                PathScope::Custom(path) => normalize(path),
+                _ => return false,
+            };
+            requested_path == allowed_path || requested_path.starts_with(&format!("{allowed_path}/"))
+        }
         _ => allowed == requested,
     }
 }
 
 /// Check HTTP permission with domain
-fn check_http_permission(config: &SovereigntyConfig, domain: &DomainScope) -> bool {
+fn check_http_permission(config: &PermissionsConfig, domain: &DomainScope) -> bool {
     // First check blocklist
     if let DomainScope::Domain(d) = domain {
         let d_lower = d.to_lowercase();
@@ -439,10 +466,10 @@ fn check_http_permission(config: &SovereigntyConfig, domain: &DomainScope) -> bo
             for perm in &config.permissions {
                 match perm {
                     Permission::HttpConnect(DomainScope::Any) => return true,
-                    Permission::HttpConnect(DomainScope::Domain(allowed)) => {
-                        if d_lower == *allowed || d_lower.ends_with(&format!(".{}", allowed)) {
-                            return true;
-                        }
+                    Permission::HttpConnect(DomainScope::Domain(allowed))
+                        if d_lower == *allowed || d_lower.ends_with(&format!(".{}", allowed)) =>
+                    {
+                        return true;
                     }
                     _ => {}
                 }
@@ -510,27 +537,27 @@ fn log_permission_use(app_name: &str, permission: &Permission) {
     eprintln!("[AUDIT] {} @ {}: {}", app_name, timestamp, permission_to_string(permission));
 }
 
-/// Initialize sovereignty from poly.toml
+/// Initialize permissions from poly.toml
 pub fn init_from_toml(toml_path: &Path, app_name: &str) {
     if let Ok(content) = std::fs::read_to_string(toml_path) {
-        let config = SovereigntyConfig::from_toml(&content, app_name);
-        *SOVEREIGNTY.write().unwrap() = config;
+        let config = PermissionsConfig::from_toml(&content, app_name);
+        *PERMISSIONS.write().unwrap() = config;
     }
 }
 
-/// Set development mode (disables sovereignty checks)
+/// Set development mode (disables permissions checks)
 pub fn set_development_mode() {
-    *SOVEREIGNTY.write().unwrap() = SovereigntyConfig::development();
+    *PERMISSIONS.write().unwrap() = PermissionsConfig::development();
 }
 
-/// Check if sovereignty is enabled
+/// Check if permissions is enabled
 pub fn is_enabled() -> bool {
-    SOVEREIGNTY.read().unwrap().enabled
+    PERMISSIONS.read().unwrap().enabled
 }
 
 /// Get list of granted permissions (for UI display)
 pub fn get_granted_permissions() -> Vec<String> {
-    let config = SOVEREIGNTY.read().unwrap();
+    let config = PERMISSIONS.read().unwrap();
     config.permissions.iter().map(permission_to_string).collect()
 }
 

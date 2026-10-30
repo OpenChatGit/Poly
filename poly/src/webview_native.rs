@@ -21,6 +21,83 @@ pub struct BrowserConfig {
     pub decorations: bool,
 }
 
+static FULLSCREEN_TOGGLE_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static LAST_FULLSCREEN_TOGGLE_REQUEST_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+static NATIVE_SURFACE_INTERACTION_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static NATIVE_SURFACE_INTERACTION_COOLDOWN_UNTIL_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Let the native event loop use a short tick while NCOS moves a window that owns
+/// a child WebView. Return to the normal idle cadence shortly after the gesture.
+pub fn set_native_surface_interaction_active(active: bool) {
+    use std::sync::atomic::Ordering;
+    NATIVE_SURFACE_INTERACTION_ACTIVE.store(active, Ordering::Release);
+    if !active {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        NATIVE_SURFACE_INTERACTION_COOLDOWN_UNTIL_MS.store(now_ms.saturating_add(250), Ordering::Release);
+    }
+}
+
+pub fn native_surface_interaction_active() -> bool {
+    use std::sync::atomic::Ordering;
+    if NATIVE_SURFACE_INTERACTION_ACTIVE.load(Ordering::Acquire) { return true; }
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64;
+    now_ms < NATIVE_SURFACE_INTERACTION_COOLDOWN_UNTIL_MS.load(Ordering::Acquire)
+}
+
+pub fn request_fullscreen_toggle() {
+    // The root UI WebView and a focused embedded app WebView can both receive the
+    // same physical F11 press. Collapse those near-simultaneous IPC messages into
+    // one shell toggle so the app surface cannot accidentally toggle the host back.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u64::MAX as u128) as u64;
+    let mut previous = LAST_FULLSCREEN_TOGGLE_REQUEST_MS.load(std::sync::atomic::Ordering::Acquire);
+    loop {
+        if now_ms.saturating_sub(previous) < 150 {
+            return;
+        }
+        match LAST_FULLSCREEN_TOGGLE_REQUEST_MS.compare_exchange_weak(
+            previous,
+            now_ms,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => break,
+            Err(actual) => previous = actual,
+        }
+    }
+    FULLSCREEN_TOGGLE_REQUESTED.store(true, std::sync::atomic::Ordering::Release);
+}
+
+pub fn take_fullscreen_toggle_request() -> bool {
+    FULLSCREEN_TOGGLE_REQUESTED.swap(false, std::sync::atomic::Ordering::AcqRel)
+}
+
+pub const FULLSCREEN_SHORTCUT_SCRIPT: &str = r#"(() => {
+  window.addEventListener('keydown', event => {
+    if (event.key !== 'F11' || event.repeat) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const message = 'poly:ncos:toggle-fullscreen';
+    if (window.chrome?.webview) window.chrome.webview.postMessage(message);
+    else if (window.webkit?.messageHandlers?.ipc) window.webkit.messageHandlers.ipc.postMessage(message);
+  }, true);
+})();"#;
+
 impl Default for BrowserConfig {
     fn default() -> Self {
         Self {
@@ -45,7 +122,6 @@ impl Default for BrowserConfig {
 mod native_impl {
     use super::BrowserConfig;
     use std::collections::HashMap;
-    use std::io::Read;
     use wry::{WebView, WebViewBuilder, Rect};
     use wry::dpi::{LogicalPosition, LogicalSize};
     use crate::webview::{
@@ -77,6 +153,25 @@ mod native_impl {
             self.main_webview.as_ref()
         }
 
+        /// Keep the root UI WebView fitted to the native window after resize/fullscreen changes.
+        pub fn resize_main_to_window(&self, window: &tao::window::Window) {
+            let Some(webview) = self.main_webview.as_ref() else { return; };
+            // In borderless fullscreen Windows can still report the work-area size
+            // for the client window. The root WebView must cover the whole monitor.
+            let size = if window.fullscreen().is_some() {
+                window.current_monitor().map(|monitor| monitor.size()).unwrap_or_else(|| window.inner_size())
+            } else {
+                window.inner_size()
+            };
+            let bounds = Rect {
+                position: wry::dpi::Position::Physical(wry::dpi::PhysicalPosition::new(0, 0)),
+                size: wry::dpi::Size::Physical(wry::dpi::PhysicalSize::new(size.width, size.height)),
+            };
+            if let Err(error) = webview.set_bounds(bounds) {
+                eprintln!("[WebView] Could not resize root UI WebView: {}", error);
+            }
+        }
+
         /// Process all pending operations from the queue
         pub fn process_pending_operations(&mut self, window: &tao::window::Window) {
             let operations = crate::webview::take_pending_operations();
@@ -99,7 +194,9 @@ mod native_impl {
                     WebViewOperation::SetUserAgent { id, user_agent } => self.set_user_agent(&id, &user_agent),
                     WebViewOperation::AddInitScript { id, script } => self.add_init_script(&id, &script),
                     WebViewOperation::SetMainBounds { bounds } => self.set_main_bounds(bounds),
-                    WebViewOperation::GrantPermission { .. } => Ok(()), // TODO: Implement
+                    WebViewOperation::GrantPermission { permission, .. } => {
+                        Err(format!("Permission responses are not supported by the native WebView backend: {}", permission))
+                    }
                 };
                 
                 if let Err(e) = result {
@@ -111,8 +208,10 @@ mod native_impl {
         fn create_webview(&mut self, window: &tao::window::Window, config: WebViewConfig) -> Result<(), String> {
             println!("[WebView] 🔧 Creating WebView '{}'", config.id);
             
-            // Initialize ad blocker on first WebView creation
-            crate::adblock_init::ensure_adblock_initialized();
+            // Native apps can opt out when they manage their own network policy.
+            if config.adblock_enabled {
+                crate::adblock_init::ensure_adblock_initialized();
+            }
             
             if self.instances.contains_key(&config.id) {
                 return Err(format!("WebView '{}' already exists in native", config.id));
@@ -137,7 +236,13 @@ mod native_impl {
                 .with_background_color(config.background_color)
                 .with_devtools(config.devtools)
                 .with_visible(config.visible)
-                .with_autoplay(config.autoplay);
+                .with_autoplay(config.autoplay)
+                .with_initialization_script(super::FULLSCREEN_SHORTCUT_SCRIPT)
+                .with_ipc_handler(|request: wry::http::Request<String>| {
+                    if request.body() == "poly:ncos:toggle-fullscreen" {
+                        super::request_fullscreen_toggle();
+                    }
+                });
             
             // Add initialization scripts (run before page loads)
             for script in &config.init_scripts {
@@ -165,6 +270,16 @@ mod native_impl {
             // Document title changed handler
             builder = builder.with_document_title_changed_handler(move |title| {
                 update_title(&id_for_title, &title);
+            });
+
+            // Report actual document load completion to the managed WebView event queue.
+            // NCOS uses this to remove its loading overlay for embedded app surfaces.
+            let id_for_load = id.clone();
+            builder = builder.with_on_page_load_handler(move |event, _url| {
+                match event {
+                    wry::PageLoadEvent::Started => update_loading(&id_for_load, true),
+                    wry::PageLoadEvent::Finished => update_loading(&id_for_load, false),
+                }
             });
             
             // New window handler (target="_blank" etc.)
@@ -194,7 +309,11 @@ mod native_impl {
                 .map_err(|e| e.to_string())?;
             
             self.instances.insert(id.clone(), webview);
-            println!("[WebView] ✅ Created '{}' - Ad blocking ready with {} rules", id, 139790);
+            if config.adblock_enabled {
+                println!("[WebView] ✅ Created '{}' - Poly ad blocking enabled", id);
+            } else {
+                println!("[WebView] ✅ Created '{}' - Poly ad blocking disabled", id);
+            }
             
             // On Windows, newly created WebViews appear BEHIND the main webview.
             // We need to bring the new webview to front by toggling visibility.
@@ -570,7 +689,9 @@ mod native_impl {
         }
         
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+            *control_flow = ControlFlow::WaitUntil(
+                std::time::Instant::now() + std::time::Duration::from_millis(50),
+            );
             
             // Process command queue
             if let Ok(mut queue) = COMMAND_QUEUE.lock() {
@@ -752,9 +873,6 @@ mod native_impl {
                         });
                     }
                 }
-                Event::MainEventsCleared => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
                 _ => {}
             }
         });
@@ -787,6 +905,11 @@ mod native_impl {
 #[cfg(feature = "native")]
 pub use native_impl::{WebViewManager, run_browser_window, has_pending_operations};
 
+#[cfg(feature = "native")]
+impl Default for native_impl::WebViewManager {
+    fn default() -> Self { Self::new() }
+}
+
 // ============================================
 // Stubs for non-native builds
 // ============================================
@@ -801,6 +924,12 @@ impl WebViewManager {
     pub fn main_webview(&self) -> Option<&()> { None }
     pub fn process_pending_operations(&mut self, _: &()) {}
     pub fn handle_resize(&self, _: u32, _: u32) {}
+    pub fn resize_main_to_window(&self, _: &()) {}
+}
+
+#[cfg(not(feature = "native"))]
+impl Default for WebViewManager {
+    fn default() -> Self { Self::new() }
 }
 
 #[cfg(not(feature = "native"))]

@@ -2,6 +2,16 @@
 
 Complete reference for all built-in functions in the Poly programming language.
 
+> **Experimental:** The custom language API is excluded from normal builds. It
+> is available only when Poly is built with `experimental-language`. The NCOS
+> Virtual Drive is also experimental and requires `experimental-virtual-drive`.
+
+Native CEF renderer feature setup is documented in [CEF.md](CEF.md).
+
+The NCOS virtual-drive API and native installer transaction are documented in
+the workspace `docs/API.md` under “NCOS native app windows” and “NCOS virtual
+drive layout.”
+
 ## Table of Contents
 
 - [Core Functions](#core-functions)

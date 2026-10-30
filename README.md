@@ -1,15 +1,21 @@
 # Poly
 
-![Version](https://img.shields.io/badge/version-0.4.1-blue)
+![Version](https://img.shields.io/badge/version-0.4.8-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
-![Language](https://img.shields.io/badge/poly--lang-beta-orange)
+![Experimental](https://img.shields.io/badge/language%20and%20virtual%20drive-experimental-orange)
 ![License](https://img.shields.io/badge/license-Custom-green)
 
-Build native desktop apps with web technologies, using a powerful, typed, Python-like language.
+Build native desktop apps with web technologies.
 
-Poly is a lightweight framework for creating cross-platform desktop applications using HTML, CSS, and JavaScript, now powered by a significantly enhanced Poly scripting language.
+Poly is a framework for creating desktop applications using HTML, CSS, and JavaScript.
 
-## New in 0.4.1: Frontend-Backend Communication
+Poly's custom scripting language and NCOS Virtual Drive are experimental and excluded from normal builds. To include them, build with `--features "native experimental-language experimental-virtual-drive"`.
+
+> **Experimental:** `poly-ui` is an incomplete native UI prototype and is not part of Poly's default build. Its layout and renderer are still under development.
+
+## Experimental: Poly Language Frontend-Backend Communication
+
+This feature requires a build with `experimental-language` enabled.
 
 Call Poly functions directly from JavaScript with seamless type conversion!
 
@@ -64,7 +70,7 @@ Then simply restart your editor.
 ## Features
 
 - Lightweight (~15MB binary)
-- **Typed Scripting Language** (Python-like syntax)
+- React, Svelte, Vue, and Preact project templates
 - Multi-window support
 - Native dialogs, clipboard, notifications
 - System tray integration
@@ -78,7 +84,7 @@ Then simply restart your editor.
 ## Quick Start
 
 ```bash
-# Install Poly 0.4.0
+# Install Poly 0.4.8
 cargo install --path poly --features native
 
 # Create a new project
@@ -87,13 +93,28 @@ cd my-app
 poly dev
 ```
 
+### Start with a web framework
+
+Create a Vite project with React, Svelte, Vue, or Preact already configured. Poly runs `npm install` for you; add `--no-install` to create the files without downloading packages.
+
+```bash
+poly init --react
+# or: poly init --svelte / --vue / --preact
+
+poly dev          # Vite HMR plus the Poly backend
+poly build        # build frontend and package the desktop app
+poly run --native # launch the built app
+```
+
+You can also create a new folder directly with `poly new my-app --react`. These templates use Vite and require Node.js with npm installed.
+
 ## Roadmap
 
 - Linux support
 - macOS support
 - Plugin system
 - More native APIs
-- Further language optimizations
+- Stabilize the experimental Poly language and NCOS Virtual Drive
 
 ## Documentation
 

@@ -17,20 +17,15 @@ use std::sync::mpsc::{channel, Sender};
 static WINDOW_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Window position
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum WindowPosition {
     /// Center on screen
+    #[default]
     Center,
     /// Specific coordinates
     At(i32, i32),
     /// Center on parent window
     CenterOnParent(u64),
-}
-
-impl Default for WindowPosition {
-    fn default() -> Self {
-        WindowPosition::Center
-    }
 }
 
 /// Window configuration
@@ -408,7 +403,7 @@ pub fn get_window_state(id: u64) -> Result<WindowState, String> {
 pub fn close_all_windows() -> Result<(), String> {
     let registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Lock error: {}", e))?;
     
-    for (_, info) in registry.iter() {
+    for info in registry.values() {
         let _ = info.sender.send(WindowCommand::Close);
     }
     Ok(())
@@ -470,7 +465,7 @@ fn run_window(
         event::{Event, WindowEvent},
         event_loop::{ControlFlow, EventLoopBuilder},
         window::WindowBuilder,
-        dpi::{LogicalSize, LogicalPosition},
+        dpi::{LogicalSize, LogicalPosition, PhysicalPosition},
         platform::windows::EventLoopBuilderExtWindows,
     };
     use wry::WebViewBuilder;
@@ -497,7 +492,9 @@ fn run_window(
         builder = builder.with_max_inner_size(LogicalSize::new(w as f64, h as f64));
     }
     
-    // Position
+    // Resolve parent geometry before building so a missing parent is reported
+    // to the caller's window thread instead of silently ignoring the request.
+    let mut parent_state = None;
     match config.position {
         WindowPosition::At(x, y) => {
             builder = builder.with_position(LogicalPosition::new(x as f64, y as f64));
@@ -505,8 +502,13 @@ fn run_window(
         WindowPosition::Center => {
             // Will be centered by default on most platforms
         }
-        WindowPosition::CenterOnParent(_parent_id) => {
-            // TODO: Get parent window position and center on it
+        WindowPosition::CenterOnParent(parent_id) => {
+            let registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Window registry lock error: {e}"))?;
+            let parent = registry.get(&parent_id)
+                .ok_or_else(|| format!("Parent window {parent_id} was not found"))?;
+            parent_state = Some(parent.state.lock()
+                .map_err(|e| format!("Parent window state lock error: {e}"))?
+                .clone());
         }
     }
     
@@ -529,11 +531,22 @@ fn run_window(
     
     let window = builder.build(&event_loop)
         .map_err(|e| format!("Window build error: {}", e))?;
+
+    if let Some(parent) = parent_state {
+        let scale = window.scale_factor();
+        let child_width = (config.width as f64 * scale).round() as i32;
+        let child_height = (config.height as f64 * scale).round() as i32;
+        let x = parent.x + (parent.width as i32 - child_width) / 2;
+        let y = parent.y + (parent.height as i32 - child_height) / 2;
+        window.set_outer_position(PhysicalPosition::new(x, y));
+    }
     
     let window = Arc::new(window);
     let window_clone = Arc::clone(&window);
     let window_for_cmd = Arc::clone(&window);
     let window_for_events = Arc::clone(&window);
+    let fullscreen_restore_maximized = Arc::new(Mutex::new(false));
+    let fullscreen_restore_for_ipc = Arc::clone(&fullscreen_restore_maximized);
     
     // Build webview
     let mut wv_builder = WebViewBuilder::new()
@@ -542,25 +555,25 @@ fn run_window(
         .with_background_color(config.background_color)
         .with_ipc_handler(move |req: wry::http::Request<String>| {
             let body = req.body();
-            handle_ipc_message(body, &window_clone);
+            handle_ipc_message(body, &window_clone, &fullscreen_restore_for_ipc);
         });
     
     // Set content
     let ipc_script = get_ipc_script(id);
+    wv_builder = wv_builder.with_initialization_script(&ipc_script);
     
     if let Some(url) = &config.url {
         wv_builder = wv_builder.with_url(url);
     } else if let Some(html) = &config.html {
-        let html_with_ipc = inject_ipc_script(html, &ipc_script);
-        wv_builder = wv_builder.with_html(&html_with_ipc);
+        wv_builder = wv_builder.with_html(html);
     } else {
         let default_html = format!(r#"<!DOCTYPE html>
 <html>
-<head><title>{}</title>{}</head>
+<head><title>{}</title></head>
 <body style="margin:0;background:#1a1a1f;color:#fff;font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;">
 <p style="opacity:0.5;">Window {} ready</p>
 </body>
-</html>"#, config.title, ipc_script, id);
+</html>"#, config.title, id);
         wv_builder = wv_builder.with_html(&default_html);
     }
     
@@ -576,6 +589,7 @@ fn run_window(
     
     // State for command thread
     let state_for_cmd = Arc::clone(&state);
+    let fullscreen_restore_for_cmd = Arc::clone(&fullscreen_restore_maximized);
     
     // Thread to receive commands - window commands are handled here,
     // webview commands are queued for the event loop
@@ -665,10 +679,21 @@ fn run_window(
                     window_for_cmd.set_always_on_top(*on_top);
                 }
                 WindowCommand::SetFullscreen(fullscreen) => {
-                    if *fullscreen {
+                    if *fullscreen && window_for_cmd.fullscreen().is_none() {
+                        let was_maximized = window_for_cmd.is_maximized();
+                        if let Ok(mut restore) = fullscreen_restore_for_cmd.lock() {
+                            *restore = was_maximized;
+                        }
+                        if was_maximized {
+                            window_for_cmd.set_maximized(false);
+                        }
                         window_for_cmd.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
-                    } else {
+                    } else if !*fullscreen && window_for_cmd.fullscreen().is_some() {
                         window_for_cmd.set_fullscreen(None);
+                        if fullscreen_restore_for_cmd.lock().map(|restore| *restore).unwrap_or(false) {
+                            window_for_cmd.set_maximized(true);
+                        }
+                        if let Ok(mut restore) = fullscreen_restore_for_cmd.lock() { *restore = false; }
                     }
                     if let Ok(mut s) = state_for_cmd.lock() {
                         s.is_fullscreen = *fullscreen;
@@ -688,7 +713,9 @@ fn run_window(
     let state_for_events = Arc::clone(&state);
     
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Poll; // Use Poll to process queued commands
+        *control_flow = ControlFlow::WaitUntil(
+            std::time::Instant::now() + std::time::Duration::from_millis(50),
+        );
         
         // Process queued WebView commands
         if let Ok(mut queue) = webview_cmd_queue.lock() {
@@ -737,10 +764,6 @@ fn run_window(
             Event::UserEvent(()) => {
                 *control_flow = ControlFlow::Exit;
             }
-            Event::MainEventsCleared => {
-                // Small sleep to prevent busy-waiting
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
             _ => {}
         }
         
@@ -754,7 +777,7 @@ fn run_window(
 }
 
 #[cfg(feature = "native")]
-fn handle_ipc_message(message: &str, window: &tao::window::Window) {
+fn handle_ipc_message(message: &str, window: &tao::window::Window, fullscreen_restore_maximized: &Mutex<bool>) {
     match message {
         "minimize" => window.set_minimized(true),
         "maximize" => {
@@ -762,6 +785,22 @@ fn handle_ipc_message(message: &str, window: &tao::window::Window) {
         }
         "close" => window.set_visible(false),
         "drag" => { let _ = window.drag_window(); }
+        "poly:ncos:toggle-fullscreen" => {
+            if window.fullscreen().is_none() {
+                let was_maximized = window.is_maximized();
+                if let Ok(mut restore) = fullscreen_restore_maximized.lock() {
+                    *restore = was_maximized;
+                }
+                if was_maximized { window.set_maximized(false); }
+                window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
+            } else {
+                window.set_fullscreen(None);
+                if fullscreen_restore_maximized.lock().map(|restore| *restore).unwrap_or(false) {
+                    window.set_maximized(true);
+                }
+                if let Ok(mut restore) = fullscreen_restore_maximized.lock() { *restore = false; }
+            }
+        }
         "focus" => window.set_focus(),
         "restore" => {
             window.set_minimized(false);
@@ -773,7 +812,7 @@ fn handle_ipc_message(message: &str, window: &tao::window::Window) {
 
 #[cfg(feature = "native")]
 fn get_ipc_script(window_id: u64) -> String {
-    format!(r#"<script>
+    format!(r#"
 window.ipc = {{
   postMessage: function(msg) {{
     if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(msg);
@@ -790,18 +829,13 @@ window.poly.window = {{
   focus: function() {{ window.ipc.postMessage('focus'); }},
   restore: function() {{ window.ipc.postMessage('restore'); }}
 }};
-</script>"#, window_id)
-}
-
-#[cfg(feature = "native")]
-fn inject_ipc_script(html: &str, ipc_script: &str) -> String {
-    if html.contains("</head>") {
-        html.replace("</head>", &format!("{}</head>", ipc_script))
-    } else if html.contains("<body") {
-        html.replace("<body", &format!("{}<body", ipc_script))
-    } else {
-        format!("{}{}", ipc_script, html)
-    }
+window.addEventListener('keydown', function(event) {{
+  if (event.key !== 'F11' || event.repeat) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  window.ipc.postMessage('poly:ncos:toggle-fullscreen');
+}}, true);
+"#, window_id)
 }
 
 #[cfg(feature = "native")]

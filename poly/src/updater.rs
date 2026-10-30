@@ -263,7 +263,7 @@ pub fn download_update(url: &str, progress_callback: Option<Box<dyn Fn(u64, u64)
     let total_size = response.content_length().unwrap_or(0);
     
     // Get filename from URL and add timestamp for uniqueness
-    let filename = url.split('/').last().unwrap_or("update");
+    let filename = url.split('/').next_back().unwrap_or("update");
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -371,9 +371,7 @@ del "%~f0"
             std::process::exit(0);
         }
         "zip" => {
-            // Extract and replace
-            extract_and_replace(update_path)?;
-            Ok(())
+            Err("ZIP updates cannot replace the running Poly installation yet. Use an MSI or EXE installer.".to_string())
         }
         _ => Err(format!("Unknown update format: {}", ext))
     }
@@ -395,8 +393,7 @@ pub fn install_update(update_path: &Path) -> Result<(), String> {
             Ok(())
         }
         "zip" => {
-            extract_and_replace(update_path)?;
-            Ok(())
+            Err("ZIP updates cannot replace the running Poly installation yet. Open a DMG or use a supported package.".to_string())
         }
         _ => Err(format!("Unknown update format: {}", ext))
     }
@@ -411,10 +408,13 @@ pub fn install_update(update_path: &Path) -> Result<(), String> {
     match ext {
         "AppImage" => {
             // Make executable and run
-            Command::new("chmod")
+            let status = Command::new("chmod")
                 .args(["+x", &update_path.to_string_lossy()])
                 .status()
                 .map_err(|e| format!("Failed to chmod: {}", e))?;
+            if !status.success() {
+                return Err(format!("Failed to make AppImage executable (exit status: {})", status));
+            }
             
             Command::new(update_path)
                 .spawn()
@@ -424,57 +424,18 @@ pub fn install_update(update_path: &Path) -> Result<(), String> {
         }
         "deb" => {
             // Install with dpkg
-            Command::new("pkexec")
+            let status = Command::new("pkexec")
                 .args(["dpkg", "-i", &update_path.to_string_lossy()])
                 .status()
                 .map_err(|e| format!("Failed to install deb: {}", e))?;
-            Ok(())
+            if status.success() {
+                Ok(())
+            } else {
+                Err(format!("Package installation failed (exit status: {})", status))
+            }
         }
         _ => Err(format!("Unknown update format: {}", ext))
     }
-}
-
-#[cfg(feature = "native")]
-fn extract_and_replace(zip_path: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path)
-        .map_err(|e| format!("Failed to open zip: {}", e))?;
-    
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read zip: {}", e))?;
-    
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?;
-    
-    let _exe_dir = exe_path.parent()
-        .ok_or("Failed to get exe directory")?;
-    
-    // Extract to temp, then replace
-    let temp_extract = std::env::temp_dir().join("poly_update_extract");
-    std::fs::create_dir_all(&temp_extract).ok();
-    
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)
-            .map_err(|e| format!("Failed to read zip entry: {}", e))?;
-        
-        let outpath = temp_extract.join(file.name());
-        
-        if file.name().ends_with('/') {
-            std::fs::create_dir_all(&outpath).ok();
-        } else {
-            if let Some(p) = outpath.parent() {
-                std::fs::create_dir_all(p).ok();
-            }
-            let mut outfile = std::fs::File::create(&outpath)
-                .map_err(|e| format!("Failed to create file: {}", e))?;
-            std::io::copy(&mut file, &mut outfile)
-                .map_err(|e| format!("Failed to extract: {}", e))?;
-        }
-    }
-    
-    // TODO: Replace current exe with extracted one
-    // This is tricky on Windows due to file locking
-    
-    Ok(())
 }
 
 // Stubs for non-native builds

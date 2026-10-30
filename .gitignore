@@ -5,8 +5,11 @@ polyview-browser
 # Rust
 /target/
 **/target/
-Cargo.lock
+# Cargo.lock is committed so CLI and workspace builds stay reproducible.
 **/*.rs.bk
+
+# JavaScript
+**/node_modules/
 
 # IDE
 .idea/

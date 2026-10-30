@@ -3,6 +3,11 @@ use logos::Logos;
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t]+")]  // Skip spaces and tabs, but NOT newlines
 pub enum Token {
+    // Emitted by the tokenizer for unsupported characters so they reach the
+    // parser as a location-aware error instead of silently disappearing.
+    #[token("\0")]
+    Invalid,
+
     // Keywords
     #[token("let")]
     Let,
@@ -296,7 +301,15 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 Err(_) => {
-                    column += 1;
+                    let span = inner.span();
+                    let width = span.end.saturating_sub(span.start).max(1);
+                    raw_tokens.push(SpannedToken {
+                        token: Token::Invalid,
+                        span,
+                        line,
+                        column,
+                    });
+                    column += width;
                 }
             }
         }

@@ -33,7 +33,16 @@ impl Parser {
         while !self.is_at_end() {
             self.skip_newlines();
             if !self.is_at_end() {
-                statements.push(self.parse_statement()?);
+                let statement = self.parse_statement().map_err(|error| {
+                    match self.tokens.get(self.pos) {
+                        Some(token) => format!(
+                            "Syntax error at line {}, column {}: {}",
+                            token.line, token.column, error
+                        ),
+                        None => format!("Syntax error at end of file: {}", error),
+                    }
+                })?;
+                statements.push(statement);
             }
         }
         

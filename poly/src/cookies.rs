@@ -34,7 +34,7 @@ pub fn normalize_domain(domain: &str) -> String {
 pub fn store_cookie(domain: &str, cookie: &str) {
     let normalized = normalize_domain(domain);
     let mut cookies = COOKIES.lock().unwrap();
-    let entry = cookies.entry(normalized.clone()).or_insert_with(Vec::new);
+    let entry = cookies.entry(normalized.clone()).or_default();
     
     // Extract cookie name
     let cookie_name = cookie.split('=').next().unwrap_or("");

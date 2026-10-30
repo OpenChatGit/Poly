@@ -54,6 +54,8 @@ pub struct WebViewConfig {
     pub user_agent: Option<String>,
     pub zoom_level: f64,
     pub autoplay: bool,
+    /// Initialize Poly's built-in ad blocker for this WebView.
+    pub adblock_enabled: bool,
     /// Scripts to run before page loads (like userscripts)
     pub init_scripts: Vec<String>,
     /// Background color (r, g, b, a) - defaults to dark
@@ -73,6 +75,7 @@ impl Default for WebViewConfig {
             user_agent: None,
             zoom_level: 1.0,
             autoplay: true,
+            adblock_enabled: true,
             init_scripts: Vec::new(),
             background_color: (23, 26, 33, 255),  // Steam dark color
         }
@@ -218,7 +221,10 @@ pub fn create(config: WebViewConfig) -> Result<(), String> {
         .map_err(|_| "Failed to acquire registry lock")?;
     
     if registry.contains_key(&config.id) {
-        return Err(format!("WebView '{}' already exists", config.id));
+        // Creating the same managed surface twice is an expected race during
+        // shell restore/layout synchronization. Treat it as an idempotent
+        // success and leave the existing native view and its URL untouched.
+        return Ok(());
     }
     
     // Create initial state
@@ -349,9 +355,22 @@ pub fn set_bounds(id: &str, bounds: WebViewBounds) -> Result<(), String> {
     state.bounds = bounds;
     drop(registry);
     
-    PENDING_OPERATIONS.lock()
-        .map_err(|_| "Failed to acquire operations lock")?
-        .push(WebViewOperation::SetBounds { id: id.to_string(), bounds });
+    let mut operations = PENDING_OPERATIONS.lock()
+        .map_err(|_| "Failed to acquire operations lock")?;
+
+    // Bounds can be produced once per animation frame while a managed window is
+    // dragged. If the native event loop is behind, applying every intermediate
+    // rectangle makes embedded pages visibly trail the shell. Replace a queued
+    // trailing bounds update for this same view; lifecycle and visibility
+    // operations remain ordered and are never crossed.
+    if let Some(WebViewOperation::SetBounds { id: queued_id, bounds: queued_bounds }) = operations.last_mut() {
+        if queued_id == id {
+            *queued_bounds = bounds;
+            return Ok(());
+        }
+    }
+
+    operations.push(WebViewOperation::SetBounds { id: id.to_string(), bounds });
     
     Ok(())
 }

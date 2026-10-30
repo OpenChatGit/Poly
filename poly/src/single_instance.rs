@@ -39,6 +39,7 @@ fn try_acquire_lock(app_id: &str) -> Result<bool, String> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(false)
         .share_mode(0) // No sharing - exclusive access
         .open(&lock_path);
     
@@ -148,8 +149,5 @@ pub fn is_primary_instance() -> bool {
 /// Simple helper function for use in main.rs
 pub fn check_single_instance(app_id: &str) -> bool {
     let config = SingleInstanceConfig::new(app_id);
-    match try_acquire_instance(&config) {
-        Ok(is_primary) => is_primary,
-        Err(_) => true, // On error, allow running
-    }
+    try_acquire_instance(&config).unwrap_or(true) // On error, allow running
 }

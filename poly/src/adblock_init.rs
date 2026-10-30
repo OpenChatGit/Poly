@@ -3,8 +3,10 @@
 //! Automatically initializes the ad blocker when the browser starts.
 //! Downloads filter lists and sets up Brave's adblock-rust engine.
 
+#[cfg(feature = "native")]
 use std::sync::Once;
 
+#[cfg(feature = "native")]
 static INIT: Once = Once::new();
 
 /// Initialize ad blocking on first call (thread-safe)

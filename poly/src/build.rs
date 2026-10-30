@@ -5,11 +5,12 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::Command;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::time::Duration;
 
 // ANSI colors
 const CYAN: &str = "\x1b[36m";
 const GREEN: &str = "\x1b[32m";
-const YELLOW: &str = "\x1b[33m";
 #[allow(dead_code)]
 const RED: &str = "\x1b[31m";
 const DIM: &str = "\x1b[2m";
@@ -124,6 +125,10 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
         .unwrap_or_else(|| "app".to_string());
     let app_version = extract_toml_value(&toml_content, "version")
         .unwrap_or_else(|| "1.0.0".to_string());
+
+    if project_path.join("package.json").is_file() && project_path.join("vite.config.js").is_file() {
+        run_frontend_build(project_path)?;
+    }
     
     println!();
     println!("  {}POLY{} {}build{}", CYAN, RESET, DIM, RESET);
@@ -141,64 +146,69 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
     
     // Create dist directory
     let dist_dir = project_path.join("dist").join(config.platform.name());
-    fs::create_dir_all(&dist_dir).ok();
+    fs::create_dir_all(&dist_dir)
+        .map_err(|error| format!("Could not create output directory {}: {error}", dist_dir.display()))?;
     
     // Step 1: Bundle web assets
-    print!("  {}Bundling assets...{}", DIM, RESET);
-    io::stdout().flush().ok();
+    let bundle_progress = build_progress("Bundling web assets...");
     
     let bundle_dir = dist_dir.join("bundle");
-    bundle_web_assets(project_path, &bundle_dir)?;
+    if let Err(error) = bundle_web_assets(project_path, &bundle_dir) {
+        bundle_progress.abandon_with_message(format!("{}×{} Asset bundling failed", RED, RESET));
+        return Err(error);
+    }
     
-    println!("\r  {}✓{} Bundled assets          ", GREEN, RESET);
+    bundle_progress.finish_with_message(format!("{}✓{} Bundled web assets", GREEN, RESET));
     
     // Step 2: Create launcher/executable
-    print!("  {}Creating executable...{}", DIM, RESET);
-    io::stdout().flush().ok();
+    let executable_progress = build_progress("Compiling app runtime...");
     
     let exe_name = format!("{}{}", app_name, config.platform.exe_extension());
     let exe_path = dist_dir.join(&exe_name);
     
-    create_launcher(project_path, &exe_path, &bundle_dir, config)?;
+    if let Err(error) = create_launcher(project_path, &exe_path, &bundle_dir, config) {
+        executable_progress.abandon_with_message(format!("{}×{} App runtime build failed", RED, RESET));
+        return Err(error);
+    }
     
-    let size = fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
-    println!("\r  {}✓{} Created {} ({:.1} MB)          ", GREEN, RESET, exe_name, size as f64 / 1_000_000.0);
+    let size = fs::metadata(&exe_path)
+        .map_err(|error| format!("Could not inspect built executable {}: {error}", exe_path.display()))?
+        .len();
+    executable_progress.finish_with_message(format!("{}✓{} Created {} ({:.1} MB)", GREEN, RESET, exe_name, size as f64 / 1_000_000.0));
     
     // Step 3: Sign executable (optional)
     if config.sign {
-        print!("  {}Signing executable...{}", DIM, RESET);
-        io::stdout().flush().ok();
-        
+        let signing_progress = build_progress("Signing executable...");
         let signing_config = load_signing_config(&config.project_path);
         match sign_executable(&exe_path, &signing_config) {
             Ok(()) => {
-                println!("\r  {}✓{} Signed executable          ", GREEN, RESET);
+                signing_progress.finish_with_message(format!("{}✓{} Signed executable", GREEN, RESET));
             }
             Err(e) => {
-                println!("\r  {}!{} Signing failed: {}          ", YELLOW, RESET, e);
+                signing_progress.abandon_with_message(format!("{}×{} Signing failed", RED, RESET));
+                return Err(format!("Could not sign {}: {}", exe_path.display(), e));
             }
         }
     }
     
     // Step 4: Create installer (optional)
     if config.installer {
-        print!("  {}Creating installer...{}", DIM, RESET);
-        io::stdout().flush().ok();
-        
+        let installer_progress = build_progress("Creating installer...");
         match create_installer(&dist_dir, &app_name, &app_version, config.platform) {
             Ok(installer_path) => {
-                println!("\r  {}✓{} Created installer: {}          ", GREEN, RESET, 
-                    installer_path.file_name().unwrap_or_default().to_string_lossy());
+                installer_progress.finish_with_message(format!("{}✓{} Created installer: {}", GREEN, RESET,
+                    installer_path.file_name().unwrap_or_default().to_string_lossy()));
             }
             Err(e) => {
-                println!("\r  {}!{} Installer skipped: {}          ", YELLOW, RESET, e);
+                installer_progress.abandon_with_message(format!("{}×{} Installer creation failed", RED, RESET));
+                return Err(format!("Could not create installer: {}", e));
             }
         }
     }
     
     let elapsed = start.elapsed();
     println!();
-    println!("  {}done{} in {:.1}s", GREEN, RESET, elapsed.as_secs_f64());
+    println!("  {}✓{} Build completed in {:.1}s", GREEN, RESET, elapsed.as_secs_f64());
     println!();
     println!("  {}Output:{} {}", DIM, RESET, dist_dir.display());
     
@@ -208,18 +218,37 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
     })
 }
 
+fn build_progress(message: &str) -> ProgressBar {
+    let progress = ProgressBar::new_spinner();
+    progress.set_style(
+        ProgressStyle::with_template("  {spinner:.cyan} {msg}")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner()),
+    );
+    progress.set_message(message.to_string());
+    progress.enable_steady_tick(Duration::from_millis(90));
+    progress
+}
+
 /// Bundle web assets into a directory
 fn bundle_web_assets(project_path: &Path, bundle_dir: &Path) -> Result<(), String> {
     // Clean and create bundle directory
     if bundle_dir.exists() {
-        fs::remove_dir_all(bundle_dir).ok();
+        fs::remove_dir_all(bundle_dir)
+            .map_err(|e| format!("Failed to replace old bundle {}: {}", bundle_dir.display(), e))?;
     }
     fs::create_dir_all(bundle_dir).map_err(|e| format!("Failed to create bundle dir: {}", e))?;
     
     // Copy web directory
-    let web_dir = project_path.join("web");
+    let config = poly::PolyConfig::load(project_path);
+    let web_dir = project_path.join(&config.web.dir);
     if web_dir.exists() {
-        copy_dir_recursive(&web_dir, &bundle_dir.join("web"))?;
+        let relative = Path::new(&config.web.dir);
+        if relative.is_absolute() || relative.components().any(|part| !matches!(part, std::path::Component::Normal(_))) {
+            return Err(format!("Configured web output directory '{}' must be a relative path without '..'.", config.web.dir));
+        }
+        copy_dir_recursive(&web_dir, &bundle_dir.join(relative))?;
+    } else {
+        return Err(format!("Configured web output directory '{}' does not exist.", web_dir.display()));
     }
     
     // Copy assets directory
@@ -237,17 +266,58 @@ fn bundle_web_assets(project_path: &Path, bundle_dir: &Path) -> Result<(), Strin
     // Copy poly.toml
     let poly_toml = project_path.join("poly.toml");
     if poly_toml.exists() {
-        fs::copy(&poly_toml, bundle_dir.join("poly.toml")).ok();
+        fs::copy(&poly_toml, bundle_dir.join("poly.toml"))
+            .map_err(|e| format!("Failed to copy {}: {}", poly_toml.display(), e))?;
     }
     
     // Copy main.poly if exists
     let main_poly = project_path.join("src/main.poly");
     if main_poly.exists() {
-        fs::create_dir_all(bundle_dir.join("src")).ok();
-        fs::copy(&main_poly, bundle_dir.join("src/main.poly")).ok();
+        fs::create_dir_all(bundle_dir.join("src"))
+            .map_err(|e| format!("Failed to create bundled source directory: {}", e))?;
+        fs::copy(&main_poly, bundle_dir.join("src/main.poly"))
+            .map_err(|e| format!("Failed to copy {}: {}", main_poly.display(), e))?;
     }
     
     Ok(())
+}
+
+fn run_frontend_build(project_path: &Path) -> Result<(), String> {
+    let progress = build_progress("Building frontend with Vite...");
+    let output = npm_command()
+        .args(["run", "build"])
+        .current_dir(project_path)
+        .output()
+        .map_err(|error| {
+            progress.abandon_with_message(format!("{}×{} Frontend build could not start", RED, RESET));
+            format!("Could not start npm run build: {error}")
+        })?;
+    print_cargo_output(&output.stdout, &output.stderr);
+    if !output.status.success() {
+        progress.abandon_with_message(format!("{}×{} Frontend build failed", RED, RESET));
+        let status = output.status.code().map(|code| format!("exit code {code}"))
+            .unwrap_or_else(|| "terminated by a signal".to_string());
+        return Err(format!("npm run build failed ({status})."));
+    }
+    progress.finish_with_message(format!("{}✓{} Frontend build completed", GREEN, RESET));
+    Ok(())
+}
+
+pub fn build_frontend(project_path: &Path) -> Result<(), String> {
+    if project_path.join("package.json").is_file() && project_path.join("vite.config.js").is_file() {
+        run_frontend_build(project_path)?;
+    }
+    Ok(())
+}
+
+fn npm_command() -> Command {
+    if cfg!(windows) {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "npm"]);
+        command
+    } else {
+        Command::new("npm")
+    }
 }
 
 /// Create the launcher executable
@@ -269,38 +339,36 @@ fn create_launcher(
         cmd.current_dir(&poly_crate);
         cmd.arg("build")
             .arg("-p").arg("poly")
-            .arg("--features").arg("native,gui");  // Add gui feature for no-console
+            .arg("--features").arg("native,gui")
+            .arg("--quiet");
         
         if config.release {
             cmd.arg("--release");
         }
         
         let output = cmd.output()
-            .map_err(|e| format!("Failed to run cargo build: {}", e))?;
+            .map_err(|e| format!("Could not start Cargo build: {}", e))?;
         
         if !output.status.success() {
-            // If gui build fails, fall back to copying current exe
-            let poly_exe = std::env::current_exe()
-                .map_err(|e| format!("Failed to find poly executable: {}", e))?;
-            fs::copy(&poly_exe, exe_path)
-                .map_err(|e| format!("Failed to copy executable: {}", e))?;
-        } else {
-            // Copy the built GUI executable
-            let target_dir = poly_crate.join("target");
-            let profile = if config.release { "release" } else { "debug" };
-            let built_exe = target_dir.join(profile).join(format!("poly{}", Platform::current().exe_extension()));
-            
-            if built_exe.exists() {
-                fs::copy(&built_exe, exe_path)
-                    .map_err(|e| format!("Failed to copy built executable: {}", e))?;
-            } else {
-                // Fallback: copy current exe
-                let poly_exe = std::env::current_exe()
-                    .map_err(|e| format!("Failed to find poly executable: {}", e))?;
-                fs::copy(&poly_exe, exe_path)
-                    .map_err(|e| format!("Failed to copy executable: {}", e))?;
-            }
+            print_cargo_output(&output.stdout, &output.stderr);
+            let status = output.status.code()
+                .map(|code| format!("exit code {code}"))
+                .unwrap_or_else(|| "terminated by a signal".to_string());
+            return Err(format!("Cargo could not compile the Poly app runtime ({status}). See the compiler output above."));
         }
+
+        if !output.stdout.is_empty() || !output.stderr.is_empty() {
+            print_cargo_output(&output.stdout, &output.stderr);
+        }
+
+        let target_dir = poly_crate.join("target");
+        let profile = if config.release { "release" } else { "debug" };
+        let built_exe = target_dir.join(profile).join(format!("poly{}", Platform::current().exe_extension()));
+        if !built_exe.is_file() {
+            return Err(format!("Cargo succeeded, but the app runtime executable was not found at {}.", built_exe.display()));
+        }
+        fs::copy(&built_exe, exe_path)
+            .map_err(|e| format!("Could not copy the compiled app runtime: {}", e))?;
         
         Ok(())
     } else {
@@ -310,6 +378,17 @@ fn create_launcher(
              Run 'poly build --ci' to generate a GitHub Actions workflow.",
             config.platform.name()
         ))
+    }
+}
+
+fn print_cargo_output(stdout: &[u8], stderr: &[u8]) {
+    if !stdout.is_empty() {
+        let _ = io::stdout().write_all(stdout);
+        if !stdout.ends_with(b"\n") { println!(); }
+    }
+    if !stderr.is_empty() {
+        let _ = io::stderr().write_all(stderr);
+        if !stderr.ends_with(b"\n") { eprintln!(); }
     }
 }
 
@@ -469,10 +548,7 @@ pub fn sign_executable(exe_path: &Path, signing_config: &SigningConfig) -> Resul
         Platform::Windows => sign_windows(exe_path, signing_config),
         Platform::MacOS => sign_macos(exe_path, signing_config),
         Platform::Linux => {
-            // Linux doesn't have a standard code signing mechanism
-            // GPG signing could be added later
-            println!("  {}!{} Linux code signing not implemented (GPG signing planned)", YELLOW, RESET);
-            Ok(())
+            Err("Linux executable signing is not implemented. Disable signing or provide a platform signing tool.".to_string())
         }
         Platform::Current => unreachable!(),
     }
@@ -655,7 +731,7 @@ fn create_windows_installer(
         
         zip.finish().map_err(|e| format!("Failed to finish zip: {}", e))?;
         
-        return Ok(zip_path);
+        Ok(zip_path)
     }
     
     #[cfg(not(feature = "native"))]
@@ -715,7 +791,7 @@ fn create_macos_app_bundle(
     fs::create_dir_all(&resources).ok();
     
     // Copy executable
-    let exe_name = format!("{}", app_name);
+    let exe_name = app_name.to_string();
     let src_exe = dist_dir.join(&exe_name);
     if src_exe.exists() {
         fs::copy(&src_exe, macos.join(&exe_name)).ok();
@@ -886,7 +962,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         if entry.path().is_dir() {
             copy_dir_recursive(&entry.path(), &dest)?;
         } else {
-            fs::copy(&entry.path(), &dest)
+            fs::copy(entry.path(), &dest)
                 .map_err(|e| format!("Copy error: {}", e))?;
         }
     }

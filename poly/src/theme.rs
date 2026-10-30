@@ -158,7 +158,7 @@ fn detect_windows_theme() -> Option<ColorScheme> {
             Some(&mut data_size),
         );
 
-        RegCloseKey(hkey).ok();
+        let _ = RegCloseKey(hkey);
 
         if query_result.is_err() {
             return None;
@@ -226,7 +226,7 @@ fn detect_windows_accent() -> Option<String> {
                 Some(&mut data_size),
             );
 
-            RegCloseKey(hkey).ok();
+            let _ = RegCloseKey(hkey);
 
             if query_result.is_err() {
                 continue;

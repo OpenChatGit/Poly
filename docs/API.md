@@ -2,7 +2,7 @@
 
 Complete reference for all Poly JavaScript APIs.
 
-**Version:** 0.3.6
+**Version:** 0.4.8
 
 > **Note:** This documentation is comprehensive and covers all available APIs in detail. Take your time - it's completely normal if you don't understand everything at first. Start with the basics and explore more advanced features as you need them.
 
@@ -92,6 +92,12 @@ Closes the window.
 polyWindow.close();
 ```
 
+### F11 Fullscreen Shortcut
+
+Native Poly windows toggle borderless fullscreen when the user presses **F11**. This works in the app's main WebView and Poly-managed WebViews. If the window was maximized before entering fullscreen, Poly restores that maximized state when fullscreen is exited.
+
+The same behavior is available for windows created with `poly.windows.create()`.
+
 ### `polyWindow.drag()`
 
 Starts window dragging. Call this on `mousedown` for a custom titlebar.
@@ -145,6 +151,78 @@ await poly.window.setSize(1200, 800);
 await poly.window.center();
 await poly.window.setMinSize(800, 600);
 ```
+
+### NCOS Native App Windows
+
+NCOS can host a Windows application's existing top-level window inside a managed NCOS window. Native apps declare who owns the window chrome through `window.chrome` in their app manifest:
+
+- `"ncos"` (default) removes the native caption and uses the NCOS titlebar, controls, placement, resizing, visibility, and taskbar lifecycle. Installer windows use this mode.
+- `"app"` preserves the native app's chrome and uses the full NCOS window area for the hosted HWND, with no visible NCOS frame beneath it.
+
+Native apps are Windows-only and require Poly Native Mode. Register an app with `runtime: "native"` and an NCOS virtual path under `C:/System/Apps/<app-id>/Program`; NCOS routes that registered executable through the native window manager automatically. The launcher verifies the requested path against the app registration and refuses executable paths outside that NCOS folder.
+
+```javascript
+window.ncosOS.appManager.register({
+  id: 'my-editor',
+  label: 'My Editor',
+  icon: './assets/editor.png',
+  runtime: 'native',
+  executable: 'C:/System/Apps/my-editor/Program/editor.exe',
+  arguments: [],
+  window: { chrome: 'app' },
+});
+
+// The same registered app can be launched by NCOS shell integrations:
+await window.ncosDesktop.nativeApps.launch({
+  appId: 'my-editor',
+  executablePath: 'C:/System/Apps/my-editor/Program/editor.exe',
+  arguments: [],
+  label: 'My Editor',
+});
+```
+
+Window attachment uses the Windows HWND parent relationship. Poly tracks the main visible window and periodically discovers visible owned dialogs, embedding those in the same app surface and keeping their position in sync. Independent secondary windows still require per-app validation. DPI-awareness changes, child-window limitations, and native popups can vary by application.
+
+Poly's `NativeConfig` keeps the legacy PolyView helper enabled by default for compatibility. NCOS disables that helper for its own shell because its app windows use Poly's native app host.
+
+Native window embedding and an NCOS executable path do not automatically contain installer side effects. Poly's current native processes still run with the user's Windows permissions, so the NCOS Explorer blocks unregistered EXE installers instead of presenting them as fully NCOS-managed. The intended install model redirects install and profile paths into the NCOS app tree while leaving host CPU, memory, GPU, and OS APIs available. Full tracking and cleanup of arbitrary installer writes to registry or paths outside the selected install/profile folders is not implemented yet.
+
+Poly's app layout has stable logical `Program`, `Data/Roaming`, `Data/Local`, `Data/ProgramData`, and `Data/Temp` folders. The first native backend is Windows: at app launch, Poly points the conventional `APPDATA`, `LOCALAPPDATA`, `PROGRAMDATA`, `TEMP`, and `TMP` environment variables into those NCOS folders. This is a compatibility redirection for apps that use those environment variables; it is not a security sandbox, and programs that resolve Windows known folders through other APIs may still use host locations. The app continues to use the host's CPU, memory, GPU, and other system resources without Poly-imposed quotas. Linux and macOS will map the same logical folders to their platform conventions in later backends.
+
+The NCOS bridge prepares a transaction-specific version folder for installation or repair:
+
+```javascript
+const target = await poly.ncos.drive.prepareInstall('my-app', 'install-version-id');
+// target.installPath is the physical folder to enter in a Windows installer's custom-path field.
+// target.installVirtualPath is the matching NCOS path.
+const verified = await poly.ncos.drive.verifyInstall('my-app', 'install-version-id');
+// verified.data.executables lists non-empty Windows PE executables in that version.
+```
+
+In the NCOS Explorer, opening an unregistered `.exe` starts an install flow: Poly stages a copy under a transaction-specific `Program/Installer` folder, opens the installer in a native NCOS window, and passes the app's NCOS folders through the Windows environment. The previous installed version remains in place during a repair. After the installer exits, Poly requires a non-empty Windows PE executable in the new version folder; Firefox specifically requires `firefox.exe`. The shell registers the app only after this check, then attempts to remove superseded program files. If that cleanup is blocked by the host filesystem, the verified app remains installed and the old files can remain. Failed, cancelled, or incomplete first installs are rolled back; a failed repair removes only its new version and keeps the previous registration and files. Desktop shortcuts can only be created for apps whose install phase is `ready`. The NCOS shell uses the same layout when uninstalling a registered native app: it closes the app process first, then removes that app's `C:/System/Apps/<id>` tree, including its program and profile data.
+
+This is path steering for installers that honor a custom install directory and standard profile environment variables. It does not intercept arbitrary registry writes or applications that resolve host folders through other Windows APIs; those side effects may still land outside NCOS. MSI installers and automatic cleanup of external side effects are not supported by this first Windows flow. Native app tracking follows installer child processes so a small bootstrapper can hand its UI to a secondary process; installer stdout/stderr is captured in `C:/System/Apps/<id>/Data/Temp/installer-output.log` for startup diagnostics.
+
+### NCOS Virtual Drive Layout
+
+The Explorer root lists `System` first. All app folders live under `C:/System/Apps/<id>`. Bundled app content is stored in `Package`, native app files in `Program`, and per-app data in `Data`. Other system folders include `Config`, `Drivers`, `Logs`, `Resources`, `Cache`, and `Temp`. Legacy `C:/Apps` app folders are moved into `C:/System/Apps` when Poly opens the virtual drive; name collisions are preserved under that app's `Legacy` folder rather than overwriting existing files.
+
+### App permissions
+
+Each standalone Poly app can declare the Poly APIs it needs in its own `poly.toml`. When permissions are enabled, the native bridge rejects undeclared file and network access; filesystem scopes should be as narrow as possible. An explicitly empty `[permissions]` section is deny-all. Omitting the section keeps development mode permissive for compatibility.
+
+```toml
+[permissions]
+enabled = true
+audit_log = true
+permissions = [
+  "fs:read:./data",
+  "fs:write:./data",
+  "http:api.example.com",
+]
+```
+
+The file permissions guard calls through `poly.fs.*` and database file access. They do not sandbox arbitrary code that uses its own OS APIs or restrict the NCOS virtual-drive bridge. Native EXEs retain access to the PC's normal system resources. NCOS installation path steering is documented above; it does not claim to intercept arbitrary host filesystem or registry writes.
 
 ### Custom Titlebar Example
 
@@ -388,7 +466,7 @@ await poly.windows.setAlwaysOnTop(win.id, true);
 
 #### `poly.windows.setFullscreen(id, value)`
 
-Toggles fullscreen mode.
+Enters or exits borderless fullscreen mode. Poly preserves and restores a window's maximized state across the transition.
 
 ```javascript
 await poly.windows.setFullscreen(win.id, true);

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::fs;
 
 /// Complete Poly project configuration from poly.toml
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PolyConfig {
     pub package: PackageConfig,
     pub web: WebConfig,
@@ -132,22 +132,6 @@ impl Default for PredefinedWindow {
             decorations: false,
             always_on_top: false,
             transparent: false,
-        }
-    }
-}
-
-impl Default for PolyConfig {
-    fn default() -> Self {
-        Self {
-            package: PackageConfig::default(),
-            web: WebConfig::default(),
-            window: WindowConfig::default(),
-            dev: DevConfig::default(),
-            network: NetworkConfig::default(),
-            app: AppConfig::default(),
-            tray: TrayConfig::default(),
-            build: BuildConfig::default(),
-            browser: BrowserConfig::default(),
         }
     }
 }
@@ -375,9 +359,8 @@ impl PolyConfig {
     }
     
     fn parse_app(&mut self, key: &str, value: &str) {
-        match key {
-            "notification_timeout" => self.app.notification_timeout = value.parse().unwrap_or(5000),
-            _ => {}
+        if key == "notification_timeout" {
+            self.app.notification_timeout = value.parse().unwrap_or(5000);
         }
     }
     

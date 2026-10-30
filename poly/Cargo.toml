@@ -1,22 +1,21 @@
 [package]
 name = "poly"
-version = "0.4.3"
+version = "0.4.8"
 edition = "2021"
-description = "Poly - A Python-like dynamic language with multi-runtime interoperability"
+description = "Poly native desktop application framework"
 authors = ["Poly Team"]
 
 [dependencies]
 # Lexer/Parser
-logos = "0.14"           # Fast lexer generator
+logos = { version = "0.14", optional = true } # Experimental language lexer
 # CLI
 clap = { version = "4.4", features = ["derive"] }
-# Error handling
-thiserror = "1.0"
-miette = { version = "7.0", features = ["fancy"] }
+# Progress output
+indicatif = "0.18.6"
 # Web interop (WASM)
 wasm-bindgen = { version = "0.2", optional = true }
 # TTY detection
-atty = "0.2"
+atty = { version = "0.2", optional = true }
 # File watching for hot reload
 notify = "7.0"
 # HTTP server for dev mode
@@ -36,7 +35,6 @@ once_cell = "1.19"
 # Native WebView (like Tauri)
 wry = { version = "0.50", optional = true }
 tao = { version = "0.32", optional = true }
-winit = { version = "0.30", optional = true }
 image = { version = "0.25", optional = true, default-features = false, features = ["png"] }
 # System tray
 tray-icon = { version = "0.14", optional = true }
@@ -65,21 +63,30 @@ arboard = { version = "3.4", optional = true }
 notify-rust = { version = "4", optional = true }
 # SQLite database
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
-# Async runtime for search
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros"], optional = true }
-futures = { version = "0.3", optional = true }
 # Windows API for frameless windows
-windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_UI_Input_KeyboardAndMouse"], optional = true }
+windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_System_RestartManager", "Win32_UI_Input_KeyboardAndMouse"], optional = true }
 # Raw window handle for WebView
 raw-window-handle = { version = "0.6", optional = true }
+# Optional Chromium Embedded Framework runtime. Kept out of the default native
+# build so existing Poly apps do not download/package the large CEF distribution.
+cef = { version = "156.2.0", optional = true, default-features = false }
 # Window shadows (from Tauri team) for frameless windows
 # Note: Disabled due to raw-window-handle version conflict with tao/wry
 # window-shadows = { version = "0.2", optional = true }
 
 [features]
 default = []
-wasm = ["wasm-bindgen"]
-native = ["wry", "tao", "winit", "image", "rfd", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar", "arboard", "notify-rust", "windows", "raw-window-handle", "rusqlite", "regex", "adblock", "rayon"]
+wasm = ["wasm-bindgen", "experimental-language"]
+experimental-language = ["dep:logos", "dep:atty"]
+experimental-virtual-drive = ["native"]
+native = ["wry", "tao", "image", "rfd", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar", "arboard", "notify-rust", "windows", "raw-window-handle", "rusqlite", "regex", "adblock", "rayon"]
+# CEF is an explicit renderer backend so projects can opt into CEF distribution
+# and its subprocess/runtime requirements without changing the Wry default.
+cef = ["native", "dep:cef"]
+# Adds CEF's platform runtime bundlers for producing deployable CEF app folders.
+cef-build-util = ["cef", "cef/build-util"]
+# Enables CEF's shared-texture OSR path for GPU-backed embedding.
+cef-osr = ["cef", "cef/accelerated_osr"]
 # GUI mode - hides console window on Windows (used for bundled apps)
 gui = []
 

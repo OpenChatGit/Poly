@@ -29,7 +29,8 @@ mod native_impl {
     use once_cell::sync::Lazy;
     
     // Per-window navigation queues
-    pub static NAV_QUEUES: Lazy<Arc<Mutex<HashMap<u64, HashMap<String, Vec<String>>>>>> = Lazy::new(|| {
+    pub type NavigationQueues = HashMap<u64, HashMap<String, Vec<String>>>;
+    pub static NAV_QUEUES: Lazy<Arc<Mutex<NavigationQueues>>> = Lazy::new(|| {
         Arc::new(Mutex::new(HashMap::new()))
     });
     
@@ -86,7 +87,7 @@ mod native_impl {
         // Sort views by z-order: we want views with higher y to be created first (bottom)
         // and views with lower y to be created last (top, for UI)
         let mut sorted_views = config.views.clone();
-        sorted_views.sort_by(|a, b| b.y.cmp(&a.y)); // Higher y first = bottom first
+        sorted_views.sort_by_key(|view| std::cmp::Reverse(view.y)); // Higher y first = bottom first
         
         println!("[MultiView] Creating {} views for window {}", sorted_views.len(), window_id);
         
@@ -135,7 +136,9 @@ mod native_impl {
         let views_config = config.views.clone();
         
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Poll;
+            *control_flow = ControlFlow::WaitUntil(
+                std::time::Instant::now() + std::time::Duration::from_millis(50),
+            );
             
             // Process navigation queue for this window
             if let Ok(mut queues) = NAV_QUEUES.try_lock() {
@@ -207,9 +210,6 @@ mod native_impl {
                             });
                         }
                     }
-                }
-                Event::MainEventsCleared => {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 _ => {}
             }

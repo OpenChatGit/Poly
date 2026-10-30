@@ -2,11 +2,11 @@
 name = "poly-ui"
 version = "0.1.0"
 edition = "2021"
-description = "Poly UI - High-performance cross-platform UI framework"
+description = "Experimental Poly UI framework prototype"
 
 [dependencies]
 # Core Poly language
-poly = { path = "../poly" }
+poly = { path = "../poly", features = ["experimental-language"] }
 
 # Window & Graphics
 winit = "0.30"

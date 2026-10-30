@@ -1,7 +1,25 @@
+#[cfg(feature = "experimental-language")]
 pub mod ast;
+#[cfg(feature = "experimental-language")]
 pub mod lexer;
+#[cfg(feature = "experimental-language")]
 pub mod parser;
+#[cfg(feature = "experimental-language")]
 pub mod interpreter;
+#[cfg(not(feature = "experimental-language"))]
+#[doc(hidden)]
+pub mod interpreter {
+    #[derive(Default)]
+    pub struct Interpreter;
+
+    impl Interpreter {
+        pub fn new() -> Self {
+            Self
+        }
+
+        pub fn set_stream_sender(&mut self, _sender: Option<std::sync::mpsc::Sender<String>>) {}
+    }
+}
 pub mod web;
 pub mod native;
 pub mod updater;
@@ -13,11 +31,15 @@ pub mod notification;
 pub mod deeplink;
 pub mod templates;
 pub mod single_instance;
-pub mod sovereignty;
+pub mod permissions;
 pub mod browser;
 pub mod titlebar;
 pub mod webview;
 pub mod webview_native;
+pub mod cef_osr;
+#[cfg(feature = "cef")]
+/// Direct CEF API access for Poly render backends and native extensions.
+pub use cef as cef_api;
 pub mod multiview;
 pub mod multiview_native;
 pub mod polyview;
@@ -26,6 +48,13 @@ pub mod cookies;
 pub mod adblock;
 pub mod adblock_engine;
 pub mod adblock_init;
+#[cfg(feature = "experimental-virtual-drive")]
+#[path = "virtual_drive.rs"]
+pub mod virtual_drive;
+#[cfg(not(feature = "experimental-virtual-drive"))]
+#[path = "virtual_drive_stub.rs"]
+#[doc(hidden)]
+pub mod virtual_drive;
 pub mod vscode_extension;
 pub mod theme;
 pub mod db;
@@ -60,7 +89,9 @@ pub use multiview::{MultiViewWindowConfig, ViewConfig};
 #[cfg(feature = "native")]
 pub use multiview_native::create_multiview_window;
 
+#[cfg(feature = "experimental-language")]
 use lexer::Lexer;
+#[cfg(feature = "experimental-language")]
 use parser::Parser;
 use interpreter::Interpreter;
 
@@ -71,13 +102,14 @@ pub use updater::{UpdateConfig, UpdateInfo, check_github_updates, check_custom_u
 pub use tray::{TrayConfig, TrayMenuItem, TrayEvent, TrayHandle, create_tray};
 pub use ai::{AiProvider, ChatMessage, ChatRequest, ChatResponse, StreamEvent, MessageRole, check_ollama, list_ollama_models, chat as ai_chat};
 pub use single_instance::{SingleInstanceConfig, try_acquire_instance, release_instance, is_primary_instance, check_single_instance};
-pub use sovereignty::{SovereigntyConfig, Permission, check_permission, is_enabled as sovereignty_enabled};
+pub use permissions::{PermissionsConfig, Permission, check_permission, is_enabled as permissions_enabled};
 pub use config::{PolyConfig, init_global_config, get_config};
 pub use adblock::{init_adblock, should_block, download_easylist, download_easyprivacy, download_pihole_blocklist, parse_pihole_hosts, get_stats as adblock_stats};
 pub use adblock_engine::{init_brave_adblock, should_block_brave, get_cosmetic_filters, get_stats as brave_adblock_stats};
 pub use adblock_init::ensure_adblock_initialized;
 
 /// Run Poly source code and return the output
+#[cfg(feature = "experimental-language")]
 pub fn run(source: &str) -> Result<Vec<String>, String> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokenize();
@@ -90,8 +122,13 @@ pub fn run(source: &str) -> Result<Vec<String>, String> {
     
     Ok(interpreter.get_output().to_vec())
 }
+#[cfg(not(feature = "experimental-language"))]
+pub fn run(_source: &str) -> Result<Vec<String>, String> {
+    Err("Poly's custom language is experimental. Rebuild with --features experimental-language.".into())
+}
 
 /// Run Poly source code and return the last value
+#[cfg(feature = "experimental-language")]
 pub fn eval(source: &str) -> Result<String, String> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokenize();
@@ -104,8 +141,13 @@ pub fn eval(source: &str) -> Result<String, String> {
     
     Ok(format!("{}", result))
 }
+#[cfg(not(feature = "experimental-language"))]
+pub fn eval(_source: &str) -> Result<String, String> {
+    Err("Poly's custom language is experimental. Rebuild with --features experimental-language.".into())
+}
 
 /// Run Poly source code and return the last value as valid JSON
+#[cfg(feature = "experimental-language")]
 pub fn eval_json(source: &str) -> Result<String, String> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokenize();
@@ -118,13 +160,23 @@ pub fn eval_json(source: &str) -> Result<String, String> {
     
     Ok(result.to_json())
 }
+#[cfg(not(feature = "experimental-language"))]
+pub fn eval_json(_source: &str) -> Result<String, String> {
+    Err("Poly's custom language is experimental. Rebuild with --features experimental-language.".into())
+}
 
 /// Create a new interpreter instance
+#[cfg(feature = "experimental-language")]
+pub fn create_interpreter() -> Interpreter {
+    Interpreter::new()
+}
+#[cfg(not(feature = "experimental-language"))]
 pub fn create_interpreter() -> Interpreter {
     Interpreter::new()
 }
 
 /// Initialize interpreter with source code (parse and run definitions)
+#[cfg(feature = "experimental-language")]
 pub fn init_interpreter(interpreter: &mut Interpreter, source: &str) -> Result<(), String> {
     let lexer = Lexer::new(source);
     let tokens = lexer.tokenize();
@@ -135,8 +187,13 @@ pub fn init_interpreter(interpreter: &mut Interpreter, source: &str) -> Result<(
     interpreter.run(&program)?;
     Ok(())
 }
+#[cfg(not(feature = "experimental-language"))]
+pub fn init_interpreter(_interpreter: &mut Interpreter, _source: &str) -> Result<(), String> {
+    Err("Poly's custom language is experimental. Rebuild with --features experimental-language.".into())
+}
 
 /// Call a function on an existing interpreter and return JSON result
+#[cfg(feature = "experimental-language")]
 pub fn call_function(interpreter: &mut Interpreter, fn_name: &str, args_json: &str) -> Result<String, String> {
     // Parse the call expression
     let call_source = format!("{}({})", fn_name, args_json);
@@ -150,12 +207,16 @@ pub fn call_function(interpreter: &mut Interpreter, fn_name: &str, args_json: &s
     let result = interpreter.run(&program)?;
     Ok(result.to_json())
 }
+#[cfg(not(feature = "experimental-language"))]
+pub fn call_function(_interpreter: &mut Interpreter, _fn_name: &str, _args_json: &str) -> Result<String, String> {
+    Err("Poly's custom language is experimental. Rebuild with --features experimental-language.".into())
+}
 
 // WASM bindings for web interop
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", feature = "experimental-language"))]
 use wasm_bindgen::prelude::*;
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", feature = "experimental-language"))]
 #[wasm_bindgen]
 pub fn poly_run(source: &str) -> Result<String, JsValue> {
     match run(source) {
@@ -164,7 +225,7 @@ pub fn poly_run(source: &str) -> Result<String, JsValue> {
     }
 }
 
-#[cfg(feature = "wasm")]
+#[cfg(all(feature = "wasm", feature = "experimental-language"))]
 #[wasm_bindgen]
 pub fn poly_eval(source: &str) -> Result<String, JsValue> {
     match eval(source) {
@@ -173,7 +234,7 @@ pub fn poly_eval(source: &str) -> Result<String, JsValue> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "experimental-language"))]
 mod tests {
     use super::*;
 
