@@ -896,7 +896,7 @@ jobs:
           targets: ${{ matrix.target }}
       
       - name: Install Poly
-        run: cargo install --git https://github.com/OpenChatGit/Poly.git poly --features native
+        run: cargo install --git https://github.com/OpenChatGit/Poly.git poly-framework --features native
       
       - name: Build
         run: poly build --release

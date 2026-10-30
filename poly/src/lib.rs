@@ -55,7 +55,6 @@ pub mod virtual_drive;
 #[path = "virtual_drive_stub.rs"]
 #[doc(hidden)]
 pub mod virtual_drive;
-pub mod vscode_extension;
 pub mod theme;
 pub mod db;
 pub mod hotkeys;

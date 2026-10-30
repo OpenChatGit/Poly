@@ -27,7 +27,7 @@ renders directly in that child window, avoiding the per-frame software readback
 and canvas transfer used by OSR. The child follows the app window and is bounded
 to the browser content rectangle. Other platforms use the windowless canvas path.
 
-Build the CEF-enabled Poly binary with `cargo build -p poly --features cef`. The
+Build the CEF-enabled Poly binary with `cargo build -p poly-framework --features cef`. The
 binary re-enters `poly` for CEF renderer subprocesses, so the CEF runtime files
 must be shipped alongside Poly. In NCOS, `poly.cef.create(...)` creates a
 managed browser. Windows input is handled by the native CEF child; the canvas
@@ -37,7 +37,7 @@ On Windows, build Poly with the packaging utility enabled, then bundle a project
 from the Poly workspace root:
 
 ```powershell
-cargo run -p poly --features cef-build-util -- cef-bundle apps/ncos
+cargo run -p poly-framework --features cef-build-util -- cef-bundle apps/ncos
 ```
 
 For a release bundle, use `cargo run --release` and pass `--release` to the

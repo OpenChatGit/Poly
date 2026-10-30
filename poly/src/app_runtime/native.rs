@@ -1620,7 +1620,7 @@ if (typeof lucide !== 'undefined') {
         eprintln!("{}error{}: {}", RED, RESET, e);
         eprintln!();
         eprintln!("  {}hint{}: Build with native feature enabled:", DIM, RESET);
-        eprintln!("    cargo build -p poly --features native");
+        eprintln!("    cargo build -p poly-framework --features native");
         std::process::exit(1);
     }
 }

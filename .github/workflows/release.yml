@@ -1,0 +1,35 @@
+name: Release Cargo package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify and package crate
+        run: cargo package --package poly-framework
+
+      - name: Publish GitHub Release with Cargo package
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Poly ${{ github.ref_name }}
+          body: |
+            Poly is an experimental, custom-built Rust framework and command-line tool for creating, developing, building, and running native desktop applications with HTML, CSS, and JavaScript frontends.
+
+            This release is far from production-ready. Features are incomplete, APIs may change, and native support currently targets Windows. See the repository README for setup instructions and current limitations.
+
+            The attached `.crate` file is the Cargo source package. Installing it provides the `poly` command.
+          files: target/package/poly-framework-*.crate
+          fail_on_unmatched_files: true

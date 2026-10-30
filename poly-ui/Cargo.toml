@@ -6,7 +6,7 @@ description = "Experimental Poly UI framework prototype"
 
 [dependencies]
 # Core Poly language
-poly = { path = "../poly", features = ["experimental-language"] }
+poly = { package = "poly-framework", path = "../poly", features = ["experimental-language"] }
 
 # Window & Graphics
 winit = "0.30"

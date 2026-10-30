@@ -378,15 +378,6 @@ enum Commands {
         verify: bool,
     },
     
-    /// Install VSCode extension for Poly syntax highlighting
-    InstallVscode,
-    
-    /// Uninstall VSCode extension
-    UninstallVscode,
-    
-    /// Show VSCode extension information
-    VscodeInfo,
-    
     /// Show API information for AI assistants (JSON format)
     AiInfo {
         /// Output format
@@ -529,9 +520,6 @@ fn generate_ai_info(format: &str) {
             "poly init <name>",
             "poly add <package>",
             "poly install",
-            "poly install-vscode",
-            "poly uninstall-vscode",
-            "poly vscode-info",
             "poly ai-info [--format json|markdown]",
             "poly --version",
             "poly --help"
@@ -645,7 +633,7 @@ fn bundle_cef_project(path: &str, output: Option<&str>, release: bool) -> Result
             .parent().ok_or_else(|| "Poly executable has no parent directory.".to_string())?.to_path_buf();
         let executable = executable_dir.join("poly.exe");
         if !executable.is_file() {
-            return Err(format!("CEF-enabled Poly executable was not found at {}. Build with `cargo build -p poly --features cef-build-util{}` first.", executable.display(), if release { " --release" } else { "" }));
+            return Err(format!("CEF-enabled Poly executable was not found at {}. Build with `cargo build -p poly-framework --features cef-build-util{}` first.", executable.display(), if release { " --release" } else { "" }));
         }
         let expected_profile = if release { "release" } else { "debug" };
         if executable_dir.file_name().and_then(|name| name.to_str()) != Some(expected_profile) {
@@ -736,31 +724,6 @@ fn main() {
         Some(Commands::Add { package, version }) => packages::add_package(&package, version.as_deref()),
         Some(Commands::Remove { package }) => packages::remove_package(&package),
         Some(Commands::Install { verify }) => packages::install_packages(verify),
-        Some(Commands::InstallVscode) => {
-            match poly::vscode_extension::install_vscode_extension() {
-                Ok(()) => Ok(()),
-                Err(e) => { eprintln!("{}error{}: {}", RED, RESET, e); std::process::exit(1); }
-            }
-        },
-        Some(Commands::UninstallVscode) => {
-            match poly::vscode_extension::uninstall_vscode_extension() {
-                Ok(()) => Ok(()),
-                Err(e) => { eprintln!("{}error{}: {}", RED, RESET, e); std::process::exit(1); }
-            }
-        },
-        Some(Commands::VscodeInfo) => {
-            println!("📦 Poly VSCode Extension");
-            println!();
-            if poly::vscode_extension::is_extension_installed() {
-                println!("  {}✓ Extension is installed{}", GREEN, RESET);
-            } else {
-                println!("  {}✗ Extension is not installed{}", YELLOW, RESET);
-                println!();
-                println!("  Run: {}poly install-vscode{}", CYAN, RESET);
-            }
-            println!();
-            Ok(())
-        },
         Some(Commands::AiInfo { format }) => {
             generate_ai_info(&format);
             Ok(())

@@ -1,64 +1,136 @@
-# Poly API Documentation
+# Poly API & Developer Guide
 
-Complete reference for all Poly JavaScript APIs.
+**Current release:** 0.4.9 · **Last reviewed:** 2026-10
 
-**Version:** 0.4.8
+> [!WARNING]
+> **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
+>
+> Poly's custom language and the NCOS Virtual Drive are experimental and excluded from normal builds. Native app embedding is Windows-only today. WebView permission responses, ZIP self-updates, and Linux code signing are not implemented. Poly does not sandbox native executables or arbitrary installer side effects.
 
-> **Note:** This documentation is comprehensive and covers all available APIs in detail. Take your time - it's completely normal if you don't understand everything at first. Start with the basics and explore more advanced features as you need them.
+## Quick Start
 
----
+Create a starter app with a web framework:
+
+```sh
+poly init --react
+# or: --svelte, --vue, --preact
+poly dev
+poly build
+poly run --native
+```
+
+Use `poly init --no-install` to create the project without running `npm install`. You can also create a new directory with `poly new my-app --svelte`. See [CLI and Project Templates](#cli-and-project-templates) for details.
+
+## Build Features and Support
+
+| Capability | Enable with | Status / notes |
+|---|---|---|
+| Standard desktop framework | `--features native` | Default supported workflow; platform behavior still varies. |
+| Poly custom language and CLI | `--features experimental-language` | Experimental; excluded from normal builds. See the [language API](../poly/docs/API.md). |
+| NCOS Virtual Drive and native app install flow | `--features "native experimental-virtual-drive"` | Experimental; Windows is the first backend. See [Virtual Drive](#ncos-virtual-drive-layout). |
+| CEF renderer | `--features cef` | Optional; the matching CEF runtime must be packaged. See [CEF setup](../poly/docs/CEF.md). |
+| Poly language WASM bindings | `--features wasm` | Experimental and requires the custom language. |
+| `poly-ui` crate | separate workspace package | Incomplete prototype; layout and renderer work remains. |
+
+The usual local install command is `cargo install --path poly --features native`. Add experimental features only when you intend to use them. The package is named `poly-framework` on crates.io because `poly` is already registered there.
+
+## API Availability
+
+Poly exposes browser-facing APIs through the global `poly` object. Methods that create native windows, trays, or WebViews require Native Mode. The development server may provide a browser-side implementation for common APIs, but it does not reproduce every native OS behavior.
+
+| API area | Requirement |
+|---|---|
+| Dialogs, filesystem, clipboard, notifications, shell, app, OS | Poly development server or Native Mode; exact behavior depends on the host. |
+| Window management, system tray, WebView, MultiView | Native Mode. |
+| `poly.cef.*` | Build with `cef`; package the matching CEF runtime. |
+| Poly source execution and `poly.call` | Build with `experimental-language`. |
+| `poly.ncos.drive.*` and NCOS installer APIs | Build with `native experimental-virtual-drive`; experimental, Windows-first. |
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Window Control](#window-control)
-- [Multi-Window](#multi-window)
-- [Shell API](#shell-api)
-- [App API](#app-api)
-- [OS API](#os-api)
-- [Clipboard](#clipboard)
-- [Notifications](#notifications)
-- [Dialogs](#dialogs)
-- [File System](#file-system)
-- [Deep Links](#deep-links)
-- [System Tray](#system-tray)
-- [Auto-Updater](#auto-updater)
-- [AI/LLM Integration](#aillm-integration)
-- [IPC (Backend Functions)](#ipc-backend-functions)
-- [Configuration (poly.toml)](#configuration-polytoml)
-- [Building Apps](#building-apps)
-- [Code Signing](#code-signing)
+- [CLI and Project Templates](#cli-and-project-templates)
+- [Build Features and Support](#build-features-and-support)
+- [API Availability](#api-availability)
+- Core APIs
+  - [Window Control](#window-control)
+    - [NCOS Native App Windows](#ncos-native-app-windows)
+    - [NCOS Virtual Drive Layout and API](#ncos-virtual-drive-layout)
+    - [App Permissions](#app-permissions)
+    - [Custom Titlebar](#custom-titlebar-example)
+  - [Multi-Window](#multi-window)
+  - [Shell API](#shell-api)
+  - [App API](#app-api)
+  - [OS API](#os-api)
+  - [Clipboard](#clipboard)
+  - [Notifications](#notifications)
+  - [Dialogs](#dialogs)
+  - [File System](#file-system)
+  - [Deep Links](#deep-links)
+  - [System Tray](#system-tray)
+  - [Auto-Updater](#auto-updater)
+  - [AI/LLM Integration](#aillm-integration)
+  - [IPC (Backend Functions)](#ipc-backend-functions)
+- Project configuration and delivery
+  - [Configuration (`poly.toml`)](#configuration-polytoml)
+  - [Building Apps](#building-apps)
+  - [Code Signing](#code-signing)
+  - [Single Instance](#single-instance)
+  - [Dev Server Configuration](#dev-server-configuration)
+  - [Project Structure](#project-structure)
+  - [Package Manager](#package-manager)
+- Browser and embedded content
+  - [Browser Mode](#browser-mode)
+  - [Browser Tab API](#browser-tab-api)
+  - [WebView API](#webview-api)
+  - [CEF API](#cef-api)
+  - [MultiView API](#multiview-api)
+- [Known Issues](#known-issues)
 
 ---
 
 ## Overview
 
-Poly provides all APIs through the global `poly` object. All API methods are asynchronous and return Promises.
+Poly provides browser-facing APIs through the global `poly` object. Most calls are asynchronous and return Promises; check the method description because a few helpers are synchronous or return data directly.
 
 ```javascript
-// Example: Combining multiple APIs
 const platform = await poly.os.platform();
 const home = await poly.os.homedir();
 await poly.notification.show('System Info', `${platform} - ${home}`);
 ```
 
-### Availability
+Calls that fail are generally returned as rejected Promises. Handle errors where OS access, permissions, or platform-specific features can fail:
 
-| API | Dev Server | Native Mode |
-|-----|------------|-------------|
-| `poly.dialog.*` | ✅ | ✅ |
-| `poly.fs.*` | ✅ | ✅ |
-| `poly.clipboard.*` | ✅ | ✅ |
-| `poly.notification.*` | ✅ | ✅ |
-| `poly.shell.*` | ✅ | ✅ |
-| `poly.app.*` | ✅ | ✅ |
-| `poly.os.*` | ✅ | ✅ |
-| `poly.windows.*` | ✅ | ✅ |
-| `poly.deeplink.*` | ✅ | ✅ |
-| `poly.updater.*` | ✅ | ✅ |
-| `poly.tray.*` | ❌ | ✅ |
-| `poly.window.*` (setTitle, center, etc.) | ❌ | ✅ |
-| `polyWindow.*` (minimize, maximize, etc.) | ❌ | ✅ |
+```javascript
+try {
+  await poly.fs.write('./data/settings.json', JSON.stringify({ theme: 'dark' }));
+} catch (error) {
+  console.error('Could not save settings:', error);
+}
+```
+
+## CLI and Project Templates
+
+`poly init` initializes the current directory. Choose a frontend template to generate Vite configuration, a starter screen, and the corresponding package manifest:
+
+```sh
+poly init --react
+poly init --svelte
+poly init --vue
+poly init --preact
+```
+
+Each template uses `web/` as its Vite root and writes the production site to `dist/web/`. By default Poly runs `npm install`; pass `--no-install` to skip it. For a new folder, use `poly new my-app --react` (or another supported framework).
+
+For a plain HTML app, use `poly init` without a framework flag. Generated projects include `poly.toml`, `assets/icon.png`, a web entry page, and a centered starter screen with the Poly logo. The generated `icon_path` sets the same logo as the native window icon shown by the operating-system titlebar.
+
+```sh
+poly dev       # development server; Vite HMR for frontend templates
+poly build     # build frontend when configured, then package the desktop app
+poly run       # launch the app
+```
+
+Poly's own language `lib` template and source-file execution are experimental and require `experimental-language`.
 
 ---
 
@@ -206,6 +278,32 @@ This is path steering for installers that honor a custom install directory and s
 ### NCOS Virtual Drive Layout
 
 The Explorer root lists `System` first. All app folders live under `C:/System/Apps/<id>`. Bundled app content is stored in `Package`, native app files in `Program`, and per-app data in `Data`. Other system folders include `Config`, `Drivers`, `Logs`, `Resources`, `Cache`, and `Temp`. Legacy `C:/Apps` app folders are moved into `C:/System/Apps` when Poly opens the virtual drive; name collisions are preserved under that app's `Legacy` folder rather than overwriting existing files.
+
+#### JavaScript API
+
+The bridge is available only when Poly is built with `native experimental-virtual-drive`. It is experimental and currently Windows-first.
+
+| Method | Purpose |
+|---|---|
+| `poly.ncos.drive.list(path = 'C:/')` | List a virtual directory. |
+| `poly.ncos.drive.readText(path)` | Read a UTF-8 text file. |
+| `poly.ncos.drive.writeText(path, contents)` | Write a UTF-8 text file. |
+| `poly.ncos.drive.createDirectory(path)` | Create a directory. |
+| `poly.ncos.drive.delete(path)` | Delete a virtual path. |
+| `poly.ncos.drive.forApp(appId)` | Return the same file operations scoped to that app's `Data` directory. |
+| `poly.ncos.drive.prepareInstall(appId, versionId)` | Prepare an isolated version directory for an install or repair. |
+| `poly.ncos.drive.verifyInstall(appId, versionId)` | Check the staged install and report executable files. |
+
+Use `forApp` for app-owned settings and data. It rejects absolute paths, drive changes, and `..` traversal:
+
+```javascript
+const appData = poly.ncos.drive.forApp('my-tool');
+await appData.createDirectory('settings');
+await appData.writeText('settings/preferences.json', JSON.stringify({ theme: 'dark' }));
+const preferences = JSON.parse(await appData.readText('settings/preferences.json'));
+```
+
+The Virtual Drive is a managed host-filesystem layout, not an OS security boundary. Native executables and installers still run with the user's Windows permissions; see the limitations above.
 
 ### App permissions
 
@@ -1775,6 +1873,8 @@ console.log('Downloaded to:', path);
 
 Installs a downloaded update.
 
+Supported installer formats depend on the host OS. ZIP-based self-replacement is currently unsupported and returns an error; do not treat `download()` success as confirmation that an update can be installed. Linux signing is also not implemented.
+
 ```javascript
 await poly.updater.install(path);
 // App will restart
@@ -2344,6 +2444,8 @@ poly build --ci demo-app
 ```
 
 ### Target Platforms
+
+Windows is Poly's current native target. macOS and Linux build targets exist, but their native API and packaging support is incomplete and is not at feature parity with Windows. Cross-platform target names do not guarantee every runtime feature works on that platform.
 
 | Target | Aliases | Description |
 |--------|---------|-------------|
@@ -3346,17 +3448,9 @@ poly.webview.on('titleChange', '*', (id, title) => {
 
 #### `poly.webview.respondToPermission(id, permission, granted)`
 
-Responds to a permission request (camera, microphone, geolocation, etc.).
+This API shape is reserved for permission prompts, but the current native WebView backend does not implement permission responses. Calls return an unsupported-operation error; do not rely on this API to grant or deny camera, microphone, or geolocation access.
 
-```javascript
-poly.webview.on('permission', '*', async (id, { permission, origin }) => {
-  const granted = await poly.dialog.confirm(
-    'Permission Request',
-    `${origin} wants to access your ${permission}. Allow?`
-  );
-  await poly.webview.respondToPermission(id, permission, granted);
-});
-```
+No runnable example is provided because the backend does not currently emit permission requests or apply responses.
 
 ### Complete Browser Example
 
@@ -3432,6 +3526,35 @@ initBrowser();
 ```
 
 ---
+
+## CEF API
+
+`poly.cef.*` controls Poly-managed CEF browser surfaces. Build with `--features cef`; bundle the matching CEF runtime before distributing the app. The JavaScript bridge is present in the runtime, but CEF calls are unavailable unless the binary was built and initialized with CEF. See the separate [CEF setup guide](../poly/docs/CEF.md) for build and packaging details.
+
+```javascript
+if (await poly.cef.available()) {
+  await poly.cef.create('docs', 'https://example.com', 900, 650, {
+    x: 0,
+    y: 40,
+    width: 900,
+    height: 610,
+  });
+  await poly.cef.navigate('docs', 'https://example.com/help');
+}
+```
+
+| Method | Purpose |
+|---|---|
+| `available()` | Check whether CEF initialized successfully. |
+| `create(id, url, width?, height?, bounds?)` | Create a managed browser surface. |
+| `navigate(id, url)`, `goBack(id)`, `goForward(id)`, `reload(id)` | Navigate browser history. |
+| `resize(id, width, height)`, `setBounds(id, bounds)`, `setVisible(id, visible)` | Update surface geometry and visibility. |
+| `mouseMove`, `mouseButton`, `mouseWheel`, `key` | Forward input to the surface. |
+| `favicon(id)`, `metadata(id)` | Read browser metadata. |
+| `readFrame(id, since?)` | Read a changed RGBA frame for windowless rendering; returns `null` when no new frame is ready. |
+| `destroy(id)` | Release a managed surface. |
+
+CEF currently has platform-specific rendering paths and is not a drop-in guarantee of identical behavior across Windows, macOS, and Linux. Review the setup guide's renderer and sandbox limitations before shipping.
 
 ## MultiView API
 
