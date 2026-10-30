@@ -20,21 +20,21 @@ pub struct PolyConfig {
     pub browser: BrowserConfig,
 }
 
-/// [package] section
+/// The `[package]` section.
 #[derive(Debug, Clone)]
 pub struct PackageConfig {
     pub name: String,
     pub version: String,
 }
 
-/// [web] section
+/// The `[web]` section.
 #[derive(Debug, Clone)]
 pub struct WebConfig {
     pub dir: String,
     pub packages_dir: String,
 }
 
-/// [window] section - all window-related settings
+/// The `[window]` section, with window-related settings.
 #[derive(Debug, Clone)]
 pub struct WindowConfig {
     pub title: Option<String>,
@@ -55,7 +55,7 @@ pub struct WindowConfig {
     pub icon_path: Option<String>,
 }
 
-/// [dev] section - development server settings
+/// The `[dev]` section, with development server settings.
 #[derive(Debug, Clone)]
 pub struct DevConfig {
     pub port: u16,
@@ -65,7 +65,7 @@ pub struct DevConfig {
     pub inject_lucide: bool,
 }
 
-/// [network] section - HTTP client settings
+/// The `[network]` section, with HTTP client settings.
 #[derive(Debug, Clone)]
 pub struct NetworkConfig {
     pub timeout: u32,
@@ -73,13 +73,13 @@ pub struct NetworkConfig {
     pub max_body_size: u64,
 }
 
-/// [app] section - application behavior
+/// The `[app]` section, with application behavior settings.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub notification_timeout: u32,
 }
 
-/// [tray] section - system tray settings
+/// The `[tray]` section, with system tray settings.
 #[derive(Debug, Clone)]
 pub struct TrayConfig {
     pub enabled: bool,
@@ -90,14 +90,14 @@ pub struct TrayConfig {
     pub close_to_tray: bool,
 }
 
-/// [build] section - build settings
+/// The `[build]` section, with build settings.
 #[derive(Debug, Clone)]
 pub struct BuildConfig {
     pub icon_size: u32,
     pub icon_path: Option<String>,
 }
 
-/// [browser] section - browser mode settings
+/// The `[browser]` section, with browser mode settings.
 #[derive(Debug, Clone)]
 pub struct BrowserConfig {
     pub enabled: bool,

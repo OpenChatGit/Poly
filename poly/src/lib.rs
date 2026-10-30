@@ -1,3 +1,12 @@
+#![doc = include_str!("../README.md")]
+#![allow(rustdoc::bare_urls)]
+#![doc = include_str!("../docs/RUST_API.md")]
+#![doc = include_str!("../docs/FRAMEWORK_API.md")]
+#![doc = "\n\n---\n\n# Experimental Poly Language API\n\nThis language is opt-in and incomplete. Its guide documents the syntax, built-ins, and runtime behavior available with the `experimental-language` feature.\n"]
+#![doc = include_str!("../docs/API.md")]
+#![doc = "\n\n---\n\n# Optional CEF Renderer Guide\n\nCEF is an optional backend. Its runtime and packaging requirements are documented below.\n"]
+#![doc = include_str!("../docs/CEF.md")]
+
 #[cfg(feature = "experimental-language")]
 pub mod ast;
 #[cfg(feature = "experimental-language")]
@@ -223,7 +232,6 @@ pub fn poly_run(source: &str) -> Result<String, JsValue> {
         Err(e) => Err(JsValue::from_str(&e)),
     }
 }
-
 #[cfg(all(feature = "wasm", feature = "experimental-language"))]
 #[wasm_bindgen]
 pub fn poly_eval(source: &str) -> Result<String, JsValue> {
@@ -289,3 +297,4 @@ if x > 5:
         assert_eq!(output, vec!["big"]);
     }
 }
+

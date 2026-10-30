@@ -20,6 +20,6 @@ poly init --react
 
 Templates require Node.js and npm. Use `poly dev`, `poly build`, and `poly run --native` inside the generated project.
 
-Read the [project README](https://github.com/OpenChatGit/Poly#readme) for setup and current limitations. The [API reference](https://github.com/OpenChatGit/Poly/blob/main/docs/API.md) may include experimental interfaces.
+The [docs.rs reference](https://docs.rs/poly-framework/latest/poly/) combines the Rust API with the complete JavaScript API and developer guide, plus the experimental language and CEF guides. Read the [project README](https://github.com/OpenChatGit/Poly#readme) for setup and current limitations. Some interfaces are experimental.
 
-Poly is distributed under the custom [Poly License](LICENSE). Review it before using or redistributing the crate.
+Poly is distributed under the custom [Poly License](https://github.com/OpenChatGit/Poly/blob/master/LICENSE). Review it before using or redistributing the crate.

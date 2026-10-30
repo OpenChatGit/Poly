@@ -1,6 +1,6 @@
 # Poly
 
-![Version](https://img.shields.io/badge/version-0.4.9-blue)
+![Version](https://img.shields.io/badge/version-0.4.10-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Status](https://img.shields.io/badge/status-experimental-orange)
 ![License](https://img.shields.io/badge/license-custom-informational)
@@ -62,11 +62,13 @@ Feature availability depends on platform, build flags, and the maturity of each 
 
 ## Documentation
 
-- [API reference](docs/API.md)
-- [CEF backend notes](poly/docs/CEF.md)
-- [Experimental language API notes](poly/docs/API.md)
-- [Examples](poly/examples)
-- [Crate package information](poly/README.md)
+The [docs.rs reference](https://docs.rs/poly-framework/latest/poly/) combines the Rust API with the complete JavaScript API and developer guide, plus the experimental language and CEF guides.
+
+- [API reference](https://github.com/OpenChatGit/Poly/blob/master/docs/API.md)
+- [CEF backend notes](https://github.com/OpenChatGit/Poly/blob/master/poly/docs/CEF.md)
+- [Experimental language API notes](https://github.com/OpenChatGit/Poly/blob/master/poly/docs/API.md)
+- [Examples](https://github.com/OpenChatGit/Poly/tree/master/poly/examples)
+- [Crate package information](https://github.com/OpenChatGit/Poly/blob/master/poly/README.md)
 
 Documentation may describe experimental or incomplete interfaces. Check each section's status notes before relying on it.
 
@@ -82,4 +84,4 @@ The resulting CLI executable is named `poly`.
 
 ## License
 
-Poly is distributed under the [Poly License](LICENSE). It is a custom license with restrictions on commercializing Poly itself. Applications built with Poly are explicitly allowed to be commercialized. Read the full license before using or redistributing the project.
+Poly is distributed under the [Poly License](https://github.com/OpenChatGit/Poly/blob/master/LICENSE). It is a custom license with restrictions on commercializing Poly itself. Applications built with Poly are explicitly allowed to be commercialized. Read the full license before using or redistributing the project.

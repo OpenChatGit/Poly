@@ -1,6 +1,6 @@
 # Poly API & Developer Guide
 
-**Current release:** 0.4.9 · **Last reviewed:** 2026-10
+**Current release:** 0.4.10 · **Last reviewed:** 2026-10
 
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.

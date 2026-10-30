@@ -1,6 +1,6 @@
 [package]
 name = "poly-framework"
-version = "0.4.9"
+version = "0.4.10"
 edition = "2021"
 description = "Experimental custom Rust framework and CLI for building native desktop apps with web frontends"
 authors = ["Poly Team"]
@@ -9,6 +9,9 @@ readme = "README.md"
 license-file = "LICENSE"
 keywords = ["desktop", "webview", "framework", "native", "cef"]
 categories = ["gui", "web-programming"]
+
+[package.metadata.docs.rs]
+features = ["experimental-language"]
 
 [dependencies]
 # Lexer/Parser

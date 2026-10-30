@@ -3,11 +3,11 @@
 > [!WARNING]
 > **Work in progress:** this reference is incomplete and may not describe every edge case or current implementation detail. The Poly language is experimental, excluded from normal builds, and may change without compatibility guarantees.
 >
-> Enable it with `--features experimental-language` (add `native` when building the desktop CLI). The NCOS Virtual Drive is a separate experimental feature enabled with `native experimental-virtual-drive` and is documented in the [main API guide](../docs/API.md#ncos-virtual-drive-layout).
+> Enable it with `--features experimental-language` (add `native` when building the desktop CLI). The NCOS Virtual Drive is a separate experimental feature enabled with `native experimental-virtual-drive` and is documented in the [main API guide](https://github.com/OpenChatGit/Poly/blob/master/docs/API.md#ncos-virtual-drive-layout).
 
-This page covers built-in functions, operators, and syntax for Poly's custom language. It does not describe the JavaScript `poly` object; use the [main API guide](../docs/API.md) for that. To browse the source for an API, start with `poly/src/interpreter/builtins.rs` and `poly/src/interpreter/collection_methods.rs`.
+This page covers built-in functions, operators, and syntax for Poly's custom language. It does not describe the JavaScript `poly` object; use the [main API guide](https://github.com/OpenChatGit/Poly/blob/master/docs/API.md) for that. To browse the source for an API, start with `poly/src/interpreter/builtins.rs` and `poly/src/interpreter/collection_methods.rs`.
 
-Native CEF renderer feature setup is documented in [CEF.md](CEF.md).
+Native CEF renderer feature setup is documented in [CEF.md](https://github.com/OpenChatGit/Poly/blob/master/poly/docs/CEF.md).
 
 The NCOS virtual-drive API and native installer transaction are documented in
 the workspace `docs/API.md` under “NCOS native app windows” and “NCOS virtual
