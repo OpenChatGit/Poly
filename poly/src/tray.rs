@@ -221,36 +221,23 @@ fn build_submenu(
 
 #[cfg(feature = "native")]
 fn load_tray_icon(path: &str) -> Result<Icon, Box<dyn std::error::Error>> {
-    use std::fs::File;
-    use std::io::BufReader;
-    use image::GenericImageView;
-    
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    
-    // Detect format from extension
-    let format = if path.ends_with(".png") {
-        image::ImageFormat::Png
-    } else if path.ends_with(".ico") {
-        image::ImageFormat::Ico
-    } else {
-        image::ImageFormat::Png // Default to PNG
-    };
-    
-    let img = image::load(reader, format)?;
-    let (_width, _height) = img.dimensions();
-    
-    // Resize to standard tray icon size (32x32 or 64x64)
+    let img = crate::native::load_icon_image(path)?.to_rgba8();
+    let (width, height) = img.dimensions();
     let size = 32u32;
+    let scale = (size as f32 / width as f32).min(size as f32 / height as f32);
+    let scaled_width = ((width as f32 * scale).round() as u32).clamp(1, size);
+    let scaled_height = ((height as f32 * scale).round() as u32).clamp(1, size);
     let resized = image::imageops::resize(
-        &img.to_rgba8(),
-        size,
-        size,
-        image::imageops::FilterType::Lanczos3
+        &img,
+        scaled_width,
+        scaled_height,
+        image::imageops::FilterType::Lanczos3,
     );
-    
-    let icon = Icon::from_rgba(resized.into_raw(), size, size)?;
-    Ok(icon)
+    let mut canvas = image::RgbaImage::new(size, size);
+    let offset_x = (size - scaled_width) / 2;
+    let offset_y = (size - scaled_height) / 2;
+    image::imageops::overlay(&mut canvas, &resized, i64::from(offset_x), i64::from(offset_y));
+    Ok(Icon::from_rgba(canvas.into_raw(), size, size)?)
 }
 
 #[cfg(feature = "native")]

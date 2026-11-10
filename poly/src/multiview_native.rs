@@ -76,8 +76,9 @@ mod native_impl {
         
         // Load icon if specified
         if let Some(ref icon_path) = config.icon_path {
-            if let Ok(icon) = load_icon(icon_path) {
-                builder = builder.with_window_icon(Some(icon));
+            match crate::native::load_window_icon(icon_path) {
+                Ok(icon) => builder = builder.with_window_icon(Some(icon)),
+                Err(error) => eprintln!("[Poly] Could not load MultiView window icon '{}': {error}", icon_path),
             }
         }
         
@@ -247,28 +248,6 @@ mod native_impl {
                 }
             }
         }
-    }
-    
-    fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>> {
-        use std::fs::File;
-        use std::io::BufReader;
-        use image::GenericImageView;
-        
-        let file = File::open(path)?;
-        let img = image::load(BufReader::new(file), image::ImageFormat::Png)?;
-        let (w, h) = img.dimensions();
-        let size = w.max(h);
-        
-        let mut square = image::RgbaImage::new(size, size);
-        for p in square.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
-        
-        let (xo, yo) = ((size - w) / 2, (size - h) / 2);
-        for (x, y, p) in img.to_rgba8().enumerate_pixels() {
-            square.put_pixel(x + xo, y + yo, *p);
-        }
-        
-        let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
-        Ok(tao::window::Icon::from_rgba(resized.into_raw(), 64, 64)?)
     }
     
     /// Queue navigation for a view

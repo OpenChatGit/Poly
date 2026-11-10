@@ -631,7 +631,7 @@ All options for `poly.windows.create()`:
 | `maximized` | boolean | false | Start maximized |
 | `visible` | boolean | true | Initially visible |
 | `focused` | boolean | true | Initially focused |
-| `icon_path` | string | - | Window icon (PNG) |
+| `icon_path` | string | - | Window icon (PNG/JPEG; multi-size ICO on Windows) |
 | `background_color` | array | [26,26,26,255] | RGBA background |
 | `x` | number | center | Initial X position |
 | `y` | number | center | Initial Y position |
@@ -2239,7 +2239,7 @@ lodash = "4.17.21"
 | `decorations` | boolean | true | Show native titlebar |
 | `always_on_top` | boolean | false | Window always on top |
 | `fullscreen` | boolean | false | Start in fullscreen |
-| `icon_path` | string | - | Path to window icon (PNG; use a multi-size ICO on Windows for the titlebar) |
+| `icon_path` | string | - | Path to window icon (PNG/JPEG; use a multi-size ICO on Windows for the titlebar) |
 | `min_width` | number | - | Minimum window width |
 | `min_height` | number | - | Minimum window height |
 | `max_width` | number | - | Maximum window width |
@@ -2258,6 +2258,8 @@ lodash = "4.17.21"
 | `inject_lucide` | boolean | false | Auto-inject Lucide Icons |
 
 **Note:** By default, Poly does NOT inject any libraries. You control your own dependencies. If you want Alpine.js or Lucide Icons auto-injected into your HTML, enable them here:
+
+Lucide and other SVG icons used inside the page are rendered by the WebView as vector graphics; Poly does not rasterize those HTML icons. Native window and tray icons use the operating system's image pipeline: use PNG for cross-platform assets and a multi-size ICO on Windows. SVG is a source format for generating native icon sets, not a native titlebar icon format.
 
 ```toml
 [dev]
@@ -2285,7 +2287,7 @@ inject_lucide = true
 |--------|------|---------|-------------|
 | `enabled` | boolean | false | Enable system tray |
 | `tooltip` | string | package.name | Tooltip on hover |
-| `icon_path` | string | - | Path to tray icon |
+| `icon_path` | string | - | Path to tray icon (PNG/JPEG; ICO is also decoded when available); scaled proportionally for the tray |
 | `icon_size` | number | 32 | Tray icon size in pixels |
 | `minimize_to_tray` | boolean | false | Minimize to tray |
 | `close_to_tray` | boolean | false | Close to tray |
@@ -2312,7 +2314,7 @@ Browser mode creates a dual-WebView window (UI + Content).
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `icon_size` | number | 64 | Icon size for window icon |
-| `icon_path` | string | - | Path to app icon |
+| `icon_path` | string | - | Path to app icon (PNG/JPEG; use a multi-size ICO for Windows packaging) |
 
 ### [signing.windows] Section
 

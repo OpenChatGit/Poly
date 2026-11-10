@@ -266,10 +266,12 @@ pub fn dialog_confirm(_: &str, _: &str) -> bool { false }
 // ============================================
 
 #[cfg(feature = "native")]
-fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>> {
-    use std::fs::File;
-    use std::io::BufReader;
-    use image::GenericImageView;
+pub(crate) fn load_icon_image(path: &str) -> Result<image::DynamicImage, Box<dyn std::error::Error>> {
+    Ok(image::ImageReader::open(path)?.decode()?)
+}
+
+#[cfg(feature = "native")]
+pub(crate) fn load_window_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>> {
 
     #[cfg(target_os = "windows")]
     if std::path::Path::new(path)
@@ -280,21 +282,9 @@ fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>
         return Ok(tao::window::Icon::from_path(path, None)?);
     }
 
-    let file = File::open(path)?;
-    let img = image::load(BufReader::new(file), image::ImageFormat::Png)?;
-    let (w, h) = img.dimensions();
-    let size = w.max(h);
-
-    let mut square = image::RgbaImage::new(size, size);
-    for p in square.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
-
-    let (xo, yo) = ((size - w) / 2, (size - h) / 2);
-    for (x, y, p) in img.to_rgba8().enumerate_pixels() {
-        square.put_pixel(x + xo, y + yo, *p);
-    }
-
-    let resized = image::imageops::resize(&square, 64, 64, image::imageops::FilterType::Lanczos3);
-    Ok(tao::window::Icon::from_rgba(resized.into_raw(), 64, 64)?)
+    let img = load_icon_image(path)?.to_rgba8();
+    let (width, height) = img.dimensions();
+    Ok(tao::window::Icon::from_rgba(img.into_raw(), width, height)?)
 }
 
 #[cfg(all(feature = "native", target_os = "windows"))]
@@ -328,7 +318,7 @@ pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn
         .with_transparent(config.transparent);
 
     if let Some(ref icon_path) = config.icon_path {
-        match load_icon(icon_path) {
+        match load_window_icon(icon_path) {
             Ok(icon) => builder = builder.with_window_icon(Some(icon)),
             Err(error) => eprintln!("[Poly] Could not load window icon '{}': {error}", icon_path),
         }
@@ -392,7 +382,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         .with_transparent(config.transparent);
 
     if let Some(ref icon_path) = config.icon_path {
-        match load_icon(icon_path) {
+        match load_window_icon(icon_path) {
             Ok(icon) => builder = builder.with_window_icon(Some(icon)),
             Err(error) => eprintln!("[Poly] Could not load window icon '{}': {error}", icon_path),
         }
@@ -687,32 +677,6 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
 // ============================================
 // Tray Icon Helpers
 // ============================================
-
-#[cfg(feature = "native")]
-#[allow(dead_code)]
-fn load_tray_icon_from_file(path: &str) -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
-    use std::fs::File;
-    use std::io::BufReader;
-    use image::GenericImageView;
-
-    let file = File::open(path)?;
-    let format = if path.ends_with(".ico") { image::ImageFormat::Ico } else { image::ImageFormat::Png };
-    let img = image::load(BufReader::new(file), format)?;
-    let (w, h) = img.dimensions();
-
-    let size = 32u32;
-    let mut canvas = image::RgbaImage::new(size, size);
-    for p in canvas.pixels_mut() { *p = image::Rgba([0,0,0,0]); }
-
-    let scale = (size as f32 / w as f32).min(size as f32 / h as f32);
-    let (nw, nh) = ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
-    let resized = image::imageops::resize(&img.to_rgba8(), nw, nh, image::imageops::FilterType::Lanczos3);
-
-    let (xo, yo) = ((size - nw) / 2, (size - nh) / 2);
-    for (x, y, p) in resized.enumerate_pixels() { canvas.put_pixel(x + xo, y + yo, *p); }
-
-    Ok(tray_icon::Icon::from_rgba(canvas.into_raw(), size, size)?)
-}
 
 #[cfg(feature = "native")]
 #[allow(dead_code)]
