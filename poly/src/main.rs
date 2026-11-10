@@ -216,7 +216,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start development server with hot reload
+    /// Start development server with hot reload; --native opens a desktop window
     Dev {
         /// Project directory (default: current directory)
         #[arg(default_value = ".")]
@@ -229,6 +229,10 @@ enum Commands {
         /// Open browser automatically
         #[arg(long)]
         open: bool,
+
+        /// Open the app in its native desktop window with live frontend updates
+        #[arg(long)]
+        native: bool,
     },
     
     /// Run the application
@@ -614,7 +618,14 @@ fn main() {
     }
     
     let result = match cli.command {
-        Some(Commands::Dev { path, port, open }) => { run_dev_server(&path, port, open); Ok(()) },
+        Some(Commands::Dev { path, port, open, native }) => {
+            if native {
+                run_app_result(&path, false, true, false, 80)
+            } else {
+                run_dev_server(&path, port, open);
+                Ok(())
+            }
+        },
         Some(Commands::Run { path, release, native, browser, ui_height }) => run_app_result(&path, release, native, browser, ui_height),
         Some(Commands::Build { path, target, release, installer, sign, ci }) => { 
             if ci {

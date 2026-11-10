@@ -31,12 +31,13 @@ The templates use Vite and require Node.js and npm. `poly init` creates a projec
 Useful project commands:
 
 ```sh
-poly dev          # Run the frontend and Poly development workflow
+poly dev          # Run the browser frontend and Poly development workflow
+poly dev --native # Open a desktop window with live frontend updates
 poly build        # Build the frontend and desktop application
 poly run --native # Launch the native desktop app
 ```
 
-Add JavaScript libraries with `poly add <package>`. Poly records them in `package.json`, uses npm's lockfile, and configures Vite imports for plain HTML projects. Import modules normally from `web/src/main.js`, then use `poly dev` and `poly build`.
+Add JavaScript libraries with `poly add <package>`. Poly records them in `package.json`, uses npm's lockfile, and configures Vite imports for plain HTML projects. Import modules normally from `web/src/main.js`. Use `poly dev --native` to make desktop changes live without rebuilding; `poly build` remains for packaging.
 
 Project files in the top-level `assets/` folder can be imported from frontend modules with Vite (for example, `import logoUrl from '../../assets/logo.svg'`). Plain URLs such as `/assets/logo.svg` also work in Poly's native window in development and packaged builds.
 

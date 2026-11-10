@@ -122,10 +122,13 @@ Each template uses `web/` as its Vite root and writes the production site to `di
 For a plain HTML app, use `poly init` without a framework flag. Generated projects include `poly.toml`, `assets/icon.png`, a web entry page, and a centered starter screen with the Poly logo. The generated `icon_path` sets the same logo as the native window icon shown by the operating-system titlebar.
 
 ```sh
-poly dev       # development server; Vite for frontend imports and HMR
+poly dev       # browser development server; Vite for frontend imports and HMR
+poly dev --native # desktop development window with live frontend updates
 poly build     # build frontend when configured, then package the desktop app
 poly run       # launch the app
 ```
+
+Use `poly dev --native` while developing a desktop app. It opens the native Poly window against the editable frontend and starts Vite with HMR when the project has a Vite setup. HTML, CSS, JavaScript, and imported assets update without running `poly build` after each change. `poly run --native` also uses the live frontend unless `--release` is set or the app is running from a packaged bundle.
 
 
 ---
