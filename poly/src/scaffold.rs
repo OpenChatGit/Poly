@@ -213,7 +213,8 @@ export default defineConfig({{
     strictPort: true,
     proxy: {{
       '/__poly_invoke': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},
-      '/__poly_invoke_stream': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }}
+      '/__poly_invoke_stream': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},
+      '/assets': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }}
     }}
   }},
   build: {{ outDir: {dist_dir_json}, emptyOutDir: true }}
@@ -264,6 +265,41 @@ pub(super) fn has_vite_config(project_path: &Path) -> bool {
     ["vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.mts", "vite.config.cjs", "vite.config.cts"]
         .iter()
         .any(|name| project_path.join(name).is_file())
+}
+
+#[cfg(all(test, feature = "native"))]
+mod vite_import_tests {
+    use super::enable_vite_imports;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn generated_vite_config_proxies_project_assets() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let project_dir = std::env::temp_dir().join(format!(
+            "poly-vite-assets-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(project_dir.join("web")).unwrap();
+        fs::write(
+            project_dir.join("poly.toml"),
+            "[package]\nname = \"Test App\"\nversion = \"0.1.0\"\n\n[web]\ndir = \"web\"\n",
+        )
+        .unwrap();
+        fs::write(project_dir.join("web/index.html"), "<!doctype html><html><body></body></html>")
+            .unwrap();
+
+        assert!(enable_vite_imports(&project_dir).unwrap());
+        let config = fs::read_to_string(project_dir.join("vite.config.mjs")).unwrap();
+        assert!(config.contains("'/assets': { target: process.env.POLY_BACKEND_URL"));
+        let html = fs::read_to_string(project_dir.join("web/index.html")).unwrap();
+        assert!(html.contains("src=\"/src/main.js\""));
+
+        fs::remove_dir_all(project_dir).unwrap();
+    }
 }
 
 #[cfg(feature = "native")]
@@ -330,7 +366,7 @@ fn scaffold_frontend(project_path: &Path, framework: &str, project_name: &str) -
   "devDependencies": {{ "{plugin}": "latest", "vite": "latest" }}
 }}
 "#);
-    let vite_config = format!("{plugin_import}import {{ defineConfig }} from 'vite'\n\nexport default defineConfig({{\n  root: 'web',\n  plugins: [{plugin_call}],\n  server: {{\n    host: '127.0.0.1',\n    port: 5173,\n    strictPort: true,\n    proxy: {{\n      '/__poly_invoke': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},\n      '/__poly_invoke_stream': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }}\n    }}\n  }},\n  build: {{ outDir: '../dist/web', emptyOutDir: true }}\n}})\n");
+    let vite_config = format!("{plugin_import}import {{ defineConfig }} from 'vite'\n\nexport default defineConfig({{\n  root: 'web',\n  plugins: [{plugin_call}],\n  server: {{\n    host: '127.0.0.1',\n    port: 5173,\n    strictPort: true,\n    proxy: {{\n      '/__poly_invoke': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},\n      '/__poly_invoke_stream': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},\n      '/assets': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }}\n    }}\n  }},\n  build: {{ outDir: '../dist/web', emptyOutDir: true }}\n}})\n");
     let html = format!("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>Poly {framework}</title></head><body><div id=\"root\"></div><script type=\"module\" src=\"/poly-dev.js\"></script><script type=\"module\" src=\"/src/main.{extension}\"></script></body></html>\n");
     let dev_bridge = r#"if (import.meta.env.DEV) {
   const poly = window.poly || {}

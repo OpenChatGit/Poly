@@ -2558,7 +2558,7 @@ import { createIcons, Minus, Square, X } from 'lucide'
 createIcons({ icons: { Minus, Square, X } })
 ```
 
-`poly dev` starts Vite for frontend projects, and `poly build` bundles their imports for the native app. Older projects that only use `poly.lock` and `packages/` keep the direct `/packages/...` script workflow.
+`poly dev` starts Vite for frontend projects, and `poly build` bundles their imports for the native app. Import project assets from `web/src/main.js` with paths relative to that file, for example `import logoUrl from '../../assets/logo.svg'`. For HTML and CSS URLs, `/assets/logo.svg` serves files from the project-root `assets/` directory in Poly's native development window and packaged builds. Poly's generated Vite config proxies `/assets` to the native asset server during development. Older projects that only use `poly.lock` and `packages/` keep the direct `/packages/...` script workflow.
 
 ---
 

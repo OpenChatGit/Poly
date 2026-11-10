@@ -38,6 +38,8 @@ poly run --native # Launch the native desktop app
 
 Add JavaScript libraries with `poly add <package>`. Poly records them in `package.json`, uses npm's lockfile, and configures Vite imports for plain HTML projects. Import modules normally from `web/src/main.js`, then use `poly dev` and `poly build`.
 
+Project files in the top-level `assets/` folder can be imported from frontend modules with Vite (for example, `import logoUrl from '../../assets/logo.svg'`). Plain URLs such as `/assets/logo.svg` also work in Poly's native window in development and packaged builds.
+
 ## Current status and limitations
 
 - Poly is experimental and not ready to be treated as a stable or production-proven framework.

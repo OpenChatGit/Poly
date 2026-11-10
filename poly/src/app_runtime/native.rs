@@ -1,5 +1,87 @@
 use super::*;
 
+/// Resolve files from the project's top-level `assets/` directory without
+/// allowing a request to escape that directory.
+fn project_asset_path(assets_dir: &Path, url_path: &str) -> Option<std::path::PathBuf> {
+    let relative = url_path.strip_prefix("assets/")?;
+    if relative.is_empty() {
+        return None;
+    }
+
+    let relative_path = Path::new(relative);
+    if relative_path
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+
+    let path = assets_dir.join(relative_path);
+    path.is_file().then_some(path)
+}
+
+fn resolve_configured_icon(icon_path: Option<&str>, app_root: &Path) -> Option<std::path::PathBuf> {
+    let configured = Path::new(icon_path?);
+    let resolved = if configured.is_absolute() {
+        configured.to_path_buf()
+    } else {
+        app_root.join(configured)
+    };
+    resolved.is_file().then_some(resolved)
+}
+
+#[cfg(test)]
+mod asset_path_tests {
+    use super::{project_asset_path, resolve_configured_icon};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn resolves_project_assets_and_rejects_paths_outside_assets() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let project_dir = std::env::temp_dir().join(format!(
+            "poly-assets-{}-{unique}",
+            std::process::id()
+        ));
+        let assets_dir = project_dir.join("assets");
+        fs::create_dir_all(assets_dir.join("logos")).unwrap();
+        fs::write(assets_dir.join("logos/duck.svg"), "<svg/>").unwrap();
+
+        assert_eq!(
+            project_asset_path(&assets_dir, "assets/logos/duck.svg"),
+            Some(assets_dir.join("logos/duck.svg"))
+        );
+        assert_eq!(project_asset_path(&assets_dir, "assets/missing.svg"), None);
+        assert_eq!(project_asset_path(&assets_dir, "assets/../poly.toml"), None);
+        assert_eq!(project_asset_path(&assets_dir, "other/duck.svg"), None);
+
+        fs::remove_dir_all(project_dir).unwrap();
+    }
+
+    #[test]
+    fn resolves_relative_window_icons_from_the_app_root() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let app_root = std::env::temp_dir().join(format!(
+            "poly-window-icon-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(app_root.join("assets")).unwrap();
+        fs::write(app_root.join("assets/duck.png"), b"png").unwrap();
+
+        assert_eq!(
+            resolve_configured_icon(Some("assets/duck.png"), &app_root),
+            Some(app_root.join("assets/duck.png"))
+        );
+        fs::remove_dir_all(app_root).unwrap();
+    }
+}
+
 pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: bool, ui_height_arg: u32) {
     #[cfg(not(feature = "native"))]
     let _ = (release, browser_flag, ui_height_arg);
@@ -178,11 +260,13 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
         // Load config for packages_dir
         let config = poly::PolyConfig::load(project_path);
         let packages_dir = effective_path.join(&config.web.packages_dir);
+        let assets_dir = effective_path.join("assets");
         println!("  {}>{} Packages dir: {}", DIM, RESET, packages_dir.display());
 
         // Start local HTTP server for UI assets
         let web_dir_clone = web_dir.clone();
         let packages_dir_clone = packages_dir.clone();
+        let assets_dir_clone = assets_dir.clone();
         thread::spawn(move || {
             let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
                 .expect("Failed to start HTTP server");
@@ -212,6 +296,12 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                 } else {
                     web_dir_clone.join(url_path)
                 };
+
+                if !file_path.is_file() {
+                    if let Some(asset_path) = project_asset_path(&assets_dir_clone, url_path) {
+                        file_path = asset_path;
+                    }
+                }
 
                 // Serve app directories from their index document so SPAs
                 // keep the configured base path when opened in a Poly surface.
@@ -266,8 +356,12 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
         thread::sleep(std::time::Duration::from_millis(100));
 
         // Look for icon
-        let icon_path = project_path.join("assets/icon.png");
-        let icon = if icon_path.exists() { Some(icon_path.to_string_lossy().to_string()) } else { None };
+        let icon = resolve_configured_icon(runtime_config.window.icon_path.as_deref(), effective_path)
+            .or_else(|| {
+                let fallback = effective_path.join("assets/icon.png");
+                fallback.is_file().then_some(fallback)
+            })
+            .map(|path| path.to_string_lossy().to_string());
 
         // Use URL instead of HTML content
         let ui_url = format!("http://localhost:{}/index.html", port);
@@ -459,7 +553,8 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
             project_path.join("icon.png"),
         ]
     };
-    let icon_path = icon_candidates.iter().find(|p| p.exists())
+    let icon_path = resolve_configured_icon(runtime_config.window.icon_path.as_deref(), effective_path)
+        .or_else(|| icon_candidates.iter().find(|p| p.exists())
         .cloned()
         .or_else(|| {
             if let Ok(exe_path) = std::env::current_exe() {
@@ -475,7 +570,7 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                 }
             }
             None
-        });
+        }));
 
     let mut config = poly::NativeConfig::new(&title)
         .with_size(window_width, window_height)
@@ -535,6 +630,7 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     let active_ncos_media_streams = Arc::new(AtomicUsize::new(0));
     let project_path_for_watcher = project_path.to_path_buf();
     let project_path_owned = project_path.to_path_buf();
+    let assets_dir_server = effective_path.join("assets");
     let decorations_for_server = window_decorations;
 
     // Keep CEF's high-frequency frame reads from blocking static files, app
@@ -859,7 +955,7 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                 let request_path = url.split('?').next().unwrap_or(&url).trim_start_matches('/');
                 let decoded_url_path = urlencoding::decode(request_path).unwrap_or_else(|_| request_path.into());
                 let url_path = decoded_url_path.as_ref();
-                let file_path = if url_path.is_empty() || url_path == "index.html" {
+                let mut file_path = if url_path.is_empty() || url_path == "index.html" {
                     web_dir_server.join("index.html")
                 } else if url_path.starts_with("packages/") {
                     // Serve from packages directory (project root)
@@ -889,6 +985,15 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                 } else {
                     web_dir_server.join(url_path)
                 };
+
+                if !file_path.is_file() {
+                    if let Some(asset_path) = project_asset_path(
+                        &assets_dir_server,
+                        url_path,
+                    ) {
+                        file_path = asset_path;
+                    }
+                }
 
                 if file_path.exists() && file_path.is_file() {
                     let content = fs::read(&file_path).unwrap_or_default();
