@@ -271,6 +271,15 @@ fn load_icon(path: &str) -> Result<tao::window::Icon, Box<dyn std::error::Error>
     use std::io::BufReader;
     use image::GenericImageView;
 
+    #[cfg(target_os = "windows")]
+    if std::path::Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("ico"))
+    {
+        use tao::platform::windows::IconExtWindows;
+        return Ok(tao::window::Icon::from_path(path, None)?);
+    }
+
     let file = File::open(path)?;
     let img = image::load(BufReader::new(file), image::ImageFormat::Png)?;
     let (w, h) = img.dimensions();
@@ -319,8 +328,9 @@ pub fn run_native_window(html: &str, config: NativeConfig) -> Result<(), Box<dyn
         .with_transparent(config.transparent);
 
     if let Some(ref icon_path) = config.icon_path {
-        if let Ok(icon) = load_icon(icon_path) {
-            builder = builder.with_window_icon(Some(icon));
+        match load_icon(icon_path) {
+            Ok(icon) => builder = builder.with_window_icon(Some(icon)),
+            Err(error) => eprintln!("[Poly] Could not load window icon '{}': {error}", icon_path),
         }
     }
 
@@ -382,8 +392,9 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         .with_transparent(config.transparent);
 
     if let Some(ref icon_path) = config.icon_path {
-        if let Ok(icon) = load_icon(icon_path) {
-            builder = builder.with_window_icon(Some(icon));
+        match load_icon(icon_path) {
+            Ok(icon) => builder = builder.with_window_icon(Some(icon)),
+            Err(error) => eprintln!("[Poly] Could not load window icon '{}': {error}", icon_path),
         }
     }
 
