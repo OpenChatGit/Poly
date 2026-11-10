@@ -882,6 +882,15 @@ mod native_impl {
         use std::fs::File;
         use std::io::BufReader;
         use image::GenericImageView;
+
+        #[cfg(target_os = "windows")]
+        if std::path::Path::new(path)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ico"))
+        {
+            use tao::platform::windows::IconExtWindows;
+            return Ok(tao::window::Icon::from_path(path, None)?);
+        }
         
         let file = File::open(path)?;
         let img = image::load(BufReader::new(file), image::ImageFormat::Png)?;

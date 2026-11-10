@@ -2239,7 +2239,7 @@ lodash = "4.17.21"
 | `decorations` | boolean | true | Show native titlebar |
 | `always_on_top` | boolean | false | Window always on top |
 | `fullscreen` | boolean | false | Start in fullscreen |
-| `icon_path` | string | - | Path to window icon (PNG) |
+| `icon_path` | string | - | Path to window icon (PNG; use a multi-size ICO on Windows for the titlebar) |
 | `min_width` | number | - | Minimum window width |
 | `min_height` | number | - | Minimum window height |
 | `max_width` | number | - | Maximum window width |
