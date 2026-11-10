@@ -1662,11 +1662,22 @@ if (typeof lucide !== 'undefined') {
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     #[cfg(feature = "native")]
+    let vite_port = if use_vite_dev_server {
+        match std::net::TcpListener::bind(("127.0.0.1", 0)) {
+            Ok(listener) => listener.local_addr().map(|address| address.port()).unwrap_or(5173),
+            Err(_) => 5173,
+        }
+    } else {
+        5173
+    };
+
+    #[cfg(feature = "native")]
     let mut vite_process = if use_vite_dev_server {
         let backend_url = format!("http://127.0.0.1:{port}");
         let mut command = crate::scaffold::npm_command();
         command
-            .args(["run", "dev"])
+            .args(["run", "dev", "--", "--host", "127.0.0.1", "--port"])
+            .arg(vite_port.to_string())
             .current_dir(project_path)
             .env("POLY_BACKEND_URL", &backend_url);
         #[cfg(target_os = "windows")]
@@ -1680,7 +1691,7 @@ if (typeof lucide !== 'undefined') {
                 let mut ready = false;
                 for _ in 0..100 {
                     if std::net::TcpStream::connect_timeout(
-                        &"127.0.0.1:5173".parse().unwrap(),
+                        &format!("127.0.0.1:{vite_port}").parse().unwrap(),
                         std::time::Duration::from_millis(100),
                     ).is_ok() {
                         ready = true;
@@ -1694,10 +1705,10 @@ if (typeof lucide !== 'undefined') {
                 }
                 if !ready {
                     let _ = child.kill();
-                    eprintln!("{}error{}: Vite did not start on 127.0.0.1:5173", RED, RESET);
+                    eprintln!("{}error{}: Vite did not start on 127.0.0.1:{}", RED, RESET, vite_port);
                     std::process::exit(1);
                 }
-                println!("  {}>{} Frontend: http://127.0.0.1:5173 (Vite + HMR)", DIM, RESET);
+                println!("  {}>{} Frontend: http://127.0.0.1:{} (Vite + HMR)", DIM, RESET, vite_port);
                 Some(child)
             }
             Err(error) => {
@@ -1712,7 +1723,7 @@ if (typeof lucide !== 'undefined') {
     // Standard mode: Single WebView - App handles everything via APIs
     #[cfg(feature = "native")]
     let url = if vite_process.is_some() {
-        "http://127.0.0.1:5173".to_string()
+        format!("http://127.0.0.1:{vite_port}")
     } else {
         format!("http://localhost:{}", port)
     };
