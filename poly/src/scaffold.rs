@@ -417,6 +417,11 @@ pub(super) fn npm_command() -> std::process::Command {
     if cfg!(windows) {
         let mut command = std::process::Command::new("cmd");
         command.args(["/C", "npm"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
         command
     } else {
         std::process::Command::new("npm")

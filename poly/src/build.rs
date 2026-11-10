@@ -307,6 +307,11 @@ fn npm_command() -> Command {
     if cfg!(windows) {
         let mut command = Command::new("cmd");
         command.args(["/C", "npm"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
         command
     } else {
         Command::new("npm")
