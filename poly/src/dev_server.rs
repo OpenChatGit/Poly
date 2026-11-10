@@ -19,14 +19,35 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let reload_interval = config.dev.reload_interval;
     let web_dir_relative = config.web.dir.clone();
     let vite_project = project_path.join("package.json").is_file()
-        && project_path.join("vite.config.js").is_file();
+        && crate::scaffold::has_vite_config(project_path);
 
     // Use config port if set, otherwise CLI arg (CLI arg takes precedence if not default)
     let port = if port != 3000 { port } else { config.dev.port };
 
-    let entry = find_entry_point(project_path);
+    let entry = find_frontend_entry(project_path);
+    if entry.is_none() && vite_project {
+        println!();
+        println!("  {}POLY{} v{}  {}frontend dev server{}", CYAN, RESET, VERSION, DIM, RESET);
+        println!("  {}>{} Starting the Vite frontend...{}", DIM, RESET, RESET);
+        let mut command = crate::scaffold::npm_command();
+        command.args(["run", "dev"]);
+        if open_browser { command.args(["--", "--open"]); }
+        let status = command.current_dir(project_path).status()
+            .map_err(|error| format!("Could not start the Vite dev server: {error}"));
+        match status {
+            Ok(status) if status.success() => return,
+            Ok(status) => {
+                eprintln!("{}error{}: Vite dev server exited with {status}.", RED, RESET);
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            Err(error) => {
+                eprintln!("{}error{}: {}", RED, RESET, error);
+                std::process::exit(1);
+            }
+        }
+    }
     if entry.is_none() {
-        eprintln!("{}error{}: No entry point found. Create main.poly or src/main.poly", RED, RESET);
+        eprintln!("{}error{}: No entry point found. Create web/index.html", RED, RESET);
         std::process::exit(1);
     }
     let entry = entry.unwrap();
@@ -43,40 +64,6 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let project_path_http = project_path_owned.clone();
     let web_dir_http = web_dir_relative.clone();
     let entry_http = entry.clone();
-
-    // Create persistent interpreter wrapped in Arc<Mutex>
-    use std::sync::Mutex;
-    let interpreter = Arc::new(Mutex::new(poly::create_interpreter()));
-    let interpreter_http = Arc::clone(&interpreter);
-
-    // Initialize interpreter with source
-    {
-        let source = fs::read_to_string(&entry).unwrap_or_default();
-        let mut interp = interpreter.lock().unwrap();
-        if let Err(e) = poly::init_interpreter(&mut interp, &source) {
-            let diagnostic = render_poly_diagnostic(&entry, &source, &e);
-            eprintln!("\n  {}×{} {}Runtime initialization failed{}", RED, RESET, BOLD, RESET);
-            for line in diagnostic.lines() { eprintln!("    {}", line); }
-            std::process::exit(1);
-        }
-    }
-
-    // Channel for reloading interpreter
-    let (_reload_tx, reload_rx) = std::sync::mpsc::channel::<String>();
-    let interpreter_reload = Arc::clone(&interpreter);
-
-    // Interpreter reload thread
-    std::thread::spawn(move || {
-        for source in reload_rx {
-            let mut interp = interpreter_reload.lock().unwrap();
-            // Reset interpreter and reinitialize
-            *interp = poly::create_interpreter();
-            if let Err(e) = poly::init_interpreter(&mut interp, &source) {
-                eprintln!("{}error{}: Reload failed: {}", RED, RESET, e);
-            }
-        }
-    });
-
     // HTTP server thread
     thread::spawn(move || {
         let server = tiny_http::Server::http(format!("0.0.0.0:{}", port))
@@ -84,43 +71,6 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
 
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
-
-            // Handle streaming endpoint separately (different response type)
-            if url.as_str() == "/__poly_invoke_stream" {
-                let mut body = String::new();
-                request.as_reader().read_to_string(&mut body).ok();
-
-                let response = match handle_ipc_invoke_streaming(&interpreter_http, &body) {
-                    Ok(reader) => {
-                        tiny_http::Response::new(
-                            tiny_http::StatusCode(200),
-                            vec![
-                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/plain"[..]).unwrap(),
-                                tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap()
-                            ],
-                            reader,
-                            None,
-                            None
-                        )
-                    },
-                    Err(e) => {
-                        let error_json = serde_json::json!({"error": e}).to_string();
-                        let error_reader: Box<dyn std::io::Read + Send> = Box::new(std::io::Cursor::new(error_json.into_bytes()));
-                        tiny_http::Response::new(
-                            tiny_http::StatusCode(400),
-                            vec![
-                                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap(),
-                                tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap()
-                            ],
-                            error_reader,
-                            None,
-                            None
-                        )
-                    }
-                };
-                let _ = request.respond(response);
-                continue;
-            }
 
             let response = match url.as_str() {
                 "/" | "/index.html" => {
@@ -711,19 +661,14 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
                 }
                 "/__poly_invoke" => {
-                    // IPC Bridge - call Poly functions from JavaScript (stateful)
+                    // IPC bridge for JavaScript framework APIs
                     let mut body = String::new();
                     request.as_reader().read_to_string(&mut body).ok();
 
-                    let result = handle_ipc_invoke_stateful(&interpreter_http, &body);
+                    let result = handle_ipc_invoke_system_only(&body);
                     tiny_http::Response::from_string(result)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
                         .with_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap())
-                }
-                "/__poly_run" => {
-                    let output = execute_poly_for_web(&entry_http);
-                    tiny_http::Response::from_string(output)
-                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
                 }
                 _ if url.starts_with("/__polyview") => {
                     // PolyView Proxy - "iframe2" that bypasses all iframe restrictions
@@ -875,7 +820,7 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
     print!("  {}Building...{}", DIM, RESET);
     io::stdout().flush().unwrap();
     let start = std::time::Instant::now();
-    let _success = poly::run(&fs::read_to_string(&entry).unwrap_or_default()).is_ok();
+    let _success = entry.is_file();
     println!("\r  {}ready{} in {}{}ms{}                    ", GREEN, RESET, BOLD, start.elapsed().as_millis(), RESET);
 
     if open_browser {
@@ -911,26 +856,8 @@ if (typeof lucide !== 'undefined') lucide.createIcons();
                     std::thread::sleep(Duration::from_millis(50));
                     reload_counter.fetch_add(1, Ordering::Relaxed);
 
-                    // Only reload Poly interpreter for .poly file changes
-                    let has_poly_change = event.paths.iter().any(|p| {
-                        p.extension().and_then(|e| e.to_str()) == Some("poly")
-                    });
+                    println!();
 
-                    if has_poly_change {
-                        let start = std::time::Instant::now();
-                        let source = fs::read_to_string(&entry).unwrap_or_default();
-
-                        // Reload the persistent interpreter
-                        let mut interp = interpreter.lock().unwrap();
-                        *interp = poly::create_interpreter();
-                        match poly::init_interpreter(&mut interp, &source) {
-                            Ok(_) => println!(" {}({}ms){}", DIM, start.elapsed().as_millis(), RESET),
-                            Err(e) => println!("\n  {}error{}: {}", RED, RESET, e),
-                        }
-                    } else {
-                        // For HTML/CSS/JS, just signal reload (no Poly execution needed)
-                        println!();
-                    }
                 }
             }
             Ok(Err(e)) => eprintln!("{}error{}: {:?}", RED, RESET, e),
@@ -948,172 +875,6 @@ fn chrono_time() -> String {
     format!("{:02}:{:02}:{:02}", hours, mins, secs)
 }
 
-fn execute_poly_for_web(entry: &Path) -> String {
-    match fs::read_to_string(entry) {
-        Ok(source) => match poly::run(&source) {
-            Ok(output) => serde_json::json!({"success": true, "output": output}).to_string(),
-            Err(e) => serde_json::json!({"success": false, "error": e}).to_string(),
-        },
-        Err(e) => serde_json::json!({"success": false, "error": format!("Failed to read: {}", e)}).to_string(),
-    }
-}
-
-/// Handle IPC invoke with a persistent (stateful) interpreter
-struct ChannelReader {
-    rx: std::sync::mpsc::Receiver<String>,
-    buffer: Vec<u8>,
-}
-
-impl std::io::Read for ChannelReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        while self.buffer.is_empty() {
-             match self.rx.recv() {
-                 Ok(data) => {
-                     if !data.is_empty() {
-                        self.buffer.extend_from_slice(data.as_bytes());
-                        break;
-                     }
-                 }
-                 Err(_) => return Ok(0),
-             }
-        }
-        let len = std::cmp::min(self.buffer.len(), buf.len());
-        buf[0..len].copy_from_slice(&self.buffer[0..len]);
-        self.buffer.drain(0..len);
-        Ok(len)
-    }
-}
-
-fn handle_ipc_invoke_streaming(
-    interpreter: &std::sync::Arc<std::sync::Mutex<poly::interpreter::Interpreter>>,
-    body: &str
-) -> Result<Box<dyn std::io::Read + Send>, String> {
-    // Parse JSON
-    let request: serde_json::Value = serde_json::from_str(body).map_err(|e| format!("Invalid JSON: {}", e))?;
-    let fn_name = request.get("fn").and_then(|v| v.as_str()).ok_or("Missing 'fn' field")?.to_string();
-    let args = request.get("args").cloned().unwrap_or(serde_json::json!({}));
-
-    // Build args string
-    let args_str = if let Some(arr) = args.as_array() {
-        arr.iter().map(json_to_poly_value).collect::<Vec<_>>().join(", ")
-    } else if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
-        String::new()
-    } else {
-        json_to_poly_value(&args)
-    };
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    let interpreter_clone = interpreter.clone();
-
-    std::thread::spawn(move || {
-        // Lock interpreter
-        // Note: This blocks until interpreter is free
-        let mut interp = interpreter_clone.lock().unwrap();
-
-        // Set up streaming
-        interp.set_stream_sender(Some(tx.clone()));
-
-        // Execute
-        let _ = poly::call_function(&mut interp, &fn_name, &args_str);
-
-        // Clean up
-        interp.set_stream_sender(None);
-        // tx is dropped here, closing channel
-    });
-
-    Ok(Box::new(ChannelReader { rx, buffer: Vec::new() }))
-}
-
-pub(super) fn handle_ipc_invoke_stateful(interpreter: &std::sync::Arc<std::sync::Mutex<poly::interpreter::Interpreter>>, body: &str) -> String {
-    // Parse the request: { "fn": "function_name", "args": { ... } }
-    let request: serde_json::Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(e) => return serde_json::json!({"error": format!("Invalid JSON: {}", e)}).to_string(),
-    };
-
-    let fn_name = match request.get("fn").and_then(|v| v.as_str()) {
-        Some(name) => name,
-        None => return serde_json::json!({"error": "Missing 'fn' field"}).to_string(),
-    };
-
-    let args = request.get("args").cloned().unwrap_or(serde_json::json!({}));
-
-    // Handle built-in system APIs (prefixed with __poly_)
-    if fn_name.starts_with("__poly_") {
-        return handle_system_api(fn_name, &args);
-    }
-
-    // Build argument string from JSON - support array unpacking or skip empty objects
-    let args_str = if let Some(arr) = args.as_array() {
-        // Unpack array arguments: [1, 2] -> "1, 2"
-        arr.iter().map(json_to_poly_value).collect::<Vec<_>>().join(", ")
-    } else if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
-        String::new() // No arguments
-    } else {
-        json_to_poly_value(&args)
-    };
-
-    // Call function on persistent interpreter
-    let mut interp = interpreter.lock().unwrap();
-    match poly::call_function(&mut interp, fn_name, &args_str) {
-        Ok(json_result) => {
-            format!(r#"{{"result":{}}}"#, json_result)
-        }
-        Err(e) => serde_json::json!({"error": e}).to_string(),
-    }
-}
-
-#[allow(dead_code)]
-fn handle_ipc_invoke(entry: &Path, body: &str) -> String {
-    // Parse the request: { "fn": "function_name", "args": { ... } }
-    let request: serde_json::Value = match serde_json::from_str(body) {
-        Ok(v) => v,
-        Err(e) => return serde_json::json!({"error": format!("Invalid JSON: {}", e)}).to_string(),
-    };
-
-    let fn_name = match request.get("fn").and_then(|v| v.as_str()) {
-        Some(name) => name,
-        None => return serde_json::json!({"error": "Missing 'fn' field"}).to_string(),
-    };
-
-    let args = request.get("args").cloned().unwrap_or(serde_json::json!({}));
-
-    // Handle built-in system APIs (prefixed with __poly_)
-    if fn_name.starts_with("__poly_") {
-        return handle_system_api(fn_name, &args);
-    }
-
-    // Read the Poly source
-    let source = match fs::read_to_string(entry) {
-        Ok(s) => s,
-        Err(e) => return serde_json::json!({"error": format!("Failed to read: {}", e)}).to_string(),
-    };
-
-    // Build argument string from JSON - support array unpacking or skip empty objects
-    let args_str = if let Some(arr) = args.as_array() {
-        // Unpack array arguments: [1, 2] -> "1, 2"
-        arr.iter().map(json_to_poly_value).collect::<Vec<_>>().join(", ")
-    } else if args.is_object() && args.as_object().map(|o| o.is_empty()).unwrap_or(false) {
-        String::new() // No arguments
-    } else {
-        json_to_poly_value(&args)
-    };
-
-    // Create a call expression - the result will be the last evaluated value
-    let call_expr = format!("{fn_name}({args_str})");
-    let full_source = format!("{source}\n{call_expr}");
-
-    // Use eval_json to get proper JSON output
-    match poly::eval_json(&full_source) {
-        Ok(json_result) => {
-            // The result is already valid JSON, wrap it in the response
-            format!(r#"{{"result":{}}}"#, json_result)
-        }
-        Err(e) => serde_json::json!({"error": e}).to_string(),
-    }
-}
-
-/// Handle IPC when there's no Poly backend (system APIs only)
 pub(super) fn handle_ipc_invoke_system_only(body: &str) -> String {
     let request: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
@@ -1135,29 +896,10 @@ pub(super) fn handle_ipc_invoke_system_only(body: &str) -> String {
 }
 
 
-fn json_to_poly_value(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::Null => "none".to_string(),
-        serde_json::Value::Bool(b) => if *b { "true" } else { "false" }.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => format!("\"{}\"", s.replace("\"", "\\\"")),
-        serde_json::Value::Array(arr) => {
-            let items: Vec<_> = arr.iter().map(json_to_poly_value).collect();
-            format!("[{}]", items.join(", "))
-        }
-        serde_json::Value::Object(obj) => {
-            let items: Vec<_> = obj.iter()
-                .map(|(k, v)| format!("\"{}\": {}", k, json_to_poly_value(v)))
-                .collect();
-            format!("{{{}}}", items.join(", "))
-        }
-    }
-}
-
 
 fn generate_dev_html(project_path: &Path, entry: &Path, version: u64) -> String {
     let name = project_path.file_name().and_then(|n| n.to_str()).unwrap_or("Poly App");
-    let entry_name = entry.file_name().and_then(|n| n.to_str()).unwrap_or("main.poly");
+    let entry_name = entry.file_name().and_then(|n| n.to_str()).unwrap_or("index.html");
 
     format!(r#"<!DOCTYPE html>
 <html lang="en">
@@ -1253,17 +995,20 @@ fn should_reload(event: &Event) -> bool {
         }
 
         p.extension().and_then(|e| e.to_str())
-            .map(|ext| matches!(ext, "poly" | "html" | "css" | "js"))
+            .map(|ext| matches!(ext, "html" | "css" | "js"))
             .unwrap_or(false)
     })
 }
 
-pub(super) fn find_entry_point(project_path: &Path) -> Option<std::path::PathBuf> {
-    for candidate in ["main.poly", "src/main.poly", "app.poly", "src/app.poly", "index.poly"] {
-        let path = project_path.join(candidate);
-        if path.exists() { return Some(path); }
+pub(super) fn find_frontend_entry(project_path: &Path) -> Option<std::path::PathBuf> {
+    let source_index = project_path.join("web/index.html");
+    if source_index.is_file() {
+        return Some(source_index);
     }
-    None
+
+    let config = poly::PolyConfig::load(project_path);
+    let configured_index = project_path.join(config.web.dir).join("index.html");
+    configured_index.is_file().then_some(configured_index)
 }
 
 fn open_in_browser(url: &str) -> Result<(), Box<dyn std::error::Error>> {

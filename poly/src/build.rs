@@ -126,7 +126,7 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
     let app_version = extract_toml_value(&toml_content, "version")
         .unwrap_or_else(|| "1.0.0".to_string());
 
-    if project_path.join("package.json").is_file() && project_path.join("vite.config.js").is_file() {
+    if project_path.join("package.json").is_file() && crate::scaffold::has_vite_config(project_path) {
         run_frontend_build(project_path)?;
     }
     
@@ -270,14 +270,7 @@ fn bundle_web_assets(project_path: &Path, bundle_dir: &Path) -> Result<(), Strin
             .map_err(|e| format!("Failed to copy {}: {}", poly_toml.display(), e))?;
     }
     
-    // Copy main.poly if exists
-    let main_poly = project_path.join("src/main.poly");
-    if main_poly.exists() {
-        fs::create_dir_all(bundle_dir.join("src"))
-            .map_err(|e| format!("Failed to create bundled source directory: {}", e))?;
-        fs::copy(&main_poly, bundle_dir.join("src/main.poly"))
-            .map_err(|e| format!("Failed to copy {}: {}", main_poly.display(), e))?;
-    }
+
     
     Ok(())
 }
@@ -304,7 +297,7 @@ fn run_frontend_build(project_path: &Path) -> Result<(), String> {
 }
 
 pub fn build_frontend(project_path: &Path) -> Result<(), String> {
-    if project_path.join("package.json").is_file() && project_path.join("vite.config.js").is_file() {
+    if project_path.join("package.json").is_file() && crate::scaffold::has_vite_config(project_path) {
         run_frontend_build(project_path)?;
     }
     Ok(())
@@ -338,7 +331,7 @@ fn create_launcher(
         let mut cmd = Command::new(&cargo_path);
         cmd.current_dir(&poly_crate);
         cmd.arg("build")
-            .arg("-p").arg("poly")
+            .arg("-p").arg("poly-framework")
             .arg("--features").arg("native,gui")
             .arg("--quiet");
         
@@ -361,7 +354,10 @@ fn create_launcher(
             print_cargo_output(&output.stdout, &output.stderr);
         }
 
-        let target_dir = poly_crate.join("target");
+        let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+            .map(std::path::PathBuf::from)
+            .or_else(|| poly_crate.parent().map(|workspace| workspace.join("target")))
+            .unwrap_or_else(|| poly_crate.join("target"));
         let profile = if config.release { "release" } else { "debug" };
         let built_exe = target_dir.join(profile).join(format!("poly{}", Platform::current().exe_extension()));
         if !built_exe.is_file() {

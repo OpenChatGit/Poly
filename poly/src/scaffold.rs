@@ -14,11 +14,7 @@ pub(super) fn selected_project_template(
         else { template };
     match selected {
         "app" | "react" | "svelte" | "vue" | "preact" => Ok(selected.to_string()),
-        #[cfg(feature = "experimental-language")]
-        "lib" => Ok(selected.to_string()),
-        #[cfg(not(feature = "experimental-language"))]
-        "lib" => Err("The Poly language library template is experimental. Rebuild with --features experimental-language.".into()),
-        other => Err(format!("Unknown project template '{other}'. Choose app, lib, react, svelte, vue, or preact.")),
+        other => Err(format!("Unknown project template '{other}'. Choose app, react, svelte, vue, or preact.")),
     }
 }
 
@@ -102,12 +98,8 @@ icon_path = "assets/icon.png"
 
     match template {
         "app" => write_if_missing(project_path, "web/index.html", &poly::templates::empty_app_html(name))?,
-        #[cfg(feature = "experimental-language")]
-        "lib" => write_if_missing(project_path, "src/main.poly", &format!("# {name} - A Poly Library\n\nfn greet(name=\"World\"):\n    return f\"Hello, {{name}}!\"\n\nfn add(a, b):\n    return a + b\n"))?,
         "react" | "svelte" | "vue" | "preact" => {
             scaffold_frontend(project_path, template, name)?;
-            #[cfg(feature = "experimental-language")]
-            write_if_missing(project_path, "src/main.poly", "fn greet(name: String) -> String:\n    return \"Hello, \" + name + \"!\"\n")?;
             if !no_install {
                 install_frontend_dependencies(project_path)?;
             }
@@ -147,6 +139,143 @@ fn configure_frontend_web_dir(poly_toml: &Path) -> Result<(), String> {
     fs::write(poly_toml, updated).map_err(|error| format!("Could not update web output path: {error}"))
 }
 
+/// Prepare a plain Poly HTML project to use npm packages through Vite imports.
+#[cfg(feature = "native")]
+pub(super) fn enable_vite_imports(project_path: &Path) -> Result<bool, String> {
+    let poly_toml = project_path.join("poly.toml");
+    if !poly_toml.is_file() {
+        return Err("Not a Poly project. Run `poly init` first.".to_string());
+    }
+
+    let config = poly::PolyConfig::load(project_path);
+    let configured_web_dir = Path::new(&config.web.dir);
+    let web_dir = if project_path.join("web/index.html").is_file() {
+        Path::new("web").to_path_buf()
+    } else if project_path.join(configured_web_dir).join("index.html").is_file() {
+        if configured_web_dir == Path::new("dist/web") {
+            return Err("The configured `dist/web` directory is build output. Restore the editable `web/index.html` source before adding npm imports.".to_string());
+        }
+        configured_web_dir.to_path_buf()
+    } else {
+        return Err(format!(
+            "Could not find index.html in `web/` or configured web directory `{}`.",
+            config.web.dir
+        ));
+    };
+    let index_path = project_path.join(&web_dir).join("index.html");
+
+    let manifest_path = project_path.join("package.json");
+    let mut manifest = if manifest_path.is_file() {
+        let contents = fs::read_to_string(&manifest_path)
+            .map_err(|error| format!("Could not read package.json: {error}"))?;
+        serde_json::from_str::<serde_json::Value>(&contents)
+            .map_err(|error| format!("Could not parse package.json: {error}"))?
+    } else {
+        serde_json::json!({})
+    };
+    let object = manifest.as_object_mut()
+        .ok_or_else(|| "package.json must contain a JSON object.".to_string())?;
+    if !object.contains_key("name") {
+        let name = project_path.file_name().and_then(|name| name.to_str()).unwrap_or("poly-app");
+        let normalized = name.to_ascii_lowercase().chars()
+            .map(|character| if character.is_ascii_alphanumeric() || matches!(character, '-' | '.') { character } else { '-' })
+            .collect::<String>().trim_matches('-').to_string();
+        object.insert("name".into(), serde_json::Value::String(if normalized.is_empty() { "poly-app".into() } else { normalized }));
+    }
+    object.entry("private").or_insert(serde_json::Value::Bool(true));
+    object.entry("type").or_insert(serde_json::Value::String("module".into()));
+    let scripts = object.entry("scripts").or_insert_with(|| serde_json::json!({}));
+    let scripts = scripts.as_object_mut()
+        .ok_or_else(|| "package.json `scripts` must be a JSON object.".to_string())?;
+    scripts.entry("dev").or_insert(serde_json::Value::String("vite".into()));
+    scripts.entry("build").or_insert(serde_json::Value::String("vite build".into()));
+    let has_vite = object.get("dependencies").and_then(serde_json::Value::as_object).is_some_and(|dependencies| dependencies.contains_key("vite"))
+        || object.get("devDependencies").and_then(serde_json::Value::as_object).is_some_and(|dependencies| dependencies.contains_key("vite"));
+    let dev_dependencies = object.entry("devDependencies").or_insert_with(|| serde_json::json!({}));
+    if !dev_dependencies.is_object() {
+        return Err("package.json `devDependencies` must be a JSON object.".to_string());
+    }
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap() + "\n")
+        .map_err(|error| format!("Could not update package.json: {error}"))?;
+
+    if !has_vite_config(project_path) {
+        let web_root = web_dir.to_string_lossy().replace('\\', "/");
+        let dist_dir = relative_project_path(&web_dir, Path::new("dist/web"));
+        let web_root_json = serde_json::to_string(&web_root).unwrap();
+        let dist_dir_json = serde_json::to_string(&dist_dir).unwrap();
+        let contents = format!(r#"import {{ defineConfig }} from 'vite'
+
+export default defineConfig({{
+  root: {web_root_json},
+  server: {{
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+    proxy: {{
+      '/__poly_invoke': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},
+      '/__poly_invoke_stream': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }}
+    }}
+  }},
+  build: {{ outDir: {dist_dir_json}, emptyOutDir: true }}
+}})
+"#);
+        let vite_config = project_path.join("vite.config.mjs");
+        fs::write(&vite_config, contents)
+            .map_err(|error| format!("Could not create vite.config.mjs: {error}"))?;
+    }
+
+    let source_dir = project_path.join(&web_dir).join("src");
+    fs::create_dir_all(&source_dir).map_err(|error| format!("Could not create frontend source directory: {error}"))?;
+    let entry_path = source_dir.join("main.js");
+    if !entry_path.exists() {
+        fs::write(&entry_path, "// Import npm packages and app modules from this entry point.\n")
+            .map_err(|error| format!("Could not create {}: {error}", entry_path.display()))?;
+    }
+
+    let gitignore = project_path.join(".gitignore");
+    if !gitignore.exists() {
+        fs::write(&gitignore, "/dist\n/node_modules\n/packages\n")
+            .map_err(|error| format!("Could not create .gitignore: {error}"))?;
+    } else {
+        append_gitignore_entry(project_path, "/dist")?;
+        append_gitignore_entry(project_path, "/node_modules")?;
+    }
+
+    let html = fs::read_to_string(&index_path)
+        .map_err(|error| format!("Could not read {}: {error}", index_path.display()))?;
+    let lower_html = html.to_ascii_lowercase();
+    let has_external_module = lower_html.contains("type=\"module\"") && lower_html.contains("src=");
+    if !has_external_module {
+        let script = "  <script type=\"module\" src=\"/src/main.js\"></script>\n";
+        let updated_html = if let Some(index) = lower_html.rfind("</body>") {
+            format!("{}{}{}", &html[..index], script, &html[index..])
+        } else {
+            format!("{}\n{}", html, script)
+        };
+        fs::write(&index_path, updated_html)
+            .map_err(|error| format!("Could not add the Vite entry point to {}: {error}", index_path.display()))?;
+    }
+
+    configure_frontend_web_dir(&poly_toml)?;
+    Ok(!has_vite)
+}
+
+pub(super) fn has_vite_config(project_path: &Path) -> bool {
+    ["vite.config.js", "vite.config.mjs", "vite.config.ts", "vite.config.mts", "vite.config.cjs", "vite.config.cts"]
+        .iter()
+        .any(|name| project_path.join(name).is_file())
+}
+
+#[cfg(feature = "native")]
+fn relative_project_path(from: &Path, to: &Path) -> String {
+    let from: Vec<_> = from.components().collect();
+    let to: Vec<_> = to.components().collect();
+    let common = from.iter().zip(&to).take_while(|(left, right)| left == right).count();
+    let mut parts = vec!["..".to_string(); from.len().saturating_sub(common)];
+    parts.extend(to.iter().skip(common).map(|part| part.as_os_str().to_string_lossy().into_owned()));
+    parts.join("/")
+}
+
 fn append_gitignore_entry(project_path: &Path, entry: &str) -> Result<(), String> {
     let path = project_path.join(".gitignore");
     let content = fs::read_to_string(&path).map_err(|error| format!("Could not read .gitignore: {error}"))?;
@@ -168,7 +297,7 @@ fn write_if_missing(project_path: &Path, relative: &str, contents: &str) -> Resu
 }
 
 fn scaffold_frontend(project_path: &Path, framework: &str, project_name: &str) -> Result<(), String> {
-    if project_path.join("package.json").is_file() && !project_path.join("vite.config.js").is_file() {
+    if project_path.join("package.json").is_file() && !has_vite_config(project_path) {
         return Err("package.json already exists without a Vite config. Poly left it untouched; merge the generated framework setup manually or initialize an empty folder.".to_string());
     }
     let (plugin, dependencies, main_source, component_source) = match framework {
@@ -211,7 +340,6 @@ fn scaffold_frontend(project_path: &Path, framework: &str, project_name: &str) -
     if (result.error) throw new Error(result.error)
     return Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result
   }
-  poly.call ??= (fn, ...args) => poly.invoke(fn, args)
   window.poly = poly
 }
 "#;
@@ -229,6 +357,9 @@ fn scaffold_frontend(project_path: &Path, framework: &str, project_name: &str) -
         ("web/src/style.css", css),
         ("web/src/App.jsx", component_source),
     ] {
+        if file == "vite.config.js" && has_vite_config(project_path) {
+            continue;
+        }
         let actual_file = if (framework == "vue" || framework == "svelte") && file == "web/src/App.jsx" {
             format!("web/src/App.{extension}")
         } else { file.to_string() };

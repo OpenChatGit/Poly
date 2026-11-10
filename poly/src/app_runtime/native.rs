@@ -1,8 +1,8 @@
 use super::*;
 
-pub(crate) fn run_native_app(project_path: &Path, _release: bool, browser_flag: bool, ui_height_arg: u32) {
+pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: bool, ui_height_arg: u32) {
     #[cfg(not(feature = "native"))]
-    let _ = (browser_flag, ui_height_arg);
+    let _ = (release, browser_flag, ui_height_arg);
 
     // CEF must be initialized on Poly's main application thread. Its own browser
     // UI loop runs separately; the CEF command actor is started lazily afterward.
@@ -19,6 +19,11 @@ pub(crate) fn run_native_app(project_path: &Path, _release: bool, browser_flag: 
     let is_bundled = bundle_dir.exists();
     let effective_path = if is_bundled { &bundle_dir } else { project_path };
     let runtime_config = poly::PolyConfig::load(if is_bundled { &bundle_dir } else { project_path });
+    #[cfg(feature = "native")]
+    let use_vite_dev_server = !is_bundled
+        && !release
+        && project_path.join("package.json").is_file()
+        && crate::scaffold::has_vite_config(project_path);
 
     // Find web directory
     let web_dir = if effective_path.is_file() {
@@ -523,12 +528,6 @@ pub(crate) fn run_native_app(project_path: &Path, _release: bool, browser_flag: 
     let reload_counter_server = Arc::clone(&reload_counter);
     let reload_counter_watcher = Arc::clone(&reload_counter);
 
-    // Create persistent interpreter for native mode
-    use std::sync::Mutex;
-    let interpreter: Arc<Mutex<poly::interpreter::Interpreter>> = Arc::new(Mutex::new(poly::create_interpreter()));
-    let interpreter_server = Arc::clone(&interpreter);
-    let interpreter_watcher = Arc::clone(&interpreter);
-
     // Start local HTTP server in background thread
     let web_dir_arc = Arc::new(web_dir);
     let web_dir_server = Arc::clone(&web_dir_arc);
@@ -536,9 +535,6 @@ pub(crate) fn run_native_app(project_path: &Path, _release: bool, browser_flag: 
     let active_ncos_media_streams = Arc::new(AtomicUsize::new(0));
     let project_path_for_watcher = project_path.to_path_buf();
     let project_path_owned = project_path.to_path_buf();
-    let entry_path = find_entry_point(effective_path);
-    let entry_path_for_init = entry_path.clone();
-    let entry_path_for_server = entry_path.clone();
     let decorations_for_server = window_decorations;
 
     // Keep CEF's high-frequency frame reads from blocking static files, app
@@ -550,26 +546,10 @@ pub(crate) fn run_native_app(project_path: &Path, _release: bool, browser_flag: 
         }
     }).expect("Failed to start CEF frame response worker");
 
-    // Initialize interpreter with source
-    if let Some(ref entry) = entry_path_for_init {
-        let source = match fs::read_to_string(entry) {
-            Ok(source) => source,
-            Err(error) => {
-                eprintln!("\n  {}×{} {}Could not read Poly entry point{}\n    {}\n    {}", RED, RESET, BOLD, RESET, entry.display(), error);
-                std::process::exit(1);
-            }
-        };
-        let mut interp = interpreter.lock().unwrap();
-        if let Err(e) = poly::init_interpreter(&mut interp, &source) {
-            eprintln!("{}error{}: Failed to initialize interpreter: {}", RED, RESET, e);
-        }
-    }
-
     thread::spawn(move || {
         let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
             .expect("Failed to start local server");
 
-        let entry_path = entry_path_for_server;
 
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
@@ -865,18 +845,11 @@ pub(crate) fn run_native_app(project_path: &Path, _release: bool, browser_flag: 
                 tiny_http::Response::from_string(format!(r#"{{"decorations":{}}}"#, decorations_for_server))
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
             }
-            // Handle IPC invoke (stateful)
+            // Handle JavaScript system APIs
             else if url == "/__poly_invoke" {
                 let mut body = String::new();
                 request.as_reader().read_to_string(&mut body).ok();
-
-                let result = if entry_path.is_some() {
-                    invoke_ipc_stateful(&interpreter_server, &body)
-                } else {
-                    // No entry point, only handle system APIs
-                    invoke_ipc_system_only(&body)
-                };
-
+                let result = invoke_ipc_system_only(&body);
                 tiny_http::Response::from_string(result)
                     .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap())
             } else {
@@ -1542,8 +1515,6 @@ if (typeof lucide !== 'undefined') {
         }
     });
 
-    // Clone entry_path for watcher thread
-    let entry_path_watcher = entry_path.clone();
 
     // File watcher for hot reload
     thread::spawn(move || {
@@ -1563,42 +1534,16 @@ if (typeof lucide !== 'undefined') {
         let web_path = project_path_for_watcher.join("web");
         let watch_path = if web_path.exists() { web_path } else { project_path_for_watcher.clone() };
 
-        // Also watch src directory for .poly files
-        let src_path = project_path_for_watcher.join("src");
-
         if let Err(e) = watcher.watch(&watch_path, RecursiveMode::Recursive) {
             eprintln!("  {}warning{}: Could not watch directory: {}", YELLOW, RESET, e);
         }
 
-        if src_path.exists() {
-            if let Err(e) = watcher.watch(&src_path, RecursiveMode::Recursive) {
-                eprintln!("  {}warning{}: Could not watch src directory: {}", YELLOW, RESET, e);
-            }
-        }
-
         loop {
             if let Ok(Ok(event)) = rx.recv() {
-                    // Check for .poly file changes
-                    let has_poly_change = event.paths.iter().any(|p| {
-                        p.extension().and_then(|e| e.to_str()) == Some("poly")
-                    });
-
-                    // Reload interpreter for .poly changes
-                    if has_poly_change {
-                        if let Some(ref entry) = entry_path_watcher {
-                            let source = fs::read_to_string(entry).unwrap_or_default();
-                            let mut interp = interpreter_watcher.lock().unwrap();
-                            *interp = poly::create_interpreter();
-                            if let Err(e) = poly::init_interpreter(&mut interp, &source) {
-                                eprintln!("  {}error{}: Reload failed: {}", RED, RESET, e);
-                            }
-                        }
-                    }
-
-                    // Reload for relevant file changes (HTML/CSS/JS/JSON/SVG/Poly)
+                    // Reload frontend assets after relevant file changes (HTML/CSS/JS/JSON/SVG/Poly)
                     let dominated_by_relevant = event.paths.iter().any(|p| {
                         let ext = p.extension().and_then(|e| e.to_str());
-                        matches!(ext, Some("html") | Some("css") | Some("js") | Some("json") | Some("svg") | Some("poly"))
+                        matches!(ext, Some("html") | Some("css") | Some("js") | Some("json") | Some("svg"))
                     });
 
                     if dominated_by_relevant {
@@ -1611,12 +1556,73 @@ if (typeof lucide !== 'undefined') {
     // Give server time to start
     std::thread::sleep(std::time::Duration::from_millis(100));
 
+    #[cfg(feature = "native")]
+    let mut vite_process = if use_vite_dev_server {
+        let backend_url = format!("http://127.0.0.1:{port}");
+        let mut command = crate::scaffold::npm_command();
+        command
+            .args(["run", "dev"])
+            .current_dir(project_path)
+            .env("POLY_BACKEND_URL", &backend_url);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
+        match command.spawn() {
+            Ok(mut child) => {
+                let mut ready = false;
+                for _ in 0..100 {
+                    if std::net::TcpStream::connect_timeout(
+                        &"127.0.0.1:5173".parse().unwrap(),
+                        std::time::Duration::from_millis(100),
+                    ).is_ok() {
+                        ready = true;
+                        break;
+                    }
+                    if let Ok(Some(status)) = child.try_wait() {
+                        eprintln!("{}error{}: Vite exited during startup with {}", RED, RESET, status);
+                        std::process::exit(1);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                if !ready {
+                    let _ = child.kill();
+                    eprintln!("{}error{}: Vite did not start on 127.0.0.1:5173", RED, RESET);
+                    std::process::exit(1);
+                }
+                println!("  {}>{} Frontend: http://127.0.0.1:5173 (Vite + HMR)", DIM, RESET);
+                Some(child)
+            }
+            Err(error) => {
+                eprintln!("{}error{}: Could not start Vite: {}", RED, RESET, error);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Standard mode: Single WebView - App handles everything via APIs
+    #[cfg(feature = "native")]
+    let url = if vite_process.is_some() {
+        "http://127.0.0.1:5173".to_string()
+    } else {
+        format!("http://localhost:{}", port)
+    };
+    #[cfg(not(feature = "native"))]
     let url = format!("http://localhost:{}", port);
 
     #[cfg(all(feature = "native", feature = "experimental-virtual-drive"))]
     poly::native::register_shutdown_hook(native_app::shutdown_all);
-    if let Err(e) = poly::run_native_url(&url, config) {
+    let run_result = poly::run_native_url(&url, config);
+    #[cfg(feature = "native")]
+    if let Some(mut child) = vite_process.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    if let Err(e) = run_result {
         eprintln!("{}error{}: {}", RED, RESET, e);
         eprintln!();
         eprintln!("  {}hint{}: Build with native feature enabled:", DIM, RESET);

@@ -1,4 +1,0 @@
-# Poly - Welcome Example
-# Run with: cargo run -p poly -- poly/examples/hello.poly
-
-print("Hello, Poly!")

@@ -5,7 +5,7 @@
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
 >
-> Poly's custom language and the NCOS Virtual Drive are experimental and excluded from normal builds. Native app embedding is Windows-only today. WebView permission responses, ZIP self-updates, and Linux code signing are not implemented. Poly does not sandbox native executables or arbitrary installer side effects.
+> The NCOS Virtual Drive is experimental and excluded from normal builds. Native app embedding is Windows-only today. WebView permission responses, ZIP self-updates, and Linux code signing are not implemented. Poly does not sandbox native executables or arbitrary installer side effects.
 
 ## Quick Start
 
@@ -26,10 +26,8 @@ Use `poly init --no-install` to create the project without running `npm install`
 | Capability | Enable with | Status / notes |
 |---|---|---|
 | Standard desktop framework | `--features native` | Default supported workflow; platform behavior still varies. |
-| Poly custom language and CLI | `--features experimental-language` | Experimental; excluded from normal builds. See the [language API](../poly/docs/API.md). |
 | NCOS Virtual Drive and native app install flow | `--features "native experimental-virtual-drive"` | Experimental; Windows is the first backend. See [Virtual Drive](#ncos-virtual-drive-layout). |
 | CEF renderer | `--features cef` | Optional; the matching CEF runtime must be packaged. See [CEF setup](../poly/docs/CEF.md). |
-| Poly language WASM bindings | `--features wasm` | Experimental and requires the custom language. |
 | `poly-ui` crate | separate workspace package | Incomplete prototype; layout and renderer work remains. |
 
 The usual local install command is `cargo install --path poly --features native`. Add experimental features only when you intend to use them. The package is named `poly-framework` on crates.io because `poly` is already registered there.
@@ -43,7 +41,6 @@ Poly exposes browser-facing APIs through the global `poly` object. Methods that 
 | Dialogs, filesystem, clipboard, notifications, shell, app, OS | Poly development server or Native Mode; exact behavior depends on the host. |
 | Window management, system tray, WebView, MultiView | Native Mode. |
 | `poly.cef.*` | Build with `cef`; package the matching CEF runtime. |
-| Poly source execution and `poly.call` | Build with `experimental-language`. |
 | `poly.ncos.drive.*` and NCOS installer APIs | Build with `native experimental-virtual-drive`; experimental, Windows-first. |
 
 ## Table of Contents
@@ -70,7 +67,7 @@ Poly exposes browser-facing APIs through the global `poly` object. Methods that 
   - [System Tray](#system-tray)
   - [Auto-Updater](#auto-updater)
   - [AI/LLM Integration](#aillm-integration)
-  - [IPC (Backend Functions)](#ipc-backend-functions)
+  - [IPC (System APIs)](#ipc-system-apis)
 - Project configuration and delivery
   - [Configuration (`poly.toml`)](#configuration-polytoml)
   - [Building Apps](#building-apps)
@@ -125,12 +122,11 @@ Each template uses `web/` as its Vite root and writes the production site to `di
 For a plain HTML app, use `poly init` without a framework flag. Generated projects include `poly.toml`, `assets/icon.png`, a web entry page, and a centered starter screen with the Poly logo. The generated `icon_path` sets the same logo as the native window icon shown by the operating-system titlebar.
 
 ```sh
-poly dev       # development server; Vite HMR for frontend templates
+poly dev       # development server; Vite for frontend imports and HMR
 poly build     # build frontend when configured, then package the desktop app
 poly run       # launch the app
 ```
 
-Poly's own language `lib` template and source-file execution are experimental and require `experimental-language`.
 
 ---
 
@@ -2133,78 +2129,9 @@ All AI methods return a response object:
 
 ---
 
-## IPC (Backend Functions)
+## IPC (System APIs)
 
-Call functions defined in `main.poly`.
-
-### `poly.invoke(functionName, args?)`
-
-Calls a backend function.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `functionName` | string | Function name |
-| `args` | object | Arguments as object |
-
-```poly
-// In main.poly:
-fn greet(name) {
-  return "Hello, " + name + "!"
-}
-
-fn calculate(a, b) {
-  return a + b
-}
-
-fn getUser(id) {
-  // Simulate database query
-  return {
-    "id": id,
-    "name": "John Doe",
-    "email": "john@example.com"
-  }
-}
-```
-
-```javascript
-// In JavaScript:
-const greeting = await poly.invoke('greet', { name: 'World' });
-console.log(greeting); // "Hello, World!"
-
-const sum = await poly.invoke('calculate', { a: 5, b: 3 });
-console.log(sum); // 8
-
-const user = await poly.invoke('getUser', { id: 123 });
-console.log(user.name); // "John Doe"
-```
-
-### Stateful Interpreter
-
-The Poly interpreter maintains its state between calls:
-
-```poly
-// main.poly
-let counter = 0
-
-fn increment() {
-  counter = counter + 1
-  return counter
-}
-
-fn getCounter() {
-  return counter
-}
-```
-
-```javascript
-await poly.invoke('increment'); // 1
-await poly.invoke('increment'); // 2
-await poly.invoke('increment'); // 3
-const count = await poly.invoke('getCounter'); // 3
-```
-
----
+`poly.invoke(name, args)` is reserved for framework system APIs exposed by the JavaScript bridge. Application logic belongs in your JavaScript modules and can import regular npm packages. Poly no longer embeds or executes a custom source language.
 
 ## Configuration (poly.toml)
 
@@ -2404,7 +2331,7 @@ Browser mode creates a dual-WebView window (UI + Content).
 
 ### [dependencies] Section
 
-NPM packages with versions:
+Legacy direct-download packages are listed here. For JavaScript module imports, use `poly add` so npm records dependencies in `package.json` and Vite can bundle them.
 
 ```toml
 [dependencies]
@@ -2586,13 +2513,15 @@ If `port = 0` or not specified, Poly will automatically find a free port.
 ```
 my-app/
 ├── poly.toml        # Configuration
-├── poly.lock        # Package lockfile
-├── packages/        # NPM packages
+├── package.json     # Frontend dependencies and scripts
+├── package-lock.json # Reproducible npm dependency lockfile
+├── node_modules/    # Installed npm packages
 ├── src/
-│   └── main.poly    # Backend logic (optional)
+│   └── src/         # JavaScript application modules (optional)
 ├── web/
 │   ├── index.html   # Your app
-│   ├── app.js       # JavaScript
+│   ├── src/
+│   │   └── main.js  # JavaScript imports and frontend entry point
 │   └── styles.css   # Styles
 └── assets/
     └── icon.png     # App icon (for tray and taskbar)
@@ -2602,9 +2531,11 @@ my-app/
 
 ## Package Manager
 
+Poly uses npm's `package.json` and `package-lock.json` for JavaScript libraries. Node.js and npm must be available on `PATH`. In a plain HTML project, the first `poly add` also configures Vite and adds `web/src/main.js` as an import entry point. Existing Vite configuration is preserved.
+
 ```bash
-# Add package
-poly add alpinejs
+# Add a package for normal JavaScript imports
+poly add lucide
 
 # Specific version
 poly add lodash -v 4.17.21
@@ -2612,18 +2543,22 @@ poly add lodash -v 4.17.21
 # Remove package
 poly remove lodash
 
-# Install packages from lockfile
+# Install dependencies from package.json / package-lock.json
 poly install
 
-# Verify hashes
+# Verify the installed dependency tree
 poly install --verify
 ```
 
-Packages are stored in `packages/` and can be loaded via `/packages/` in the browser:
+Import packages from `web/src/main.js` as usual:
 
-```html
-<script src="/packages/alpinejs/dist/cdn.min.js"></script>
+```js
+import { createIcons, Minus, Square, X } from 'lucide'
+
+createIcons({ icons: { Minus, Square, X } })
 ```
+
+`poly dev` starts Vite for frontend projects, and `poly build` bundles their imports for the native app. Older projects that only use `poly.lock` and `packages/` keep the direct `/packages/...` script workflow.
 
 ---
 

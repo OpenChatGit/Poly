@@ -1,8 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
-#[cfg(feature = "experimental-language")]
-use std::io::BufRead;
 use std::path::Path;
 use std::sync::mpsc::channel;
 use std::time::Duration;
@@ -19,8 +17,8 @@ mod dev_server;
 mod app_build;
 use app_build::{build_app, extract_toml_value};
 mod app_runtime;
-use app_runtime::{format_poly_diagnostic as render_poly_diagnostic, open_url_window, run_app_result, run_browser_mode, run_native_app_impl as run_native_app};
-use dev_server::{find_entry_point, handle_ipc_invoke_stateful as invoke_ipc_stateful, handle_ipc_invoke_system_only as invoke_ipc_system_only, run_dev_server};
+use app_runtime::{open_url_window, run_app_result, run_browser_mode, run_native_app_impl as run_native_app};
+use dev_server::{handle_ipc_invoke_system_only as invoke_ipc_system_only, run_dev_server};
 use system_api::handle_system_api;
 use scaffold::{create_project, init_project, npm_command, selected_project_template};
 use polyview_proxy::{handle_polyview_proxy, handle_polyview_proxy_post};
@@ -211,20 +209,6 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
     
-    /// Source file to execute (experimental language)
-    #[cfg(feature = "experimental-language")]
-    file: Option<String>,
-    
-    /// Run in REPL mode
-    #[arg(short, long)]
-    #[cfg(feature = "experimental-language")]
-    repl: bool,
-    
-    /// Evaluate a single expression
-    #[arg(short, long)]
-    #[cfg(feature = "experimental-language")]
-    eval: Option<String>,
-    
     /// Show version and check for updates
     #[arg(short = 'V', long = "version")]
     version: bool,
@@ -249,7 +233,7 @@ enum Commands {
     
     /// Run the application
     Run {
-        /// Project directory or file
+        /// Project directory
         #[arg(default_value = ".")]
         path: String,
         
@@ -318,7 +302,7 @@ enum Commands {
         /// Project name
         name: String,
         
-        /// Project template (app, lib, react, svelte, vue, preact)
+        /// Project template (app, react, svelte, vue, preact)
         #[arg(short, long, default_value = "app")]
         template: String,
         #[arg(long, conflicts_with_all = ["svelte", "vue", "preact"])]
@@ -336,7 +320,7 @@ enum Commands {
     
     /// Initialize Poly in existing directory
     Init {
-        /// Project template (app, lib, react, svelte, vue, preact)
+        /// Project template (app, react, svelte, vue, preact)
         #[arg(default_value = "app")]
         template: String,
         #[arg(long, conflicts_with_all = ["svelte", "vue", "preact"])]
@@ -355,7 +339,7 @@ enum Commands {
     /// Check for updates
     Update,
     
-    /// Add a JavaScript package from npm/CDN
+    /// Add an npm package for JavaScript imports
     Add {
         /// Package name (e.g., alpinejs, chart.js, three)
         package: String,
@@ -371,7 +355,7 @@ enum Commands {
         package: String,
     },
     
-    /// Install packages from poly.lock (reproducible builds)
+    /// Install npm packages from package-lock.json (legacy projects use poly.lock)
     Install {
         /// Verify hashes without reinstalling
         #[arg(long)]
@@ -438,13 +422,8 @@ enum Commands {
 fn generate_ai_info(format: &str) {
     let info = serde_json::json!({
         "poly_version": VERSION,
-        "description": "Poly language API reference for AI assistants",
+        "description": "Poly JavaScript and native API reference",
         "frontend_apis": {
-            "poly.call": {
-                "description": "Call Poly backend functions from JavaScript",
-                "syntax": "await poly.call(functionName, ...args)",
-                "example": "const result = await poly.call('greet', 'Alice');"
-            },
             "poly.fs": {
                 "methods": ["read", "write", "exists", "readDir"],
                 "example": "const content = await poly.fs.read('file.txt');"
@@ -482,38 +461,7 @@ fn generate_ai_info(format: &str) {
                 "example": "await poly.shell.open('https://example.com');"
             }
         },
-        "backend_syntax": {
-            "variables": {
-                "var": "Mutable variable with optional type annotation",
-                "let": "Immutable variable with optional type annotation",
-                "example": "var x: Int = 10\nlet name: String = \"Poly\""
-            },
-            "functions": {
-                "syntax": "fn name(param: Type) -> ReturnType:",
-                "example": "fn add(a: Int, b: Int) -> Int:\n    return a + b"
-            },
-            "structs": {
-                "syntax": "struct Name:\n    fn init(inout self, ...):",
-                "example": "struct Point:\n    fn init(inout self, x: Int, y: Int):\n        self.x = x\n        self.y = y"
-            },
-            "parameter_modifiers": {
-                "inout": "Pass by mutable reference",
-                "borrowed": "Pass by immutable reference",
-                "owned": "Transfer ownership",
-                "example": "fn increment(inout x: Int):\n    x = x + 1"
-            },
-            "types": ["Int", "Float", "String", "Bool", "List", "Dict"],
-            "control_flow": ["if/elif/else", "for", "while", "match"],
-            "operators": ["+", "-", "*", "/", "**", "%", "==", "!=", "<", ">", "<=", ">=", "and", "or", "not"]
-        },
-        "builtin_functions": [
-            "print", "len", "range", "str", "int", "float", "bool",
-            "html_escape", "url_encode", "url_decode",
-            "json_parse", "json_stringify",
-            "sleep", "timestamp", "format_date"
-        ],
         "cli_commands": [
-            "poly run <file>",
             "poly dev [path]",
             "poly build [path]",
             "poly test [path]",
@@ -526,7 +474,6 @@ fn generate_ai_info(format: &str) {
         ],
         "project_structure": {
             "poly.toml": "Project configuration file",
-            "src/main.poly": "Default entry point for applications",
             "web/": "Frontend files (HTML, CSS, JS)",
             "web/index.html": "Main HTML file for GUI apps"
         },
@@ -549,12 +496,6 @@ fn generate_ai_info(format: &str) {
             println!();
             println!("## Frontend APIs (JavaScript)");
             println!();
-            println!("### `poly.call(functionName, ...args)`");
-            println!("Call Poly backend functions from JavaScript.");
-            println!("```javascript");
-            println!("const result = await poly.call('greet', 'Alice');");
-            println!("```");
-            println!();
             println!("### File System (`poly.fs`)");
             println!("- `read(path)` - Read file content");
             println!("- `write(path, content)` - Write to file");
@@ -574,30 +515,7 @@ fn generate_ai_info(format: &str) {
             println!("- `put(url, body, options)` - PUT request");
             println!("- `delete(url, options)` - DELETE request");
             println!();
-            println!("## Backend Syntax (Poly)");
-            println!();
-            println!("### Variables");
-            println!("```python");
-            println!("var x: Int = 10  # Mutable");
-            println!("let name: String = \"Poly\"  # Immutable");
-            println!("```");
-            println!();
-            println!("### Functions");
-            println!("```python");
-            println!("fn add(a: Int, b: Int) -> Int:");
-            println!("    return a + b");
-            println!("```");
-            println!();
-            println!("### Structs");
-            println!("```python");
-            println!("struct Point:");
-            println!("    fn init(inout self, x: Int, y: Int):");
-            println!("        self.x = x");
-            println!("        self.y = y");
-            println!("```");
-            println!();
             println!("## CLI Commands");
-            println!("- `poly run <file>` - Run a Poly script");
             println!("- `poly dev` - Start development server");
             println!("- `poly build` - Build for production");
             println!("- `poly init <name>` - Create new project");
@@ -650,12 +568,7 @@ fn bundle_cef_project(path: &str, output: Option<&str>, release: bool) -> Result
             if source.is_dir() { copy_directory_for_cef(&source, &bundle.join(name))?; }
         }
         fs::copy(&manifest, bundle.join("poly.toml")).map_err(|error| format!("Could not copy poly.toml: {error}"))?;
-        let entry = project.join("src").join("main.poly");
-        if entry.is_file() {
-            let destination = bundle.join("src").join("main.poly");
-            if let Some(parent) = destination.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
-            fs::copy(&entry, destination).map_err(|error| format!("Could not copy Poly entry point: {error}"))?;
-        }
+
         println!("CEF app bundle created at {}", output.display());
         println!("The Windows sandbox is not enabled by this package mode; CEF requires its bootstrap DLL entry-point integration for sandboxed builds.");
         Ok(())
@@ -767,31 +680,7 @@ fn main() {
                 }
             }
             
-            #[cfg(feature = "experimental-language")]
-            {
-                if let Some(expr) = cli.eval {
-                    match poly::eval(&expr) {
-                        Ok(result) => { println!("{}", result); Ok(()) },
-                        Err(e) => Err(e),
-                    }
-                } else if let Some(file) = cli.file {
-                    run_file_result(&file)
-                } else if cli.repl || atty::is(atty::Stream::Stdin) {
-                    run_repl();
-                    Ok(())
-                } else {
-                    let stdin = io::stdin();
-                    let source: String = stdin.lock().lines()
-                        .filter_map(|l| l.ok())
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    poly::run(&source).map(|_| ())
-                }
-            }
-            #[cfg(not(feature = "experimental-language"))]
-            {
-                Err("No command was provided. Use `poly --help` to see available commands.".into())
-            }
+            Err("No command was provided. Use `poly --help` to see available commands.".into())
         }
     };
     
@@ -976,52 +865,6 @@ fn download_and_install_update(info: &poly::UpdateInfo) {
 fn download_and_install_update(_info: &poly::UpdateInfo) {
     println!("  {}>{} Update requires native feature", YELLOW, RESET);
 }
-
-#[cfg(feature = "experimental-language")]
-fn run_file_result(file: &str) -> Result<(), String> {
-    let source = fs::read_to_string(file)
-        .map_err(|e| format!("Failed to read '{}': {}", file, e))?;
-    poly::run(&source).map(|_| ())
-}
-
-#[cfg(feature = "experimental-language")]
-fn run_repl() {
-    println!();
-    println!("  {}POLY{} v{}", CYAN, RESET, VERSION);
-    println!("  {}Type 'exit' to quit{}", DIM, RESET);
-    println!();
-    
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    
-    loop {
-        print!("{}>{} ", CYAN, RESET);
-        stdout.flush().unwrap();
-
-        let mut input = String::new();
-        if stdin.read_line(&mut input).is_err() {
-            break;
-        }
-        
-        let input = input.trim();
-        if input.is_empty() { continue; }
-        if input == "exit" || input == "quit" { break; }
-        
-        match poly::eval(input) {
-            Ok(result) => {
-                if result != "none" {
-                    println!("{}", result);
-                }
-            }
-            Err(_) => {
-                if let Err(e) = poly::run(input) {
-                    eprintln!("{}error{}: {}", RED, RESET, e);
-                }
-            }
-        }
-    }
-}
-
 
 /// Find a free port to use for the local server
 fn find_free_port() -> Option<u16> {

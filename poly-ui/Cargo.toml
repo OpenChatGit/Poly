@@ -5,8 +5,8 @@ edition = "2021"
 description = "Experimental Poly UI framework prototype"
 
 [dependencies]
-# Core Poly language
-poly = { package = "poly-framework", path = "../poly", features = ["experimental-language"] }
+# Poly native APIs
+poly = { package = "poly-framework", path = "../poly", features = ["native"] }
 
 # Window & Graphics
 winit = "0.30"

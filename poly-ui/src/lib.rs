@@ -1,6 +1,6 @@
 //! Poly UI - High-performance cross-platform UI framework
 //! 
-//! A Flutter/Tauri alternative built with Rust and Poly language support.
+//! A Rust UI framework prototype built on native Poly APIs.
 
 pub mod core;
 pub mod widgets;

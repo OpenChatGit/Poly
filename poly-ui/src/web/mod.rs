@@ -36,23 +36,3 @@ pub fn create_canvas(container_id: &str, width: u32, height: u32) -> Result<Html
     
     Ok(canvas)
 }
-
-/// Run Poly code and return output
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn run_poly(source: &str) -> Result<String, JsValue> {
-    match ::poly::run(source) {
-        Ok(output) => Ok(output.join("\n")),
-        Err(e) => Err(JsValue::from_str(&e)),
-    }
-}
-
-/// Evaluate Poly expression
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub fn eval_poly(source: &str) -> Result<String, JsValue> {
-    match ::poly::eval(source) {
-        Ok(result) => Ok(result),
-        Err(e) => Err(JsValue::from_str(&e)),
-    }
-}

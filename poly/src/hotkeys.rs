@@ -143,7 +143,7 @@ pub fn unregister_hotkey(id: i32) -> Result<(), String> {
     Ok(())
 }
 
-/// Poll pending hotkey events (callback names). Called from Poly scripts.
+/// Poll pending hotkey events registered by the host app.
 #[cfg(feature = "native")]
 pub fn poll_hotkey_events() -> Vec<String> {
     HOTKEY_EVENTS

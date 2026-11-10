@@ -36,16 +36,18 @@ poly build        # Build the frontend and desktop application
 poly run --native # Launch the native desktop app
 ```
 
+Add JavaScript libraries with `poly add <package>`. Poly records them in `package.json`, uses npm's lockfile, and configures Vite imports for plain HTML projects. Import modules normally from `web/src/main.js`, then use `poly dev` and `poly build`.
+
 ## Current status and limitations
 
 - Poly is experimental and not ready to be treated as a stable or production-proven framework.
 - Native desktop support currently targets Windows. Linux and macOS support are future work.
-- The custom Poly language and NCOS Virtual Drive are experimental features. They are excluded from default builds and are not recommended for application use.
+- The NCOS Virtual Drive is experimental and excluded from default builds.
 - `poly-ui` is an incomplete prototype and is not part of the standard Poly build.
 - Optional CEF support has additional runtime and packaging requirements. The default native backend uses Wry.
 - APIs, project templates, and package metadata may change between releases.
 
-The custom language and virtual drive can be enabled when building from source with `--features "native experimental-language experimental-virtual-drive"`. These features are experimental and may be incomplete.
+The NCOS Virtual Drive can be enabled when building from source with `--features "native experimental-virtual-drive"`. This feature is experimental and may be incomplete.
 
 ## Features
 
@@ -55,18 +57,16 @@ The custom language and virtual drive can be enabled when building from source w
 - Native dialogs, clipboard, notifications, and system tray integrations
 - Multi-window support and custom URL protocols
 - Optional CEF renderer backend
-- Experimental language frontend and backend calls
 - Experimental NCOS Virtual Drive
 
 Feature availability depends on platform, build flags, and the maturity of each subsystem.
 
 ## Documentation
 
-The [docs.rs reference](https://docs.rs/poly-framework/latest/poly/) combines the Rust API with the complete JavaScript API and developer guide, plus the experimental language and CEF guides.
+The [docs.rs reference](https://docs.rs/poly-framework/latest/poly/) combines the Rust API with the complete JavaScript API and developer guide, plus CEF setup notes.
 
 - [API reference](https://github.com/OpenChatGit/Poly/blob/master/docs/API.md)
 - [CEF backend notes](https://github.com/OpenChatGit/Poly/blob/master/poly/docs/CEF.md)
-- [Experimental language API notes](https://github.com/OpenChatGit/Poly/blob/master/poly/docs/API.md)
 - [Examples](https://github.com/OpenChatGit/Poly/tree/master/poly/examples)
 - [Crate package information](https://github.com/OpenChatGit/Poly/blob/master/poly/README.md)
 

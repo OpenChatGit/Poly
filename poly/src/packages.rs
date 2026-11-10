@@ -6,8 +6,6 @@ use std::fs;
 use std::path::Path;
 
 #[cfg(feature = "native")]
-use std::collections::HashSet;
-#[cfg(feature = "native")]
 use std::io::{self, Write};
 #[cfg(feature = "native")]
 use std::sync::{Arc, Mutex};
@@ -179,19 +177,9 @@ pub fn write_lockfile(entries: &HashMap<String, LockEntry>) -> Result<(), String
 }
 
 
-/// Package to install
-#[allow(dead_code)]
-#[derive(Clone)]
-struct PackageJob {
-    name: String,
-    version: Option<String>,
-}
-
-/// poly add <package> - UV-style fast parallel installation
+/// poly add <package> - add an npm dependency for frontend imports
 #[cfg(feature = "native")]
 pub fn add_package(package: &str, version: Option<&str>) -> Result<(), String> {
-    use std::time::Instant;
-    
     println!();
     println!("  {}POLY{} {}add{}", CYAN, RESET, DIM, RESET);
     println!();
@@ -200,133 +188,24 @@ pub fn add_package(package: &str, version: Option<&str>) -> Result<(), String> {
         return Err("Not a Poly project. Run 'poly init' first.".to_string());
     }
     
-    let start = Instant::now();
-    let client = get_client();
-    
-    // Phase 1: Resolve all dependencies
-    print!("  {}Resolving dependencies...{}", DIM, RESET);
-    io::stdout().flush().ok();
-    
-    let mut to_install: Vec<NpmPackage> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut queue: Vec<PackageJob> = vec![PackageJob { 
-        name: package.to_string(), 
-        version: version.map(|s| s.to_string()) 
-    }];
-    
-    while let Some(job) = queue.pop() {
-        if seen.contains(&job.name) { continue; }
-        seen.insert(job.name.clone());
-        
-        let pkg = fetch_npm_package(&client, &job.name, job.version.as_deref())?;
-        
-        // Add dependencies to queue
-        for dep_name in pkg.dependencies.keys() {
-            if !seen.contains(dep_name) {
-                queue.push(PackageJob { name: dep_name.clone(), version: None });
-            }
-        }
-        
-        to_install.push(pkg);
+    let needs_vite = crate::scaffold::enable_vite_imports(Path::new("."))?;
+    if needs_vite {
+        run_npm(&["install", "--save-dev", "vite"])?;
     }
-    
-    println!("\r  {}Resolved {} packages{}              ", GREEN, to_install.len(), RESET);
-    
-    if to_install.is_empty() {
-        println!();
-        return Ok(());
+
+    let spec = version.map(|version| format!("{package}@{version}")).unwrap_or_else(|| package.to_string());
+    run_npm(&["install", "--save", &spec])
+}
+
+#[cfg(feature = "native")]
+fn run_npm(args: &[&str]) -> Result<(), String> {
+    let status = crate::scaffold::npm_command()
+        .args(args)
+        .status()
+        .map_err(|error| format!("Could not start npm: {error}"))?;
+    if !status.success() {
+        return Err(format!("npm {} failed with {status}.", args.join(" ")));
     }
-    
-    // Phase 2: Parallel download and extract
-    println!("  {}Downloading...{}", DIM, RESET);
-    
-    type PackageDownloadResult = (String, String, String, Vec<String>);
-    let results: Arc<Mutex<Vec<PackageDownloadResult>>> = Arc::new(Mutex::new(Vec::new()));
-    let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let counter: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
-    let total = to_install.len();
-    
-    // Use thread pool for parallel downloads
-    let handles: Vec<_> = to_install.into_iter().map(|pkg| {
-        let results = Arc::clone(&results);
-        let errors = Arc::clone(&errors);
-        let counter = Arc::clone(&counter);
-        
-        thread::spawn(move || {
-            let client = get_client();
-            let pkg_dir = Path::new("packages").join(&pkg.name);
-            
-            // Skip if already installed with same version
-            let lockfile = read_lockfile();
-            if let Some(entry) = lockfile.get(&pkg.name) {
-                if entry.version == pkg.version && pkg_dir.exists() {
-                    let mut c = counter.lock().unwrap();
-                    *c += 1;
-                    return;
-                }
-            }
-            
-            // Remove old version
-            if pkg_dir.exists() { fs::remove_dir_all(&pkg_dir).ok(); }
-            
-            match download_and_extract(&client, &pkg, &pkg_dir) {
-                Ok(integrity) => {
-                    let deps: Vec<String> = pkg.dependencies.keys().cloned().collect();
-                    results.lock().unwrap().push((pkg.name, pkg.version, integrity, deps));
-                }
-                Err(e) => {
-                    errors.lock().unwrap().push(format!("{}: {}", pkg.name, e));
-                }
-            }
-            
-            let mut c = counter.lock().unwrap();
-            *c += 1;
-            
-            // Progress indicator
-            print!("\r  {}Downloading... {}/{}{}", DIM, *c, total, RESET);
-            io::stdout().flush().ok();
-        })
-    }).collect();
-    
-    // Wait for all downloads
-    for handle in handles {
-        handle.join().ok();
-    }
-    
-    // Check for errors
-    let errs = errors.lock().unwrap();
-    if !errs.is_empty() {
-        println!();
-        for e in errs.iter() {
-            println!("  {}>{} {}Error:{} {}", YELLOW, RESET, YELLOW, RESET, e);
-        }
-        return Err("Some packages failed to install".to_string());
-    }
-    
-    // Update lockfile
-    let installed = results.lock().unwrap();
-    let mut lockfile = read_lockfile();
-    
-    for (name, version, integrity, deps) in installed.iter() {
-        lockfile.insert(name.clone(), LockEntry {
-            version: version.clone(),
-            integrity: integrity.clone(),
-            dependencies: deps.clone(),
-        });
-        
-        // Update poly.toml for top-level package only
-        if name == package {
-            update_poly_toml(name, version)?;
-        }
-    }
-    
-    write_lockfile(&lockfile)?;
-    add_to_gitignore("packages/")?;
-    
-    let elapsed = start.elapsed();
-    println!("\r  {}Installed {} packages in {:.2}s{}          ", GREEN, installed.len(), elapsed.as_secs_f64(), RESET);
-    println!();
-    
     Ok(())
 }
 
@@ -341,6 +220,13 @@ pub fn remove_package(package: &str) -> Result<(), String> {
     println!("  {}POLY{} {}remove{}", CYAN, RESET, DIM, RESET);
     println!();
     
+    if Path::new("package.json").is_file() {
+        #[cfg(feature = "native")]
+        return run_npm(&["uninstall", package]);
+        #[cfg(not(feature = "native"))]
+        return Err("Removing npm packages requires the native feature.".to_string());
+    }
+
     let pkg_dir = Path::new("packages").join(package);
     
     if !pkg_dir.exists() {
@@ -372,6 +258,10 @@ pub fn install_packages(verify_only: bool) -> Result<(), String> {
     
     if !Path::new("poly.toml").exists() {
         return Err("Not a Poly project.".to_string());
+    }
+
+    if Path::new("package.json").is_file() {
+        return run_npm(if verify_only { &["ls", "--depth=0"] } else { &["install"] });
     }
     
     let lockfile = read_lockfile();

@@ -148,48 +148,6 @@ pub(super) fn run_app_result(path: &str, release: bool, native: bool, browser: b
         return Ok(());
     }
 
-    if project_path.is_file() {
-        let start = std::time::Instant::now();
-        let source = fs::read_to_string(project_path)
-            .map_err(|e| format!("Could not read {}: {}", project_path.display(), e))?;
-        println!("\n  {}POLY{} v{}  {}run{}", CYAN, RESET, VERSION, DIM, RESET);
-        poly::run(&source).map_err(|error| render_poly_diagnostic(project_path, &source, &error))?;
-        println!("\n  {}✓{} Finished in {}ms", GREEN, RESET, start.elapsed().as_millis());
-        return Ok(());
-    }
-
-    let entry = find_entry_point(project_path)
-        .ok_or_else(|| format!("No entry point found in {}. Expected main.poly or src/main.poly.", project_path.display()))?;
-
-    println!();
-    println!("  {}POLY{} v{}  {}{}{}", CYAN, RESET, VERSION, DIM, if release { "release" } else { "debug" }, RESET);
-    println!();
-
-    let start = std::time::Instant::now();
-    let source = fs::read_to_string(&entry)
-        .map_err(|e| format!("Could not read {}: {}", entry.display(), e))?;
-    poly::run(&source).map_err(|error| render_poly_diagnostic(&entry, &source, &error))?;
-    println!("\n  {}✓{} Finished in {}ms", GREEN, RESET, start.elapsed().as_millis());
-    Ok(())
-}
-
-pub(super) fn format_poly_diagnostic(path: &Path, source: &str, error: &str) -> String {
-    let Some(location) = error.strip_prefix("Syntax error at line ") else {
-        return format!("{}\n{}", path.display(), error);
-    };
-    let Some((line_column, message)) = location.split_once(": ") else {
-        return format!("{}\n{}", path.display(), error);
-    };
-    let Some((line, column)) = line_column.split_once(", column ") else {
-        return format!("{}\n{}", path.display(), error);
-    };
-    let (Ok(line_number), Ok(column_number)) = (line.parse::<usize>(), column.parse::<usize>()) else {
-        return format!("{}\n{}", path.display(), error);
-    };
-    let source_line = source.lines().nth(line_number.saturating_sub(1)).unwrap_or("");
-    let caret = " ".repeat(column_number.saturating_sub(1));
-    format!(
-        "{}:{}:{}\n{}\n{}^ {}",
-        path.display(), line_number, column_number, source_line, caret, message
-    )
+    let _ = (release, browser, ui_height);
+    Err("`poly run` launches desktop apps with `--native`; choose an HTML/JavaScript project entry point.".into())
 }
