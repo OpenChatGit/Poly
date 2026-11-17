@@ -368,10 +368,11 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         event_loop::{ControlFlow, EventLoop},
         window::WindowBuilder,
     };
+    use tao::platform::run_return::EventLoopExtRunReturn;
     use std::sync::{Arc, Mutex};
     use std::rc::Rc;
 
-    let event_loop = EventLoop::new();
+    let mut event_loop = EventLoop::new();
     NATIVE_EXIT_REQUESTED.store(false, Ordering::Release);
 
     let mut builder = WindowBuilder::new()
@@ -587,7 +588,9 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
     webview_manager.set_main_webview(webview);
     let mut restore_maximized_after_fullscreen = false;
 
-    event_loop.run(move |event, _, control_flow| {
+    // `run()` exits the whole process on Windows. Returning here is required
+    // so callers such as `poly dev --native` can clean up their child servers.
+    event_loop.run_return(move |event, _, control_flow| {
         let cadence_ms = if crate::webview_native::native_surface_interaction_active() { 8 } else { 50 };
         *control_flow = ControlFlow::WaitUntil(
             std::time::Instant::now() + std::time::Duration::from_millis(cadence_ms),
@@ -678,6 +681,8 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
             _ => {}
         }
     });
+
+    Ok(())
 }
 
 // ============================================

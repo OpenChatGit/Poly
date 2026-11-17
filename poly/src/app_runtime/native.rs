@@ -1155,6 +1155,9 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
         };
         command.arg(vite_port.to_string())
             .current_dir(project_path)
+            // The dev server never reads interactive input. Keep it from sharing
+            // the foreground terminal's stdin with the Poly process.
+            .stdin(std::process::Stdio::null())
             .env("POLY_BACKEND_URL", &backend_url);
         #[cfg(target_os = "windows")]
         {
