@@ -1143,10 +1143,17 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     #[cfg(feature = "native")]
     let mut vite_process = if use_vite_dev_server {
         let backend_url = format!("http://127.0.0.1:{port}");
-        let mut command = crate::scaffold::npm_command();
-        command
-            .args(["run", "dev", "--", "--host", "127.0.0.1", "--port"])
-            .arg(vite_port.to_string())
+        let vite_cli = project_path.join("node_modules/vite/bin/vite.js");
+        let mut command = if vite_cli.is_file() {
+            let mut command = std::process::Command::new("node");
+            command.arg(vite_cli).args(["--host", "127.0.0.1", "--port"]);
+            command
+        } else {
+            let mut command = crate::scaffold::npm_command();
+            command.args(["run", "dev", "--", "--host", "127.0.0.1", "--port"]);
+            command
+        };
+        command.arg(vite_port.to_string())
             .current_dir(project_path)
             .env("POLY_BACKEND_URL", &backend_url);
         #[cfg(target_os = "windows")]
