@@ -43,6 +43,7 @@ pub mod virtual_drive;
 pub mod theme;
 pub mod db;
 pub mod hotkeys;
+pub mod plugin_runtime;
 
 // Re-export WebView types
 pub use webview::{WebViewConfig, WebViewBounds, WebViewState, WebViewEvent, WebViewOperation};

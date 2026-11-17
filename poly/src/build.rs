@@ -129,6 +129,7 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
     if project_path.join("package.json").is_file() && crate::scaffold::has_vite_config(project_path) {
         run_frontend_build(project_path)?;
     }
+    build_rust_plugins(project_path)?;
     
     println!();
     println!("  {}POLY{} {}build{}", CYAN, RESET, DIM, RESET);
@@ -272,6 +273,81 @@ fn bundle_web_assets(project_path: &Path, bundle_dir: &Path) -> Result<(), Strin
     
 
     
+    Ok(())
+}
+
+fn build_rust_plugins(project_path: &Path) -> Result<(), String> {
+    let project_config = poly::PolyConfig::load(project_path);
+    let web_root = project_path.join(&project_config.web.dir);
+    let plugins_dir = web_root.join("plugins");
+    if !plugins_dir.is_dir() { return Ok(()); }
+
+    for entry in fs::read_dir(&plugins_dir).map_err(|error| format!("Could not read plugins directory: {error}"))? {
+        let entry = entry.map_err(|error| format!("Could not read plugin entry: {error}"))?;
+        if !entry.path().is_dir() { continue; }
+        let plugin_dir = entry.path();
+        let manifest_path = plugin_dir.join("manifest.json");
+        if !manifest_path.is_file() { continue; }
+        let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path)
+            .map_err(|error| format!("Could not read {}: {error}", manifest_path.display()))?)
+            .map_err(|error| format!("Invalid plugin manifest {}: {error}", manifest_path.display()))?;
+        if manifest.get("enabled").and_then(serde_json::Value::as_bool) != Some(true) { continue; }
+        let Some(native) = manifest.get("native") else { continue; };
+        if native.get("runtime").and_then(serde_json::Value::as_str) != Some("rust-sidecar") { continue; }
+
+        let plugin_id = entry.file_name().to_string_lossy().to_string();
+        if plugin_id.is_empty() || !plugin_id.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
+            return Err(format!("Invalid Rust plugin directory name: {plugin_id}"));
+        }
+        let crate_relative = native.get("crate").and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("Rust plugin '{plugin_id}' must declare native.crate."))?;
+        let binary_name = native.get("binary").and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("Rust plugin '{plugin_id}' must declare native.binary."))?;
+        let executable_relative = native.get("executable").and_then(serde_json::Value::as_str)
+            .ok_or_else(|| format!("Rust plugin '{plugin_id}' must declare native.executable."))?;
+        if !binary_name.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')) {
+            return Err(format!("Invalid Rust binary name in plugin '{plugin_id}'."));
+        }
+        let safe_relative = |value: &str| {
+            let path = Path::new(value);
+            !path.is_absolute() && path.components().all(|part| matches!(part, std::path::Component::Normal(_)))
+        };
+        if !safe_relative(crate_relative) || !safe_relative(executable_relative) {
+            return Err(format!("Rust plugin '{plugin_id}' paths must stay within its plugin directory."));
+        }
+        let crate_manifest = plugin_dir.join(crate_relative).canonicalize()
+            .map_err(|error| format!("Rust crate for plugin '{plugin_id}' was not found: {error}"))?;
+        let canonical_plugin_dir = plugin_dir.canonicalize().map_err(|error| format!("Could not resolve plugin directory: {error}"))?;
+        if !crate_manifest.starts_with(&canonical_plugin_dir) {
+            return Err(format!("Rust crate for plugin '{plugin_id}' is outside the plugin directory."));
+        }
+
+        println!("  {}>{} Building Rust plugin: {}", DIM, RESET, plugin_id);
+        let target_dir = project_path.join("dist/native-plugins").join(&plugin_id);
+        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+        let output = Command::new(cargo)
+            .args(["build", "--release", "--manifest-path"])
+            .arg(&crate_manifest)
+            .arg("--target-dir")
+            .arg(&target_dir)
+            .current_dir(&plugin_dir)
+            .output()
+            .map_err(|error| format!("Could not start Cargo for Rust plugin '{plugin_id}': {error}"))?;
+        if !output.status.success() {
+            let details = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Rust plugin '{plugin_id}' failed to compile: {}", details.trim()));
+        }
+        let executable_name = if cfg!(windows) { format!("{binary_name}.exe") } else { binary_name.to_string() };
+        let built = target_dir.join("release").join(executable_name);
+        if !built.is_file() {
+            return Err(format!("Rust plugin '{plugin_id}' did not produce the binary '{}'", built.display()));
+        }
+        let staged_path = plugin_dir.join(executable_relative);
+        if let Some(parent) = staged_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| format!("Could not create Rust plugin output folder: {error}"))?;
+        }
+        fs::copy(&built, &staged_path).map_err(|error| format!("Could not stage Rust plugin '{plugin_id}': {error}"))?;
+    }
     Ok(())
 }
 

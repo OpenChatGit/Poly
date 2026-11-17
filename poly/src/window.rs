@@ -560,7 +560,7 @@ fn run_window(
         });
     
     // Set content
-    let ipc_script = get_ipc_script(id);
+    let ipc_script = get_native_shortcut_script();
     wv_builder = wv_builder.with_initialization_script(&ipc_script);
     
     if let Some(url) = &config.url {
@@ -812,31 +812,16 @@ fn handle_ipc_message(message: &str, window: &tao::window::Window, fullscreen_re
 }
 
 #[cfg(feature = "native")]
-fn get_ipc_script(window_id: u64) -> String {
-    format!(r#"
-window.ipc = {{
-  postMessage: function(msg) {{
-    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(msg);
-    else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) window.webkit.messageHandlers.ipc.postMessage(msg);
-  }}
-}};
-window.poly = window.poly || {{}};
-window.poly.windowId = {};
-window.poly.window = {{
-  minimize: function() {{ window.ipc.postMessage('minimize'); }},
-  maximize: function() {{ window.ipc.postMessage('maximize'); }},
-  close: function() {{ window.ipc.postMessage('close'); }},
-  drag: function() {{ window.ipc.postMessage('drag'); }},
-  focus: function() {{ window.ipc.postMessage('focus'); }},
-  restore: function() {{ window.ipc.postMessage('restore'); }}
-}};
-window.addEventListener('keydown', function(event) {{
+fn get_native_shortcut_script() -> String {
+    r#"
+window.addEventListener('keydown', function(event) {
   if (event.key !== 'F11' || event.repeat) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  window.ipc.postMessage('poly:ncos:toggle-fullscreen');
-}}, true);
-"#, window_id)
+  if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('poly:ncos:toggle-fullscreen');
+  else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) window.webkit.messageHandlers.ipc.postMessage('poly:ncos:toggle-fullscreen');
+}, true);
+"#.to_string()
 }
 
 #[cfg(feature = "native")]

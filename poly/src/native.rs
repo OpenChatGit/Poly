@@ -552,6 +552,12 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                 "maximize" => {
                     window_clone.set_maximized(!window_clone.is_maximized());
                 }
+                "restore" => {
+                    window_clone.set_visible(true);
+                    window_clone.set_minimized(false);
+                    window_clone.set_maximized(false);
+                    window_clone.set_focus();
+                }
                 "close" => {
                     if close_to_tray && tray_enabled {
                         window_clone.set_visible(false);

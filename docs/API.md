@@ -1,6 +1,6 @@
 # Poly API & Developer Guide
 
-**Current release:** 0.4.10 · **Last reviewed:** 2026-10
+**Current release:** 0.5.0 · **Last reviewed:** 2026-11
 
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
@@ -133,34 +133,44 @@ Use `poly dev --native` while developing a desktop app. It opens the native Poly
 
 ---
 
+## Rust Sidecar Plugins
+
+Poly can build and invoke app plugins written in Rust as separate native executables. This avoids loading compiler-sensitive Rust dynamic libraries into the Poly process.
+
+Declare an enabled plugin's native target in its `web/plugins/<id>/manifest.json`:
+
+```json
+"native": {
+  "runtime": "rust-sidecar",
+  "crate": "native/Cargo.toml",
+  "binary": "my-plugin-native",
+  "executable": "native/bin/my-plugin-native.exe"
+}
+```
+
+`poly build` compiles enabled sidecars in release mode and stages them with the web bundle. During development, the runtime builds the crate on first use if the staged executable is missing. A sidecar receives one JSON request on stdin with `method` and `args`, then writes one JSON object to stdout with either `result` or `error`. Frontend plugins invoke it with `window.dawnPluginHost.invokeNative(pluginId, method, args)`.
+
+Sidecars are native programs and should be treated like installed application code. Only enable plugins whose Rust source you trust.
+
 ## Window Control
 
-Control the current window. Only available in native mode (`poly run --native`).
-
-> **Important:** Poly does NOT inject a titlebar automatically. When using `decorations = false` (frameless), you must build your own titlebar using the `polyWindow` API.
-
-### `polyWindow.minimize()`
-
-Minimizes the window.
+Poly does not create a `window.poly` or `polyWindow` global. Import the current-window API in your frontend module, as you would with Tauri or Electron:
 
 ```javascript
-polyWindow.minimize();
+import { getCurrentWindow } from './poly.js';
+
+const appWindow = getCurrentWindow();
+appWindow.minimize();
+appWindow.maximize();
+appWindow.close();
 ```
 
-### `polyWindow.maximize()`
-
-Toggles between maximized and normal state.
+The current-window API sends commands through the native WebView IPC channel. It works in Poly's native desktop window; it does not use Poly's managed-window registry, so the main window is never looked up using a fabricated window ID. `appWindow.restore()` restores the window, and `appWindow.startDragging()` starts dragging a custom titlebar.
 
 ```javascript
-polyWindow.maximize();
-```
-
-### `polyWindow.close()`
-
-Closes the window.
-
-```javascript
-polyWindow.close();
+titlebar.addEventListener('mousedown', event => {
+  if (event.button === 0 && !event.target.closest('button')) appWindow.startDragging();
+});
 ```
 
 ### F11 Fullscreen Shortcut
@@ -168,31 +178,6 @@ polyWindow.close();
 Native Poly windows toggle borderless fullscreen when the user presses **F11**. This works in the app's main WebView and Poly-managed WebViews. If the window was maximized before entering fullscreen, Poly restores that maximized state when fullscreen is exited.
 
 The same behavior is available for windows created with `poly.windows.create()`.
-
-### `polyWindow.drag()`
-
-Starts window dragging. Call this on `mousedown` for a custom titlebar.
-
-```javascript
-// In your custom titlebar
-<div class="titlebar" onmousedown="polyWindow.drag()">
-  <span>My App</span>
-</div>
-```
-
-### `polyWindow.isFrameless()`
-
-Checks if the window is running in frameless mode.
-
-**Returns:** `Promise<boolean>`
-
-```javascript
-const frameless = await polyWindow.isFrameless();
-if (frameless) {
-  // Show custom titlebar
-  document.getElementById('custom-titlebar').style.display = 'flex';
-}
-```
 
 ### Extended Window API
 
@@ -360,12 +345,12 @@ Complete example of a custom titlebar for frameless windows:
   </style>
 </head>
 <body>
-  <div class="titlebar" onmousedown="polyWindow.drag()">
+  <div class="titlebar" data-poly-window-drag>
     <div class="titlebar-title">My App</div>
     <div class="titlebar-buttons">
-      <button class="titlebar-btn" onclick="polyWindow.minimize()">─</button>
-      <button class="titlebar-btn" onclick="polyWindow.maximize()">□</button>
-      <button class="titlebar-btn close" onclick="polyWindow.close()">✕</button>
+      <button class="titlebar-btn" data-poly-window-action="minimize">─</button>
+      <button class="titlebar-btn" data-poly-window-action="maximize">□</button>
+      <button class="titlebar-btn close" data-poly-window-action="close">✕</button>
     </div>
   </div>
   
@@ -373,6 +358,18 @@ Complete example of a custom titlebar for frameless windows:
     <h1>Welcome</h1>
     <p>Your app content here</p>
   </div>
+  <script type="module">
+    import { getCurrentWindow } from './src/poly.js';
+    const appWindow = getCurrentWindow();
+    document.querySelectorAll('[data-poly-window-action]').forEach(button => {
+      button.addEventListener('click', () => appWindow[button.dataset.polyWindowAction]());
+    });
+    document.querySelectorAll('[data-poly-window-drag]').forEach(titlebar => {
+      titlebar.addEventListener('mousedown', event => {
+        if (event.button === 0 && !event.target.closest('button')) appWindow.startDragging();
+      });
+    });
+  </script>
 </body>
 </html>
 ```
@@ -430,16 +427,28 @@ const aboutWin = await poly.windows.create({
       </style>
     </head>
     <body>
-      <div class="titlebar" onmousedown="polyWindow.drag()">
+      <div class="titlebar" data-poly-window-drag>
         <span>About</span>
-        <button onclick="polyWindow.close()" style="background:none;border:none;color:#888;cursor:pointer">✕</button>
+        <button data-poly-window-action="close" style="background:none;border:none;color:#888;cursor:pointer">✕</button>
       </div>
       <div class="content">
         <h2>My App</h2>
         <p>Version 1.0.0</p>
         <p>Built with Poly</p>
       </div>
-    </body>
+      <script type="module">
+    import { getCurrentWindow } from './src/poly.js';
+    const appWindow = getCurrentWindow();
+    document.querySelectorAll('[data-poly-window-action]').forEach(button => {
+      button.addEventListener('click', () => appWindow[button.dataset.polyWindowAction]());
+    });
+    document.querySelectorAll('[data-poly-window-drag]').forEach(titlebar => {
+      titlebar.addEventListener('mousedown', event => {
+        if (event.button === 0 && !event.target.closest('button')) appWindow.startDragging();
+      });
+    });
+  </script>
+</body>
     </html>
   `
 });
@@ -817,9 +826,9 @@ async function openSettings() {
         </style>
       </head>
       <body>
-        <div class="titlebar" onmousedown="polyWindow.drag()">
+        <div class="titlebar" data-poly-window-drag>
           <span>⚙️ Settings</span>
-          <button onclick="polyWindow.close()">✕</button>
+          <button data-poly-window-action="close">✕</button>
         </div>
         <div class="content">
           <h2>Preferences</h2>
@@ -836,7 +845,19 @@ async function openSettings() {
             <div class="toggle active" onclick="this.classList.toggle('active')"></div>
           </div>
         </div>
-      </body>
+        <script type="module">
+    import { getCurrentWindow } from './src/poly.js';
+    const appWindow = getCurrentWindow();
+    document.querySelectorAll('[data-poly-window-action]').forEach(button => {
+      button.addEventListener('click', () => appWindow[button.dataset.polyWindowAction]());
+    });
+    document.querySelectorAll('[data-poly-window-drag]').forEach(titlebar => {
+      titlebar.addEventListener('mousedown', event => {
+        if (event.button === 0 && !event.target.closest('button')) appWindow.startDragging();
+      });
+    });
+  </script>
+</body>
       </html>
     `
   });
@@ -3784,7 +3805,7 @@ init();
   </style>
 </head>
 <body>
-  <div class="toolbar" onmousedown="polyWindow.drag()">
+  <div class="toolbar" data-poly-window-drag>
     <button class="btn" onclick="goBack()">←</button>
     <button class="btn" onclick="goForward()">→</button>
     <button class="btn" onclick="refresh()">↻</button>
@@ -3793,9 +3814,9 @@ init();
            onkeydown="if(event.key==='Enter')navigate()">
     <button class="btn" onclick="navigate()">Go</button>
     <div style="width:20px"></div>
-    <button class="btn" onclick="polyWindow.minimize()">─</button>
-    <button class="btn" onclick="polyWindow.maximize()">□</button>
-    <button class="btn" onclick="polyWindow.close()">✕</button>
+    <button class="btn" data-poly-window-action="minimize">─</button>
+    <button class="btn" data-poly-window-action="maximize">□</button>
+    <button class="btn" data-poly-window-action="close">✕</button>
   </div>
 
   <script>
@@ -3817,6 +3838,18 @@ init();
       const url = document.getElementById('url').value;
       if (url) window.ipc.postMessage('navigate:content:' + url);
     }
+  </script>
+  <script type="module">
+    import { getCurrentWindow } from './src/poly.js';
+    const appWindow = getCurrentWindow();
+    document.querySelectorAll('[data-poly-window-action]').forEach(button => {
+      button.addEventListener('click', () => appWindow[button.dataset.polyWindowAction]());
+    });
+    document.querySelectorAll('[data-poly-window-drag]').forEach(titlebar => {
+      titlebar.addEventListener('mousedown', event => {
+        if (event.button === 0 && !event.target.closest('button')) appWindow.startDragging();
+      });
+    });
   </script>
 </body>
 </html>

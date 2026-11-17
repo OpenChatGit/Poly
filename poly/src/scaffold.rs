@@ -367,16 +367,32 @@ fn scaffold_frontend(project_path: &Path, framework: &str, project_name: &str) -
 }}
 "#);
     let vite_config = format!("{plugin_import}import {{ defineConfig }} from 'vite'\n\nexport default defineConfig({{\n  root: 'web',\n  plugins: [{plugin_call}],\n  server: {{\n    host: '127.0.0.1',\n    port: 5173,\n    strictPort: true,\n    proxy: {{\n      '/__poly_invoke': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},\n      '/__poly_invoke_stream': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }},\n      '/assets': {{ target: process.env.POLY_BACKEND_URL || 'http://127.0.0.1:3000' }}\n    }}\n  }},\n  build: {{ outDir: '../dist/web', emptyOutDir: true }}\n}})\n");
-    let html = format!("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>Poly {framework}</title></head><body><div id=\"root\"></div><script type=\"module\" src=\"/poly-dev.js\"></script><script type=\"module\" src=\"/src/main.{extension}\"></script></body></html>\n");
-    let dev_bridge = r#"if (import.meta.env.DEV) {
-  const poly = window.poly || {}
-  poly.invoke ??= async (fn, args = {}) => {
-    const response = await fetch('/__poly_invoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fn, args }) })
-    const result = await response.json()
-    if (result.error) throw new Error(result.error)
-    return Object.prototype.hasOwnProperty.call(result, 'result') ? result.result : result
-  }
-  window.poly = poly
+    let html = format!("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>Poly {framework}</title></head><body><div id=\"root\"></div><script type=\"module\" src=\"/src/main.{extension}\"></script></body></html>\n");
+    let poly_api = r#"export async function invoke(fn, args = {}) {
+  const response = await fetch('/__poly_invoke', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fn, args })
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.error) throw new Error(payload.error || `Poly API failed: ${response.status}`);
+  return Object.prototype.hasOwnProperty.call(payload, 'result') ? payload.result : payload;
+}
+
+export function sendNativeMessage(message) {
+  if (window.chrome?.webview?.postMessage) return window.chrome.webview.postMessage(message);
+  if (window.webkit?.messageHandlers?.ipc?.postMessage) return window.webkit.messageHandlers.ipc.postMessage(message);
+  throw new Error('Native window controls are only available in a Poly desktop window.');
+}
+
+export function getCurrentWindow() {
+  return Object.freeze({
+    minimize: () => sendNativeMessage('minimize'),
+    maximize: () => sendNativeMessage('maximize'),
+    restore: () => sendNativeMessage('restore'),
+    close: () => sendNativeMessage('close'),
+    startDragging: () => sendNativeMessage('drag')
+  });
 }
 "#;
     let css = ":root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #edf4f7; background: #0d141a; font-synthesis: none; }\n* { box-sizing: border-box; } body { margin: 0; min-width: 320px; min-height: 100vh; display: grid; place-items: center; background: radial-gradient(ellipse at top, #183344, #0d141a 65%); } main { width: min(720px, calc(100vw - 48px)); padding: 48px; border: 1px solid #294252; border-radius: 24px; background: #111d25dd; box-shadow: 0 24px 90px #0008; text-align: center; } .brand-logo { display: block; width: 160px; height: 160px; object-fit: contain; margin: 0 auto 28px; } .eyebrow { color: #73d6e7; letter-spacing: .16em; font-size: 12px; font-weight: 700; } h1 { font-size: clamp(36px, 6vw, 64px); line-height: 1.02; letter-spacing: -.05em; margin: 16px 0; } main > p:not(.eyebrow) { color: #a4bac5; font-size: 17px; } button { margin-top: 20px; border: 0; border-radius: 10px; padding: 12px 18px; color: #08202a; background: #73d6e7; font-weight: 700; cursor: pointer; }\n";
@@ -388,7 +404,7 @@ fn scaffold_frontend(project_path: &Path, framework: &str, project_name: &str) -
     for (file, contents) in [
         ("package.json", manifest.as_str()),
         ("vite.config.js", vite_config.as_str()),
-        ("web/poly-dev.js", dev_bridge),
+        ("web/src/poly.js", poly_api),
         ("web/src/main.jsx", main_source),
         ("web/src/style.css", css),
         ("web/src/App.jsx", component_source),

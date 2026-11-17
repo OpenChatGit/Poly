@@ -1,0 +1,12 @@
+{
+  "name": "@poly/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./window": "./window.js",
+    "./http": "./http.js",
+    "./shell": "./shell.js"
+  }
+}
