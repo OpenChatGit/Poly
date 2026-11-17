@@ -496,15 +496,22 @@ fn find_poly_crate() -> Result<std::path::PathBuf, String> {
     
     // Try current directory
     let cwd = std::env::current_dir().map_err(|e| format!("Failed to get cwd: {}", e))?;
-    let poly_crate = cwd.join("poly");
-    if poly_crate.join("Cargo.toml").exists() {
-        return Ok(poly_crate);
+    let poly_path = cwd.join("poly");
+    for candidate in [poly_path.join("poly"), poly_path] {
+        let manifest = candidate.join("Cargo.toml");
+        if manifest.is_file()
+            && fs::read_to_string(manifest)
+                .unwrap_or_default()
+                .contains("name = \"poly-framework\"")
+        {
+            return Ok(candidate);
+        }
     }
     
     // Check if we're in the poly crate itself
     if cwd.join("Cargo.toml").exists() {
         let content = fs::read_to_string(cwd.join("Cargo.toml")).unwrap_or_default();
-        if content.contains("name = \"poly\"") {
+        if content.contains("name = \"poly-framework\"") {
             return Ok(cwd);
         }
     }
