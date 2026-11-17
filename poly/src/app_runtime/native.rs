@@ -30,6 +30,26 @@ fn resolve_configured_icon(icon_path: Option<&str>, app_root: &Path) -> Option<s
     resolved.is_file().then_some(resolved)
 }
 
+#[cfg(windows)]
+fn stop_dev_process_tree(child: &mut std::process::Child) {
+    use std::os::windows::process::CommandExt;
+
+    let status = std::process::Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .creation_flags(0x08000000)
+        .status();
+    if !matches!(status, Ok(status) if status.success()) {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(windows))]
+fn stop_dev_process_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 #[cfg(test)]
 mod asset_path_tests {
     use super::{project_asset_path, resolve_configured_icon};
@@ -1184,8 +1204,7 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     let run_result = poly::run_native_url(&url, config);
     #[cfg(feature = "native")]
     if let Some(mut child) = vite_process.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_dev_process_tree(&mut child);
     }
     if let Err(e) = run_result {
         eprintln!("{}error{}: {}", RED, RESET, e);
