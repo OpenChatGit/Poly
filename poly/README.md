@@ -5,11 +5,11 @@ Poly is an experimental, custom-built Rust framework and command-line tool for c
 The crate is named `poly-framework`; installing it provides the `poly` command:
 
 ```sh
-cargo install poly-framework --features native
+cargo install poly-framework --version 0.5.6 --features native,gui
 poly --help
 ```
 
-The crate's default feature set is empty. Enable `native` for the standard native runtime. The NCOS Virtual Drive is experimental and requires `experimental-virtual-drive`. Optional CEF renderer support is enabled with `cef` and may require extra runtime and packaging setup.
+The crate's default feature set is empty. Enable `native` for the standard native runtime. Rust sidecar plugins can stream newline-delimited JSON events through Poly's native plugin API. The NCOS Virtual Drive is experimental and requires `experimental-virtual-drive`. Optional CEF renderer support is enabled with `cef` and may require extra runtime and packaging setup.
 
 Create a Vite starter project with a frontend framework:
 

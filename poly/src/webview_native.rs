@@ -148,6 +148,13 @@ mod native_impl {
         pub fn set_main_webview(&mut self, webview: WebView) {
             self.main_webview = Some(webview);
         }
+
+        /// Drop embedded views before their host window is destroyed.
+        /// This avoids briefly exposing an empty native/WebView2 surface on exit.
+        pub fn shutdown(&mut self) {
+            self.instances.clear();
+            self.main_webview.take();
+        }
         
         pub fn main_webview(&self) -> Option<&WebView> {
             self.main_webview.as_ref()

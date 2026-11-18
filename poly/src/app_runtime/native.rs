@@ -758,6 +758,29 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
             }
 
             // NCOS wallpaper catalog, generated from the app's wallpaper folder.
+            if url == "/__poly_invoke_stream" {
+                let mut body = String::new();
+                request.as_reader().read_to_string(&mut body).ok();
+                let response = match invoke_ipc_plugin_stream(&body, web_dir_server.as_path()) {
+                    Ok(reader) => tiny_http::Response::new(
+                        tiny_http::StatusCode(200),
+                        vec![
+                            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/x-ndjson; charset=utf-8"[..]).unwrap(),
+                            tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache, no-transform"[..]).unwrap(),
+                        ],
+                        reader,
+                        None,
+                        None,
+                    ).boxed(),
+                    Err(error) => tiny_http::Response::from_string(format!("{}\n", serde_json::json!({"type":"error","error":error})))
+                        .with_status_code(500)
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/x-ndjson; charset=utf-8"[..]).unwrap())
+                        .boxed(),
+                };
+                let _ = request.respond(response);
+                continue;
+            }
+
             let response = if url == "/__ncos_wallpapers" {
                 let wallpaper_dir = web_dir_server.join("assets").join("wallpapers");
                 let mut files: Vec<String> = fs::read_dir(&wallpaper_dir)

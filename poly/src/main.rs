@@ -18,7 +18,11 @@ mod app_build;
 use app_build::{build_app, extract_toml_value};
 mod app_runtime;
 use app_runtime::{open_url_window, run_app_result, run_browser_mode, run_native_app_impl as run_native_app};
-use dev_server::{handle_ipc_invoke_system_only as invoke_ipc_system_only, run_dev_server};
+use dev_server::{
+    handle_ipc_invoke_system_only as invoke_ipc_system_only,
+    handle_ipc_plugin_stream as invoke_ipc_plugin_stream,
+    run_dev_server,
+};
 use system_api::handle_system_api;
 use scaffold::{create_project, init_project, npm_command, selected_project_template};
 use polyview_proxy::{handle_polyview_proxy, handle_polyview_proxy_post};

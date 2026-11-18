@@ -1,6 +1,6 @@
 # Poly
 
-![Version](https://img.shields.io/badge/version-0.5.3-blue)
+![Version](https://img.shields.io/badge/version-0.5.6-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Status](https://img.shields.io/badge/status-experimental-orange)
 ![License](https://img.shields.io/badge/license-custom-informational)
@@ -11,10 +11,10 @@ Poly combines a Rust application runtime with web frontends. The CLI can create 
 
 ## Get started
 
-Install the CLI from this repository:
+Install the native CLI from this repository:
 
 ```sh
-cargo install --git https://github.com/OpenChatGit/Poly poly-framework --features native
+cargo install --git https://github.com/OpenChatGit/Poly poly-framework --features native,gui
 ```
 
 Create a starter project with a frontend framework:
@@ -61,6 +61,7 @@ The NCOS Virtual Drive can be enabled when building from source with `--features
 - Multi-window support and custom URL protocols
 - Optional CEF renderer backend
 - Experimental NCOS Virtual Drive
+- Rust sidecar plugins, including streamed native output
 
 Feature availability depends on platform, build flags, and the maturity of each subsystem.
 
@@ -80,7 +81,7 @@ Documentation may describe experimental or incomplete interfaces. Check each sec
 ```sh
 git clone https://github.com/OpenChatGit/Poly.git
 cd Poly
-cargo build --release -p poly-framework --features native
+cargo build --release -p poly-framework --features native,gui
 ```
 
 The resulting CLI executable is named `poly`.

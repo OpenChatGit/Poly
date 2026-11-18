@@ -72,6 +72,31 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
 
+            if url == "/__poly_invoke_stream" {
+                let mut body = String::new();
+                request.as_reader().read_to_string(&mut body).ok();
+                let web_root = project_path_http.join(&web_dir_http);
+                let response = match handle_ipc_plugin_stream(&body, &web_root) {
+                    Ok(reader) => tiny_http::Response::new(
+                        tiny_http::StatusCode(200),
+                        vec![
+                            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/x-ndjson; charset=utf-8"[..]).unwrap(),
+                            tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap(),
+                            tiny_http::Header::from_bytes(&b"Cache-Control"[..], &b"no-cache, no-transform"[..]).unwrap(),
+                        ],
+                        reader,
+                        None,
+                        None,
+                    ).boxed(),
+                    Err(error) => tiny_http::Response::from_string(format!("{}\n", serde_json::json!({"type":"error","error":error})))
+                        .with_status_code(500)
+                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/x-ndjson; charset=utf-8"[..]).unwrap())
+                        .boxed(),
+                };
+                let _ = request.respond(response);
+                continue;
+            }
+
             let response = match url.as_str() {
                 "/" | "/index.html" => {
                     // Check for custom index.html in web folder
@@ -379,6 +404,22 @@ pub(super) fn handle_ipc_invoke_system_only(body: &str, web_root: Option<&Path>)
     } else {
         serde_json::json!({"error": "No Poly backend available"}).to_string()
     }
+}
+
+pub(super) fn handle_ipc_plugin_stream(
+    body: &str,
+    web_root: &Path,
+) -> Result<Box<dyn std::io::Read + Send>, String> {
+    let request: serde_json::Value = serde_json::from_str(body)
+        .map_err(|error| format!("Invalid JSON: {error}"))?;
+    if request.get("fn").and_then(|value| value.as_str()) != Some("__poly_plugin_invoke_stream") {
+        return Err("Unsupported native plugin stream request.".into());
+    }
+    let args = request.get("args").cloned().unwrap_or(serde_json::json!({}));
+    let plugin_id = args.get("pluginId").and_then(|value| value.as_str()).ok_or("Missing pluginId.")?;
+    let method = args.get("method").and_then(|value| value.as_str()).ok_or("Missing native plugin method.")?;
+    let payload = args.get("args").cloned().unwrap_or(serde_json::json!({}));
+    poly::plugin_runtime::invoke_stream(web_root, plugin_id, method, &payload)
 }
 
 

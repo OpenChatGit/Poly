@@ -610,6 +610,8 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                                 window_for_tray.set_focus();
                             }
                             "quit" | "exit" => {
+                                window_for_tray.set_visible(false);
+                                webview_manager.shutdown();
                                 run_native_shutdown_hook();
                                 *control_flow = ControlFlow::Exit;
                             }
@@ -635,6 +637,8 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
                 if close_to_tray && tray_enabled {
                     window_for_tray.set_visible(false);
                 } else {
+                    window_for_tray.set_visible(false);
+                    webview_manager.shutdown();
                     run_native_shutdown_hook();
                     *control_flow = ControlFlow::Exit;
                 }
@@ -650,6 +654,8 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
             }
             Event::MainEventsCleared => {
                 if NATIVE_EXIT_REQUESTED.swap(false, Ordering::AcqRel) {
+                    window_for_tray.set_visible(false);
+                    webview_manager.shutdown();
                     run_native_shutdown_hook();
                     *control_flow = ControlFlow::Exit;
                 }
@@ -675,6 +681,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
             Event::LoopDestroyed => {
                 // Tear down child apps before CEF and keep this on the native
                 // application thread, as required by CEF's lifecycle contract.
+                webview_manager.shutdown();
                 run_native_shutdown_hook();
                 crate::cef_osr::shutdown();
             }

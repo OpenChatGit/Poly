@@ -4,7 +4,7 @@
 //! unstable Rust ABI with the Poly runtime.
 
 use serde_json::{json, Value};
-use std::io::Write;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
@@ -168,4 +168,49 @@ pub fn invoke(web_root: &Path, plugin_id: &str, method: &str, args: &Value) -> S
     } else {
         json!({ "result": response }).to_string()
     }
+}
+
+/// Start a native plugin request and expose its newline-delimited JSON output
+/// as a reader so the app server can stream events to its webview.
+pub fn invoke_stream(
+    web_root: &Path,
+    plugin_id: &str,
+    method: &str,
+    args: &Value,
+) -> Result<Box<dyn Read + Send>, String> {
+    if !valid_segment(method) {
+        return Err("Invalid native plugin method.".into());
+    }
+    let (plugin_dir, executable_path, manifest) = sidecar_path(web_root, plugin_id)?;
+    let executable_path = if executable_path.is_file() {
+        match executable_path.canonicalize() {
+            Ok(path) if path.starts_with(&plugin_dir) => path,
+            Ok(_) => return Err("Native plugin executable is outside the plugin folder.".into()),
+            Err(error) => return Err(format!("Could not resolve Rust plugin executable: {error}")),
+        }
+    } else {
+        compile_sidecar(web_root, &plugin_dir, &manifest)?
+    };
+
+    let input = json!({ "method": method, "args": args });
+    let mut child = Command::new(&executable_path)
+        .current_dir(&plugin_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start Rust plugin: {error}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Err(error) = writeln!(stdin, "{input}") {
+            let _ = child.kill();
+            return Err(format!("Could not send a request to the Rust plugin: {error}"));
+        }
+    }
+    let stdout = child.stdout.take().ok_or("Rust plugin did not provide a stream.")?;
+    let mut stderr = child.stderr.take().ok_or("Could not read Rust plugin diagnostics.")?;
+    std::thread::spawn(move || {
+        let _ = io::copy(&mut stderr, &mut io::sink());
+        let _ = child.wait();
+    });
+    Ok(Box::new(stdout))
 }
