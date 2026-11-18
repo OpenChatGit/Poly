@@ -430,8 +430,6 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
 
     // Dev/Server config
     let mut dev_port: u16 = 0; // 0 = auto-find free port
-    let mut inject_alpine = false;  // Default: don't inject (user decides)
-    let mut inject_lucide = false;  // Default: don't inject (user decides)
 
     // Parse window section from poly.toml
     if poly_toml_path.exists() {
@@ -466,10 +464,6 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                 } else if in_dev_section {
                     if let Some(val) = line.strip_prefix("port").and_then(|s| s.trim().strip_prefix('=')) {
                         dev_port = val.trim().parse().unwrap_or(0);
-                    } else if let Some(val) = line.strip_prefix("inject_alpine").and_then(|s| s.trim().strip_prefix('=')) {
-                        inject_alpine = val.trim() == "true";
-                    } else if let Some(val) = line.strip_prefix("inject_lucide").and_then(|s| s.trim().strip_prefix('=')) {
-                        inject_lucide = val.trim() == "true";
                     }
                 }
             }
@@ -1079,30 +1073,7 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                         _ => "application/octet-stream",
                     };
 
-                    // Inject scripts based on poly.toml [dev] section config
-                    let final_content = if ct.starts_with("text/html") {
-                        let mut html = String::from_utf8_lossy(&content).to_string();
-
-                        // Only inject if enabled in poly.toml [dev] section
-                        if inject_alpine && !html.contains("alpine") && !html.contains("Alpine") {
-                            let alpine_script = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>"#;
-                            if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", alpine_script));
-                            }
-                        }
-                        if inject_lucide && !html.contains("lucide") {
-                            let lucide_script = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
-                            if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", lucide_script));
-                            }
-                        }
-
-                        html.into_bytes()
-                    } else {
-                        content
-                    };
-
-                    tiny_http::Response::from_data(final_content)
+                    tiny_http::Response::from_data(content)
                         .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
                 } else {
                     tiny_http::Response::from_string("Not Found").with_status_code(404)

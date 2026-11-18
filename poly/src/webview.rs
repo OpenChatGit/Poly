@@ -504,7 +504,7 @@ pub fn respond_to_permission(id: &str, permission: &str, granted: bool) -> Resul
 
 /// Add an initialization script that runs before every page load
 /// This is the equivalent of WebView2's AddScriptToExecuteOnDocumentCreatedAsync
-/// The script runs before any other scripts on the page, perfect for injecting CSS
+/// The script runs before any other page scripts, so it can initialize CSS early
 pub fn add_init_script(id: &str, script: &str) -> Result<(), String> {
     check_exists(id)?;
     

@@ -73,9 +73,9 @@ pub fn set_js(js: &str) {
     TITLEBAR_CONFIG.lock().unwrap().js = js.to_string();
 }
 
-/// Generate the titlebar injection script
-/// This script injects the titlebar into any page
-pub fn generate_injection_script() -> String {
+/// Generate the titlebar startup script.
+/// This script mounts the titlebar in the page.
+pub fn generate_init_script() -> String {
     let config = TITLEBAR_CONFIG.lock().unwrap();
     
     if !config.enabled {
@@ -88,7 +88,7 @@ pub fn generate_injection_script() -> String {
     
     format!(r#"
 (function() {{
-    // Don't inject if already present
+    // Avoid creating a duplicate titlebar
     if (document.getElementById('poly-titlebar')) return;
     
     // Create titlebar container
@@ -123,7 +123,7 @@ pub fn generate_injection_script() -> String {
         {css}
     `;
     
-    // Inject into page
+    // Add the titlebar to the page
     document.head.appendChild(style);
     document.body.insertBefore(titlebar, document.body.firstChild);
     

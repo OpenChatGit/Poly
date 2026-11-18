@@ -1821,7 +1821,7 @@ pub(super) fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> Stri
             serde_json::json!({"result": true}).to_string()
         }
         "__poly_titlebar_navigate" => {
-            // This will be handled specially - it navigates the WebView but injects titlebar
+            // This is handled specially: it navigates the WebView and remounts the titlebar
             let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
             // Store the URL for the WebView to navigate to
             // The actual navigation happens in the native code

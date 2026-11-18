@@ -14,8 +14,6 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let config = poly::PolyConfig::load(project_path);
 
     // Get values from config
-    let inject_alpine = config.dev.inject_alpine;
-    let inject_lucide = config.dev.inject_lucide;
     let reload_interval = config.dev.reload_interval;
     let web_dir_relative = config.web.dir.clone();
     let vite_project = project_path.join("package.json").is_file()
@@ -104,22 +102,8 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
                     if custom_index.exists() {
                         let mut html = fs::read_to_string(&custom_index).unwrap_or_default();
 
-                        // Only inject if enabled in poly.toml [dev] section
-                        if inject_alpine && !html.contains("alpine") && !html.contains("Alpine") {
-                            let alpine_script = r#"<script defer src="https://unpkg.com/alpinejs@3/dist/cdn.min.js"></script>"#;
-                            if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", alpine_script));
-                            }
-                        }
-                        if inject_lucide && !html.contains("lucide") {
-                            let lucide_script = r#"<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>"#;
-                            if html.contains("</head>") {
-                                html = html.replace("</head>", &format!("{}</head>", lucide_script));
-                            }
-                        }
-
                         // Keep hot reload in the development server. Poly's JavaScript API is now an
-                        // imported frontend package instead of a runtime-injected global.
+                        // imported frontend package instead of a global added by the runtime.
                         let reload_script = format!(r#"<script>
 (function() {{
   let version = {initial_version};

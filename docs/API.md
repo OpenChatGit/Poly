@@ -1,6 +1,6 @@
 # Poly API & Developer Guide
 
-**Current release:** 0.5.6 · **Last reviewed:** 2026-11
+**Current release:** 0.5.8 · **Last reviewed:** 2026-11
 
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
@@ -2194,8 +2194,6 @@ fullscreen = false
 port = 3000
 devtools = false
 reload_interval = 2000
-# inject_alpine = true
-# inject_lucide = true
 
 [network]
 timeout = 30
@@ -2230,9 +2228,6 @@ timestamp_url = "http://timestamp.digicert.com"
 identity = "Developer ID Application: Name (TEAMID)"
 team_id = "YOURTEAMID"
 
-[dependencies]
-alpinejs = "3.14.3"
-lodash = "4.17.21"
 ```
 
 ### [package] Section
@@ -2278,18 +2273,7 @@ lodash = "4.17.21"
 | `port` | number | 3000 | Port for dev server |
 | `devtools` | boolean | false | Enable DevTools in native mode |
 | `reload_interval` | number | 2000 | Hot reload polling interval (ms) |
-| `inject_alpine` | boolean | false | Auto-inject Alpine.js |
-| `inject_lucide` | boolean | false | Auto-inject Lucide Icons |
-
-**Note:** By default, Poly does NOT inject any libraries. You control your own dependencies. If you want Alpine.js or Lucide Icons auto-injected into your HTML, enable them here:
-
 Lucide and other SVG icons used inside the page are rendered by the WebView as vector graphics; Poly does not rasterize those HTML icons. Native window and tray icons use the operating system's image pipeline: use PNG for cross-platform assets and a multi-size ICO on Windows. SVG is a source format for generating native icon sets, not a native titlebar icon format.
-
-```toml
-[dev]
-inject_alpine = true
-inject_lucide = true
-```
 
 ### [network] Section
 
@@ -2357,12 +2341,10 @@ Browser mode creates a dual-WebView window (UI + Content).
 
 ### [dependencies] Section
 
-Legacy direct-download packages are listed here. For JavaScript module imports, use `poly add` so npm records dependencies in `package.json` and Vite can bundle them.
+This section is retained for legacy direct-download projects. New projects should use `poly add` and JavaScript module imports so npm records dependencies in `package.json` and Vite can bundle them.
 
 ```toml
 [dependencies]
-alpinejs = "3.14.3"
-lodash = "4.17.21"
 chart.js = "4.4.1"
 ```
 

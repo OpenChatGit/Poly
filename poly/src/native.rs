@@ -459,15 +459,15 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         config.background_color
     };
 
-    // Get titlebar config and create injection script that runs on every page
+    // Prepare the titlebar startup script that runs on every page
     let titlebar_config = crate::titlebar::get_titlebar();
 
     // Keep PolyView available to regular Poly apps. NCOS opts out because its
     // app and browser surfaces are hosted by the native window manager.
     let polyview_js = if config.polyview_enabled { crate::polyview::get_polyview_element_js() } else { String::new() };
 
-    // Get OS theme injection JS
-    let theme_js = crate::theme::get_theme_inject_js();
+    // Get OS theme initialization JavaScript
+    let theme_js = crate::theme::get_theme_init_script();
 
     let init_script = if titlebar_config.enabled {
         let html_escaped = titlebar_config.html.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${");
@@ -482,7 +482,7 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
 {theme}
 
 (function() {{
-    function injectTitlebar() {{
+    function mountTitlebar() {{
         if (document.getElementById('poly-titlebar')) return;
 
         const titlebar = document.createElement('div');
@@ -499,17 +499,17 @@ pub fn run_native_url(url: &str, config: NativeConfig) -> Result<(), Box<dyn std
         {js}
     }}
 
-    // Inject immediately if DOM is ready
+    // Mount immediately when the DOM is ready
     if (document.readyState === 'loading') {{
-        document.addEventListener('DOMContentLoaded', injectTitlebar);
+        document.addEventListener('DOMContentLoaded', mountTitlebar);
     }} else {{
-        injectTitlebar();
+        mountTitlebar();
     }}
 
-    // Also inject on any dynamic content changes
+    // Restore the titlebar if page scripts remove it
     const observer = new MutationObserver(() => {{
         if (!document.getElementById('poly-titlebar') && document.body) {{
-            injectTitlebar();
+            mountTitlebar();
         }}
     }});
 

@@ -366,27 +366,27 @@ fn store_cookies_from_response(response: &ureq::Response, base_url: &str) {
 }
 
 /// Rewrite HTML to enable iframe2 functionality
-/// OPTIMIZED: Inject base-tag, client-script, and only rewrite navigation links (not static resources)
+/// OPTIMIZED: Add the base tag and client script, and only rewrite navigation links (not static resources)
 fn rewrite_html(html: &str, base_url: &str) -> String {
     let proxy_port = PROXY_PORT.load(Ordering::Relaxed);
     let proxy_base = format!("http://localhost:{}/__polyview/?url=", proxy_port);
     
     let mut result = html.to_string();
     
-    // For Steam sites, inject application_config FIRST (before any other scripts)
+    // For Steam sites, add application_config FIRST (before any other scripts)
     let is_steam = base_url.contains("steampowered.com") || base_url.contains("steamcommunity.com");
     if is_steam {
         let steam_config = r#"<script id="application_config" type="application/json">{"LANGUAGE":"german","COUNTRY":"DE","MEDIA_CDN_COMMUNITY_URL":"https://steamcommunity-a.akamaihd.net/","MEDIA_CDN_URL":"https://steamcdn-a.akamaihd.net/","STORE_BASE_URL":"https://store.steampowered.com/","COMMUNITY_BASE_URL":"https://steamcommunity.com/","IN_CLIENT":false,"USE_POPUPS":false,"EUNIVERSE":1,"WEBAPI_BASE_URL":"https://api.steampowered.com/","PUBLIC_SHARED_URL":"https://steamcommunity.com/public/","CHAT_BASE_URL":"https://steamloopback.host","LOGININFO_URL":"https://steamcommunity.com/login/home/"}</script>"#;
         result = format!("{}{}", steam_config, result);
     }
     
-    // CRITICAL: Inject PolyView client script at the ABSOLUTE START of the document
+    // CRITICAL: Add the PolyView client script at the ABSOLUTE START of the document
     // This MUST be BEFORE <!DOCTYPE html> to ensure XMLHttpRequest is replaced
     // before any external scripts (like jQuery) can capture the original
     let client_script = get_polyview_client_script(base_url, proxy_port);
     result = format!("{}{}", client_script, result);
     
-    // Inject base tag for relative URLs - this makes static resources load directly!
+    // Add a base tag for relative URLs so static resources load directly
     let base_tag = format!(r#"<base href="{}">"#, base_url);
     if let Some(head_pos) = result.to_lowercase().find("<head") {
         if let Some(close_pos) = result[head_pos..].find('>') {
@@ -573,7 +573,7 @@ fn get_polyview_client_script(base_url: &str, proxy_port: u16) -> String {
 (function() {{
     'use strict';
     
-    // PolyView Client (iframe2) - Advanced injection for full compatibility
+    // PolyView Client (iframe2) - Advanced startup setup for full compatibility
     const PROXY_PORT = {};
     const PROXY_BASE = 'http://localhost:' + PROXY_PORT + '/__polyview/?url=';
     const BASE_URL = '{}';

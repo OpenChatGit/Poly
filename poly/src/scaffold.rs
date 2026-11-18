@@ -65,12 +65,6 @@ resizable = true
 decorations = true
 icon_path = "assets/icon.png"
 
-[dev]
-# Auto-inject libraries (default: false - you control your dependencies)
-# inject_alpine = true
-# inject_lucide = true
-
-[dependencies]
 "#)).map_err(|error| format!("Could not create poly.toml: {error}"))?;
     } else if is_frontend {
         configure_frontend_web_dir(&poly_toml)?;

@@ -49,8 +49,8 @@ pub fn get_theme_info() -> ThemeInfo {
     }
 }
 
-/// Generate a JavaScript snippet that injects OS theme as CSS variables.
-/// Inject this into your WebView init script so every page gets theme-aware CSS.
+/// Generate JavaScript that initializes OS theme CSS variables.
+/// Run this from the WebView startup script so every page gets theme-aware CSS.
 ///
 /// Provides:
 ///   --poly-scheme:  "dark" | "light"
@@ -59,7 +59,7 @@ pub fn get_theme_info() -> ThemeInfo {
 ///   --poly-fg:      main foreground color
 ///   --poly-surface: card/panel background
 ///   --poly-border:  border color
-pub fn get_theme_inject_js() -> String {
+pub fn get_theme_init_script() -> String {
     let info = get_theme_info();
     let scheme = info.scheme.as_str();
     let accent = info.accent;

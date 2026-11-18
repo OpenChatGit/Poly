@@ -12,6 +12,15 @@ use std::time::{Duration, Instant};
 
 static BUILD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+#[cfg(windows)]
+fn suppress_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+}
+
+#[cfg(not(windows))]
+fn suppress_console_window(_: &mut Command) {}
+
 fn failure(message: impl Into<String>) -> String {
     json!({ "error": message.into() }).to_string()
 }
@@ -71,13 +80,15 @@ fn compile_sidecar(web_root: &Path, plugin_dir: &Path, manifest: &Value) -> Resu
     let lock = BUILD_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().map_err(|_| "Rust plugin build lock is unavailable.")?;
 
-    let output = Command::new("cargo")
+    let mut cargo = Command::new("cargo");
+    cargo
         .args(["build", "--manifest-path"])
         .arg(&crate_path)
         .arg("--target-dir")
         .arg(&target_dir)
-        .current_dir(plugin_dir)
-        .output()
+        .current_dir(plugin_dir);
+    suppress_console_window(&mut cargo);
+    let output = cargo.output()
         .map_err(|error| format!("Could not start Cargo for the Rust plugin: {error}"))?;
     if !output.status.success() {
         let details = String::from_utf8_lossy(&output.stderr);
@@ -115,13 +126,14 @@ pub fn invoke(web_root: &Path, plugin_id: &str, method: &str, args: &Value) -> S
     };
 
     let input = json!({ "method": method, "args": args });
-    let mut child = match Command::new(&executable_path)
+    let mut plugin = Command::new(&executable_path);
+    plugin
         .current_dir(&plugin_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    suppress_console_window(&mut plugin);
+    let mut child = match plugin.spawn() {
         Ok(child) => child,
         Err(error) => return failure(format!("Could not start Rust plugin: {error}")),
     };
@@ -193,12 +205,14 @@ pub fn invoke_stream(
     };
 
     let input = json!({ "method": method, "args": args });
-    let mut child = Command::new(&executable_path)
+    let mut plugin = Command::new(&executable_path);
+    plugin
         .current_dir(&plugin_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    suppress_console_window(&mut plugin);
+    let mut child = plugin.spawn()
         .map_err(|error| format!("Could not start Rust plugin: {error}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         if let Err(error) = writeln!(stdin, "{input}") {

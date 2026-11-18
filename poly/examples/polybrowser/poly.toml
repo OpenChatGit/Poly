@@ -8,11 +8,6 @@ height = 800
 decorations = false
 resizable = true
 
-[dev]
-# No auto-injection - browser uses vanilla JS
-inject_alpine = false
-inject_lucide = false
-
 [browser]
 ui_height = 80
 start_url = "https://google.com"

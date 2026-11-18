@@ -2172,8 +2172,6 @@ fullscreen = false
 port = 3000
 devtools = false
 reload_interval = 2000
-# inject_alpine = true
-# inject_lucide = true
 
 [network]
 timeout = 30
@@ -2208,9 +2206,6 @@ timestamp_url = "http://timestamp.digicert.com"
 identity = "Developer ID Application: Name (TEAMID)"
 team_id = "YOURTEAMID"
 
-[dependencies]
-alpinejs = "3.14.3"
-lodash = "4.17.21"
 ```
 
 ### `[package]` Section
@@ -2256,16 +2251,7 @@ lodash = "4.17.21"
 | `port` | number | 3000 | Port for dev server |
 | `devtools` | boolean | false | Enable DevTools in native mode |
 | `reload_interval` | number | 2000 | Hot reload polling interval (ms) |
-| `inject_alpine` | boolean | false | Auto-inject Alpine.js |
-| `inject_lucide` | boolean | false | Auto-inject Lucide Icons |
-
-**Note:** By default, Poly does NOT inject any libraries. You control your own dependencies. If you want Alpine.js or Lucide Icons auto-injected into your HTML, enable them here:
-
-```toml
-[dev]
-inject_alpine = true
-inject_lucide = true
-```
+The dev server only serves your frontend and provides hot reload. Add frontend libraries through npm and import them from your JavaScript modules.
 
 ### `[network]` Section
 
@@ -2515,10 +2501,9 @@ If `port = 0` or not specified, Poly will automatically find a free port.
 ```text
 my-app/
 ├── poly.toml        # Configuration
-├── poly.lock        # Package lockfile
-├── packages/        # NPM packages
-├── src/
-│   └── src/         # JavaScript application modules (optional)
+├── package.json     # Frontend dependencies and scripts
+├── package-lock.json
+├── src/             # JavaScript application modules (optional)
 ├── web/
 │   ├── index.html   # Your app
 │   ├── app.js       # JavaScript
@@ -2532,27 +2517,18 @@ my-app/
 ## Package Manager
 
 ```bash
-# Add package
-poly add alpinejs
-
-# Specific version
-poly add lodash -v 4.17.21
-
-# Remove package
-poly remove lodash
-
-# Install packages from lockfile
-poly install
-
-# Verify hashes
-poly install --verify
+npm install lucide
+npm install alpinejs
 ```
 
-Packages are stored in `packages/` and can be loaded via `/packages/` in the browser:
+Import packages from frontend modules so Vite can resolve and bundle them:
 
-```html
-<script src="/packages/alpinejs/dist/cdn.min.js"></script>
+```js
+import Alpine from 'alpinejs';
+import { createIcons, Search } from 'lucide';
 ```
+
+Older projects can continue using Poly's direct-download `poly add` workflow, backed by `poly.lock` and `packages/`. New projects should use npm dependencies and module imports.
 
 ---
 

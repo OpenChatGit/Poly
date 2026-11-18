@@ -277,7 +277,7 @@ fn resolve_polyview_url(base: &str, relative: &str) -> String {
 fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String {
     let mut result = html.to_string();
 
-    // Inject base tag for relative URLs - this makes static resources load directly!
+    // Add a base tag for relative URLs so static resources load directly
     let base_tag = format!(r#"<base href="{}">"#, base_url);
     if let Some(head_pos) = result.to_lowercase().find("<head") {
         if let Some(close_pos) = result[head_pos..].find('>') {
@@ -286,7 +286,7 @@ fn rewrite_polyview_html(html: &str, base_url: &str, proxy_port: u16) -> String 
         }
     }
 
-    // Inject PolyView client script - this is what makes iframe2 special
+    // Add the PolyView client script that enables iframe2 behavior
     // It intercepts navigation, form submissions, and reports state to parent
     let client_script = format!(r#"
 <style>

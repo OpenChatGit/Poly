@@ -61,8 +61,6 @@ pub struct DevConfig {
     pub port: u16,
     pub devtools: bool,
     pub reload_interval: u32,
-    pub inject_alpine: bool,
-    pub inject_lucide: bool,
 }
 
 /// The `[network]` section, with HTTP client settings.
@@ -183,8 +181,6 @@ impl Default for DevConfig {
             port: 3000,
             devtools: false,
             reload_interval: 2000,
-            inject_alpine: false,
-            inject_lucide: false,
         }
     }
 }
@@ -343,8 +339,6 @@ impl PolyConfig {
             "port" => self.dev.port = value.parse().unwrap_or(3000),
             "devtools" => self.dev.devtools = value == "true",
             "reload_interval" => self.dev.reload_interval = value.parse().unwrap_or(2000),
-            "inject_alpine" => self.dev.inject_alpine = value == "true",
-            "inject_lucide" => self.dev.inject_lucide = value == "true",
             _ => {}
         }
     }
