@@ -370,7 +370,7 @@ enum Commands {
         verify: bool,
     },
     
-    /// Show API information for AI assistants (JSON format)
+    /// Show agent-oriented Poly usage guidance (JSON by default)
     AiInfo {
         /// Output format
         #[arg(short, long, default_value = "json")]
@@ -425,71 +425,77 @@ enum Commands {
     },
 }
 
-/// Get all cookies for a domain, including shared Steam cookies
-/// Generate AI-friendly API documentation
+/// Generate concise, agent-oriented Poly usage guidance.
 fn generate_ai_info(format: &str) {
     let info = serde_json::json!({
         "poly_version": VERSION,
-        "description": "Poly JavaScript and native API reference",
-        "frontend_apis": {
-            "poly.fs": {
-                "methods": ["read", "write", "exists", "readDir"],
-                "example": "const content = await poly.fs.read('file.txt');"
-            },
-            "poly.dialog": {
-                "methods": ["open", "openMultiple", "save", "folder", "message", "confirm", "custom"],
-                "example": "const file = await poly.dialog.open({ filters: [{ name: 'Text', extensions: ['txt'] }] });"
-            },
-            "poly.http": {
-                "methods": ["get", "post", "put", "patch", "delete", "request"],
-                "example": "const response = await poly.http.get('https://api.example.com');"
-            },
-            "poly.db": {
-                "methods": ["open", "close", "execute", "query", "queryOne"],
-                "example": "const db = await poly.db.open('db.sqlite'); const rows = await poly.db.query(db, 'SELECT * FROM users');"
-            },
-            "poly.window": {
-                "methods": ["setTitle", "getTitle", "center", "setSize", "getSize", "setPosition", "getPosition", "setMinSize", "setMaxSize", "setAlwaysOnTop", "setFullscreen", "isFullscreen", "isMaximized", "isMinimized"],
-                "example": "await poly.window.setTitle('My App');"
-            },
-            "poly.clipboard": {
-                "methods": ["read", "write", "clear"],
-                "example": "await poly.clipboard.write('Hello');"
-            },
-            "poly.webview": {
-                "methods": ["create", "navigate", "loadHtml", "goBack", "goForward", "reload", "stop", "setBounds", "getBounds", "eval", "destroy", "list", "get", "setVisible", "focus", "setZoom", "setMainBounds", "pollEvents", "respondToPermission"],
-                "example": "await poly.webview.create('my-view', { url: 'https://example.com', width: 800, height: 600 });"
-            },
-            "poly.notification": {
-                "methods": ["show", "showWithTimeout"],
-                "example": "await poly.notification.show('Title', 'Message');"
-            },
-            "poly.shell": {
-                "methods": ["open", "openPath", "openWith"],
-                "example": "await poly.shell.open('https://example.com');"
-            }
+        "description": "Poly is an experimental Rust desktop framework for HTML, CSS, and JavaScript frontends.",
+        "agent_guidance": [
+            "Inspect poly.toml, package.json, the frontend entry point, and the installed Poly version before making assumptions.",
+            "Initialize an existing folder with `poly init`; create a new project with `poly new <name>`. Templates are app, react, svelte, vue, and preact.",
+            "Add JavaScript libraries with `poly add <package>` or npm. New projects use package.json, package-lock.json, Vite, and standard ES module imports. Do not add CDN scripts or runtime library injection.",
+            "For a plain HTML project, the generated Vite entry is web/src/main.js. Framework templates use their generated source entry. Inspect existing Vite configuration before changing it.",
+            "Use `poly dev` for frontend development, `poly dev --native` for a native window with live frontend updates, `poly build` to package, and `poly run --native` to launch the native app.",
+            "Poly JavaScript native APIs are asynchronous. Check the API guide for exact names, options, return values, permissions, and Native Mode requirements. Handle rejected calls.",
+            "Native desktop support currently targets Windows. macOS and Linux are incomplete; experimental or feature-gated APIs must not be presented as universally available.",
+            "Poly is experimental and not production-ready. Prefer documented APIs, preserve existing project conventions, and report platform or feature limitations instead of inventing support."
+        ],
+        "quick_start": {
+            "initialize_current_folder": "poly init",
+            "create_react_project": "poly new my-app --react",
+            "add_library": "poly add lucide",
+            "import_example": "import { exportedName } from 'package-name';",
+            "dev_server": "poly dev",
+            "native_dev_window": "poly dev --native",
+            "build": "poly build",
+            "run_native": "poly run --native"
+        },
+        "frontend_package_workflow": {
+            "manifest": "package.json",
+            "lockfile": "package-lock.json",
+            "bundler": "Vite",
+            "recommended_commands": ["poly add <package>", "poly remove <package>", "poly install"],
+            "legacy_note": "Existing projects using poly.lock and packages/ remain supported by the legacy direct-download workflow. Do not use that workflow for new module imports."
+        },
+        "native_api_notes": [
+            "The `poly` JavaScript bridge is available in Poly's native runtime; browser-only development may not provide native operations.",
+            "Use the API guide as the source of truth instead of assuming browser APIs and similarly named Poly APIs are interchangeable.",
+            "Filesystem permissions and platform support vary by API. Do not claim arbitrary Rust sidecars or JavaScript plugins are sandboxed."
+        ],
+        "documentation": {
+            "javascript_api_and_developer_guide": "docs/API.md",
+            "framework_guide": "poly/docs/FRAMEWORK_API.md",
+            "rust_api_map": "poly/docs/RUST_API.md",
+            "cef_backend": "poly/docs/CEF.md",
+            "examples": "poly/examples/",
+            "cli_options": "poly --help"
         },
         "cli_commands": [
-            "poly dev [path]",
-            "poly build [path]",
-            "poly test [path]",
-            "poly init <name>",
-            "poly add <package>",
-            "poly install",
+            "poly init [--react|--svelte|--vue|--preact] [--no-install]",
+            "poly new <name> [--template <app|react|svelte|vue|preact>] [--no-install]",
+            "poly dev [path] [--native]",
+            "poly run [path] [--native] [--release]",
+            "poly build [path] [--release] [--target <platform>]",
+            "poly add <package> [-v <version>]",
+            "poly remove <package>",
+            "poly install [--verify]",
             "poly ai-info [--format json|markdown]",
             "poly --version",
             "poly --help"
         ],
         "project_structure": {
-            "poly.toml": "Project configuration file",
-            "web/": "Frontend files (HTML, CSS, JS)",
-            "web/index.html": "Main HTML file for GUI apps"
+            "poly.toml": "Desktop app and web root configuration",
+            "package.json": "Frontend npm dependencies and scripts",
+            "package-lock.json": "Reproducible npm dependency lockfile",
+            "web/": "Plain HTML app root; generated Vite entry is web/src/main.js",
+            "src/": "Source entry used by framework templates",
+            "assets/": "Project-root static assets; import through Vite or use /assets/... URLs"
         },
-        "dev_workflow": {
-            "create_project": "poly init my-app",
-            "run_dev_server": "poly dev (starts on http://localhost:3000)",
-            "build_release": "poly build",
-            "test": "poly test"
+        "feature_availability": {
+            "native_runtime": "Requires the native feature; standard native support targets Windows.",
+            "cef": "Optional renderer with additional runtime and packaging requirements.",
+            "experimental_virtual_drive": "Experimental, Windows-first, and feature-gated.",
+            "poly_ui": "Incomplete prototype, not part of the standard Poly build."
         }
     });
 
@@ -498,36 +504,48 @@ fn generate_ai_info(format: &str) {
             println!("{}", serde_json::to_string_pretty(&info).unwrap());
         },
         "markdown" | "md" => {
-            println!("# Poly API Reference for AI Assistants");
+            println!("# Poly Agent Guide");
             println!();
-            println!("**Version:** {}", VERSION);
+            println!("**Version:** {}  \n**Status:** Experimental; Windows is the current native target.", VERSION);
             println!();
-            println!("## Frontend APIs (JavaScript)");
+            println!("## Guidance for coding agents");
+            for item in info["agent_guidance"].as_array().unwrap() {
+                println!("- {}", item.as_str().unwrap());
+            }
             println!();
-            println!("### File System (`poly.fs`)");
-            println!("- `read(path)` - Read file content");
-            println!("- `write(path, content)` - Write to file");
-            println!("- `exists(path)` - Check if file exists");
-            println!("- `readDir(path)` - List directory contents");
+            println!("## Quick start");
+            for (label, key) in [
+                ("Initialize the current folder", "initialize_current_folder"),
+                ("Create a React project", "create_react_project"),
+                ("Add a library", "add_library"),
+                ("Dev server", "dev_server"),
+                ("Native dev window", "native_dev_window"),
+                ("Build", "build"),
+                ("Run native", "run_native"),
+            ] {
+                println!("- **{label}:** `{}`", info["quick_start"][key].as_str().unwrap());
+            }
             println!();
-            println!("### Dialogs (`poly.dialog`)");
-            println!("- `open(options)` - File open dialog");
-            println!("- `save(options)` - File save dialog");
-            println!("- `folder(options)` - Folder selection dialog");
-            println!("- `message(title, message)` - Show message");
-            println!("- `confirm(title, message)` - Confirmation dialog");
+            println!("## Frontend dependencies");
+            println!("Use npm dependencies recorded in `package.json` and `package-lock.json`. Import packages as ES modules and let Vite bundle them.");
+            println!("Legacy projects using `poly.lock` and `packages/` can keep their existing direct-download workflow.");
             println!();
-            println!("### HTTP Requests (`poly.http`)");
-            println!("- `get(url, options)` - GET request");
-            println!("- `post(url, body, options)` - POST request");
-            println!("- `put(url, body, options)` - PUT request");
-            println!("- `delete(url, options)` - DELETE request");
+            println!("## Native API and platform limits");
+            for item in info["native_api_notes"].as_array().unwrap() {
+                println!("- {}", item.as_str().unwrap());
+            }
             println!();
-            println!("## CLI Commands");
-            println!("- `poly dev` - Start development server");
-            println!("- `poly build` - Build for production");
-            println!("- `poly init <name>` - Create new project");
-            println!("- `poly ai-info` - Show this information");
+            println!("## Documentation");
+            for (label, key) in [
+                ("JavaScript API and developer guide", "javascript_api_and_developer_guide"),
+                ("Framework guide", "framework_guide"),
+                ("Rust API map", "rust_api_map"),
+                ("CEF backend", "cef_backend"),
+                ("Examples", "examples"),
+            ] {
+                println!("- **{label}:** `{}`", info["documentation"][key].as_str().unwrap());
+            }
+            println!("- **CLI options:** `poly --help`");
         },
         _ => {
             eprintln!("Unknown format: {}. Use 'json' or 'markdown'", format);

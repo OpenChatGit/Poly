@@ -127,6 +127,8 @@ poly build     # build frontend when configured, then package the desktop app
 poly run       # launch the app
 ```
 
+Run `poly ai-info` for machine-readable agent guidance, or `poly ai-info --format markdown` for a readable version with the current project workflow, platform limits, and documentation paths.
+
 
 ---
 

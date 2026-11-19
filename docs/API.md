@@ -1,6 +1,6 @@
 # Poly API & Developer Guide
 
-**Current release:** 0.5.8 · **Last reviewed:** 2026-11
+**Current release:** 0.5.9 · **Last reviewed:** 2026-11
 
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
@@ -129,6 +129,8 @@ poly run       # launch the app
 ```
 
 Use `poly dev --native` while developing a desktop app. It opens the native Poly window against the editable frontend and starts Vite with HMR when the project has a Vite setup. HTML, CSS, JavaScript, and imported assets update without running `poly build` after each change. `poly run --native` also uses the live frontend unless `--release` is set or the app is running from a packaged bundle.
+
+Run `poly ai-info` for machine-readable agent guidance, or `poly ai-info --format markdown` for a readable version with the current project workflow, platform limits, and documentation paths.
 
 
 ---

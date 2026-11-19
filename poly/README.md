@@ -5,7 +5,7 @@ Poly is an experimental, custom-built Rust framework and command-line tool for c
 The crate is named `poly-framework`; installing it provides the `poly` command:
 
 ```sh
-cargo install poly-framework --version 0.5.8 --features native,gui
+cargo install poly-framework --version 0.5.9 --features native,gui
 poly --help
 ```
 

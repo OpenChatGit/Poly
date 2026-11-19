@@ -1,6 +1,6 @@
 # Poly
 
-![Version](https://img.shields.io/badge/version-0.5.8-blue)
+![Version](https://img.shields.io/badge/version-0.5.9-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Status](https://img.shields.io/badge/status-experimental-orange)
 ![License](https://img.shields.io/badge/license-custom-informational)
@@ -35,6 +35,7 @@ poly dev          # Run the browser frontend and Poly development workflow
 poly dev --native # Open a desktop window with live frontend updates
 poly build        # Build the frontend and desktop application
 poly run --native # Launch the native desktop app
+poly ai-info      # Print agent-oriented setup, API, and platform guidance
 ```
 
 Add JavaScript libraries with `poly add <package>`. Poly records them in `package.json`, uses npm's lockfile, and configures Vite imports for plain HTML projects. Import modules normally from `web/src/main.js`. Use `poly dev --native` to make desktop changes live without rebuilding; `poly build` remains for packaging.
