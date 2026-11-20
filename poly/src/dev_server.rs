@@ -1,8 +1,9 @@
 use super::*;
 
-pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
+pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Result<(), String> {
     use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
     use std::thread;
+    use std::net::TcpListener;
 
     // Disable Permissions in development mode
     poly::permissions::set_development_mode();
@@ -20,7 +21,7 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
         && crate::scaffold::has_vite_config(project_path);
 
     // Use config port if set, otherwise CLI arg (CLI arg takes precedence if not default)
-    let port = if port != 3000 { port } else { config.dev.port };
+    let requested_port = if port != 3000 { port } else { config.dev.port };
 
     let entry = find_frontend_entry(project_path);
     if entry.is_none() && vite_project {
@@ -32,23 +33,40 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
         if open_browser { command.args(["--", "--open"]); }
         let status = command.current_dir(project_path).status()
             .map_err(|error| format!("Could not start the Vite dev server: {error}"));
-        match status {
-            Ok(status) if status.success() => return,
-            Ok(status) => {
-                eprintln!("{}error{}: Vite dev server exited with {status}.", RED, RESET);
-                std::process::exit(status.code().unwrap_or(1));
-            }
-            Err(error) => {
-                eprintln!("{}error{}: {}", RED, RESET, error);
-                std::process::exit(1);
-            }
+        return match status {
+            Ok(status) if status.success() => Ok(()),
+            Ok(status) => Err(format!("Vite dev server exited with {status}. See the Vite output above.")),
+            Err(error) => Err(format!("Could not start the Vite dev server: {error}")),
         }
     }
     if entry.is_none() {
-        eprintln!("{}error{}: No entry point found. Create web/index.html", RED, RESET);
-        std::process::exit(1);
+        return Err("No entry point found. Create web/index.html.".to_string());
     }
     let entry = entry.unwrap();
+
+    let (listener, port_was_busy) = match TcpListener::bind(("0.0.0.0", requested_port)) {
+        Ok(listener) => (listener, false),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            let listener = TcpListener::bind(("0.0.0.0", 0))
+                .map_err(|fallback| format!("Port {requested_port} is already in use, and Poly could not select a fallback port: {fallback}"))?;
+            (listener, true)
+        }
+        Err(error) => return Err(format!("Could not bind Poly's dev server to port {requested_port}: {error}")),
+    };
+    let port = listener.local_addr()
+        .map_err(|error| format!("Could not read Poly dev server address: {error}"))?
+        .port();
+    let server = tiny_http::Server::from_listener(listener, None)
+        .map_err(|error| format!("Could not start Poly's HTTP server: {error}"))?;
+    if port_was_busy {
+        println!("  {}!{} Port {} is already in use; using {} instead.", YELLOW, RESET, requested_port, port);
+    }
+
+    let vite_port = if vite_project {
+        Some(find_available_vite_port()?)
+    } else {
+        None
+    };
 
     println!();
     println!("  {}POLY{} v{}  {}dev server{}", CYAN, RESET, VERSION, DIM, RESET);
@@ -64,9 +82,6 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     let entry_http = entry.clone();
     // HTTP server thread
     thread::spawn(move || {
-        let server = tiny_http::Server::http(format!("0.0.0.0:{}", port))
-            .expect("Failed to start HTTP server");
-
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
 
@@ -253,8 +268,10 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
 
     let mut vite_process = if vite_project {
         let backend = format!("http://127.0.0.1:{port}");
+        let vite_port = vite_port.expect("Vite port is selected for Vite projects");
+        let vite_port_arg = vite_port.to_string();
         match npm_command()
-            .args(["run", "dev"])
+            .args(["run", "dev", "--", "--host", "127.0.0.1", "--port", &vite_port_arg, "--strictPort"])
             .current_dir(project_path)
             .env("POLY_BACKEND_URL", &backend)
             .spawn()
@@ -264,29 +281,27 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
                 let mut ready = false;
                 for _ in 0..80 {
                     if std::net::TcpStream::connect_timeout(
-                        &"127.0.0.1:5173".parse().unwrap(),
+                        &format!("127.0.0.1:{vite_port}").parse().unwrap(),
                         Duration::from_millis(100),
                     ).is_ok() {
                         ready = true;
                         break;
                     }
                     if let Ok(Some(status)) = child.try_wait() {
-                        eprintln!("  {}×{} Vite exited during startup with {}", RED, RESET, status);
-                        std::process::exit(1);
+                        return Err(format!("Vite exited during startup with {status}. See the Vite output above."));
                     }
                     std::thread::sleep(Duration::from_millis(125));
                 }
                 if !ready {
                     let _ = child.kill();
-                    eprintln!("  {}×{} Vite did not start on 127.0.0.1:5173 within 10 seconds", RED, RESET);
-                    std::process::exit(1);
+                    let _ = child.wait();
+                    return Err(format!("Vite did not start on 127.0.0.1:{vite_port} within 10 seconds. See the Vite output above."));
                 }
-                println!("  {}>{} Frontend: {}http://127.0.0.1:5173{} (Vite + HMR)", GREEN, RESET, CYAN, RESET);
+                println!("  {}>{} Frontend: {}http://127.0.0.1:{}{} (Vite + HMR)", GREEN, RESET, CYAN, vite_port, RESET);
                 Some(child)
             }
             Err(error) => {
-                eprintln!("  {}×{} Could not start the Vite dev server: {}", RED, RESET, error);
-                std::process::exit(1);
+                return Err(format!("Could not start the Vite dev server: {error}"));
             }
         }
     } else { None };
@@ -305,7 +320,7 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     println!("\r  {}ready{} in {}{}ms{}                    ", GREEN, RESET, BOLD, start.elapsed().as_millis(), RESET);
 
     if open_browser {
-        let url = if vite_project { "http://127.0.0.1:5173".to_string() }
+        let url = if let Some(vite_port) = vite_port { format!("http://127.0.0.1:{vite_port}") }
             else { format!("http://localhost:{}", port) };
         let _ = open_in_browser(&url);
     }
@@ -318,8 +333,7 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
     loop {
         if let Some(child) = vite_process.as_mut() {
             if let Ok(Some(status)) = child.try_wait() {
-                eprintln!("\n  {}×{} Vite dev server stopped with {}", RED, RESET, status);
-                break;
+                return Err(format!("Vite dev server stopped with {status}. See the Vite output above."));
             }
         }
         match rx.recv_timeout(Duration::from_millis(100)) {
@@ -345,6 +359,22 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) {
             Err(_) => {}
         }
     }
+}
+
+fn find_available_vite_port() -> Result<u16, String> {
+    use std::net::TcpListener;
+
+    for port in 5173..=5273 {
+        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
+            drop(listener);
+            return Ok(port);
+        }
+    }
+
+    TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|listener| listener.local_addr())
+        .map(|address| address.port())
+        .map_err(|error| format!("Could not find an available Vite port: {error}"))
 }
 
 fn chrono_time() -> String {

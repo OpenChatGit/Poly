@@ -644,8 +644,7 @@ fn main() {
             if native {
                 run_app_result(&path, false, true, false, 80)
             } else {
-                run_dev_server(&path, port, open);
-                Ok(())
+                run_dev_server(&path, port, open)
             }
         },
         Some(Commands::Run { path, release, native, browser, ui_height }) => run_app_result(&path, release, native, browser, ui_height),
