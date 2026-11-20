@@ -1,6 +1,6 @@
 [package]
 name = "poly-framework"
-version = "0.5.9"
+version = "0.5.10"
 edition = "2021"
 description = "Experimental custom Rust framework and CLI for building native desktop apps with web frontends"
 authors = ["Poly Team"]
@@ -87,7 +87,7 @@ cef = ["native", "dep:cef"]
 cef-build-util = ["cef", "cef/build-util"]
 # Enables CEF's shared-texture OSR path for GPU-backed embedding.
 cef-osr = ["cef", "cef/accelerated_osr"]
-# GUI mode - hides console window on Windows (used for bundled apps)
+# GUI subsystem for packaged desktop launchers; omit for the interactive CLI.
 gui = []
 
 [lib]

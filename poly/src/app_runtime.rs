@@ -6,20 +6,6 @@ pub(super) use self::native::run_native_app as run_native_app_impl;
 pub(super) fn open_url_window(url: &str, title: &str, width: u32, height: u32) {
     #[cfg(feature = "native")]
     {
-        // Hide console window on Windows
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-            unsafe {
-                let console = GetConsoleWindow();
-                if !console.0.is_null() {
-                    let _ = ShowWindow(console, SW_HIDE);
-                    FreeConsole().ok();
-                }
-            }
-        }
-
         let config = poly::NativeConfig::new(title)
             .with_size(width, height)
             .with_decorations(true)
@@ -41,20 +27,6 @@ pub(super) fn open_url_window(url: &str, title: &str, width: u32, height: u32) {
 pub(super) fn run_browser_mode(url: &str, title: &str, width: u32, height: u32, ui_height: u32, ui_html_path: Option<String>) {
     #[cfg(feature = "native")]
     {
-        // Hide console window on Windows
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-            unsafe {
-                let console = GetConsoleWindow();
-                if !console.0.is_null() {
-                    let _ = ShowWindow(console, SW_HIDE);
-                    FreeConsole().ok();
-                }
-            }
-        }
-
         // Load UI HTML from file or use default
         let ui_html = if let Some(path) = ui_html_path {
             std::fs::read_to_string(&path).unwrap_or_else(|_| default_browser_ui())

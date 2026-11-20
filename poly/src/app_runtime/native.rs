@@ -251,20 +251,6 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
             }
         }
 
-        // Hide console window on Windows
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::System::Console::{GetConsoleWindow, FreeConsole};
-            use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-            unsafe {
-                let console = GetConsoleWindow();
-                if !console.0.is_null() {
-                    let _ = ShowWindow(console, SW_HIDE);
-                    FreeConsole().ok();
-                }
-            }
-        }
-
         // Find a free port
         let port = if dev_port > 0 { dev_port } else { find_free_port().unwrap_or(9473) };
 
