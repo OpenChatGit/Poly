@@ -11,6 +11,7 @@ mod native_impl {
     use crate::multiview::{MultiViewWindowConfig, ViewConfig, MultiViewOperation};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    #[cfg(not(target_os = "macos"))]
     use std::thread;
     
     /// Handle to a multi-view window
@@ -36,37 +37,73 @@ mod native_impl {
     
     /// Create and run a multi-view window in a new thread
     pub fn create_multiview_window(id: u64, config: MultiViewWindowConfig) -> Result<(), String> {
-        // Initialize nav queue for this window
-        NAV_QUEUES.lock().unwrap().insert(id, HashMap::new());
-        for view in &config.views {
-            NAV_QUEUES.lock().unwrap()
-                .get_mut(&id).unwrap()
-                .insert(view.id.clone(), Vec::new());
+        #[cfg(target_os = "macos")]
+        {
+            // tao requires the EventLoop, Window and WebView to be created on the main
+            // thread on macOS, so the window cannot be created in its own thread.
+            let _ = (id, config);
+            return Err(
+                "Creating multi-view native windows is not supported on macOS yet; use the main application window."
+                    .to_string(),
+            );
         }
-        
-        // Spawn window in new thread
-        thread::spawn(move || {
-            if let Err(e) = run_multiview_window(id, config) {
-                eprintln!("[MultiView] Window {} error: {}", id, e);
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Initialize nav queue for this window
+            NAV_QUEUES.lock().unwrap().insert(id, HashMap::new());
+            for view in &config.views {
+                NAV_QUEUES.lock().unwrap()
+                    .get_mut(&id).unwrap()
+                    .insert(view.id.clone(), Vec::new());
             }
-        });
-        
-        Ok(())
+
+            // Spawn window in new thread
+            thread::spawn(move || {
+                if let Err(e) = run_multiview_window(id, config) {
+                    eprintln!("[MultiView] Window {} error: {}", id, e);
+                }
+            });
+
+            Ok(())
+        }
     }
     
     /// Run the multi-view window (blocking, runs in its own thread)
+    #[cfg(not(target_os = "macos"))]
     fn run_multiview_window(window_id: u64, config: MultiViewWindowConfig) -> Result<(), Box<dyn std::error::Error>> {
+        #[cfg(target_os = "windows")]
+        use tao::platform::windows::EventLoopBuilderExtWindows;
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        use tao::platform::unix::EventLoopBuilderExtUnix;
+
         use tao::{
             event::{Event, WindowEvent},
             event_loop::{ControlFlow, EventLoopBuilder},
             window::WindowBuilder,
-            platform::windows::EventLoopBuilderExtWindows,
         };
         use wry::{WebViewBuilder, Rect};
         use wry::dpi::{LogicalPosition, LogicalSize};
         
-        // Use any_thread to allow creating event loop in non-main thread
-        let event_loop = EventLoopBuilder::new().with_any_thread(true).build();
+        // Use any_thread to allow creating event loop in non-main thread where the
+        // platform exposes such an extension; macOS has no such extension.
+        let mut event_loop_builder = EventLoopBuilder::new();
+        #[cfg(any(
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd"
+        ))]
+        event_loop_builder.with_any_thread(true);
+        let event_loop = event_loop_builder.build();
         
         let mut builder = WindowBuilder::new()
             .with_title(&config.title)
@@ -218,6 +255,7 @@ mod native_impl {
     }
     
     /// Handle IPC messages from a view
+    #[cfg(not(target_os = "macos"))]
     fn handle_view_ipc(window_id: u64, view_id: &str, message: &str, window: &tao::window::Window) {
         // Check for special commands
         if message.starts_with("navigate:") {

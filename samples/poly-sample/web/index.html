@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poly Sample</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img class="logo" src="./poly-logo.png" alt="Poly logo">
+      <div>
+        <p class="eyebrow">POLY SAMPLE</p>
+        <h1>System API playground</h1>
+        <p class="subtitle">Every card below calls a real Poly backend function.</p>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Platform</h2>
+        <dl>
+          <dt>OS</dt><dd id="os-platform">…</dd>
+          <dt>Arch</dt><dd id="os-arch">…</dd>
+          <dt>Home</dt><dd id="os-home">…</dd>
+          <dt>Native window</dt><dd id="os-native">…</dd>
+        </dl>
+      </article>
+
+      <article class="card">
+        <h2>Clipboard</h2>
+        <label for="clipboard-input">Text</label>
+        <textarea id="clipboard-input" rows="3">Hello from Poly</textarea>
+        <div class="buttons">
+          <button id="clipboard-write">Write</button>
+          <button id="clipboard-read">Read</button>
+        </div>
+        <pre id="clipboard-output" class="output">—</pre>
+      </article>
+
+      <article class="card">
+        <h2>Notes on disk</h2>
+        <label for="note-input">Note</label>
+        <textarea id="note-input" rows="3">Saved through poly.fs.write()</textarea>
+        <div class="buttons">
+          <button id="note-save">Save</button>
+          <button id="note-load">Load</button>
+          <button id="note-delete">Delete</button>
+        </div>
+        <pre id="note-output" class="output">—</pre>
+      </article>
+
+      <article class="card">
+        <h2>Counter</h2>
+        <p>Click to prove the frontend is interactive.</p>
+        <div class="buttons">
+          <button id="counter-increment">Clicked <span id="counter-value">0</span> times</button>
+          <button id="counter-notify">Notify</button>
+        </div>
+      </article>
+    </section>
+
+    <footer>
+      <p id="status">Loading Poly APIs…</p>
+    </footer>
+  </main>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

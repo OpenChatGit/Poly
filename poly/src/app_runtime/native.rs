@@ -30,6 +30,61 @@ fn resolve_configured_icon(icon_path: Option<&str>, app_root: &Path) -> Option<s
     resolved.is_file().then_some(resolved)
 }
 
+/// Bind Poly's local asset server, falling back to an OS-assigned port when the
+/// requested one is taken. Returns the listener and the port it really holds,
+/// so callers build URLs from the bound port instead of the requested one.
+/// Passing `0` asks the OS for a free port.
+fn bind_local_server(requested_port: u16) -> std::io::Result<(std::net::TcpListener, u16)> {
+    use std::net::TcpListener;
+
+    let (listener, port_was_busy) = match TcpListener::bind(("127.0.0.1", requested_port)) {
+        Ok(listener) => (listener, false),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            let fallback = TcpListener::bind(("127.0.0.1", 0))
+                .or_else(|_| TcpListener::bind(("127.0.0.1", find_free_port().unwrap_or(9473))))?;
+            (fallback, true)
+        }
+        Err(error) => return Err(error),
+    };
+    let port = listener.local_addr()?.port();
+    if port_was_busy && requested_port != 0 {
+        eprintln!("  {}warning{}: Port {} is already in use; using {} instead.", YELLOW, RESET, requested_port, port);
+    }
+    Ok((listener, port))
+}
+
+/// Client-side hot reload poller injected into the served document, mirroring
+/// the one `poly dev` adds in `dev_server.rs`.
+fn poly_reload_client_script(initial_version: u64, reload_interval: u32) -> String {
+    format!(r#"<script>
+(function() {{
+  let version = {initial_version};
+  let polling = true;
+  async function check() {{
+    if (!document.hidden) {{
+      try {{
+        const response = await fetch('/__poly_reload');
+        const data = await response.json();
+        if (data.version > version) {{ version = data.version; location.reload(); }}
+      }} catch {{}}
+    }}
+    if (polling) setTimeout(check, {reload_interval});
+  }}
+  document.addEventListener('visibilitychange', () => {{ polling = !document.hidden; if (polling) check(); }});
+  check();
+}})();
+</script>"#, initial_version = initial_version, reload_interval = reload_interval)
+}
+
+fn inject_reload_client(html: &mut String, initial_version: u64, reload_interval: u32) {
+    let reload_script = poly_reload_client_script(initial_version, reload_interval);
+    if html.contains("</body>") {
+        *html = html.replace("</body>", &format!("{}</body>", reload_script));
+    } else {
+        html.push_str(&reload_script);
+    }
+}
+
 #[cfg(windows)]
 fn stop_dev_process_tree(child: &mut std::process::Child) {
     use std::os::windows::process::CommandExt;
@@ -116,8 +171,11 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     use std::sync::Arc;
     use std::thread;
 
-    // Check if running from bundle (bundle folder exists)
-    let bundle_dir = project_path.join("bundle");
+    // Check if running from bundle (bundle folder exists). A macOS `.app` keeps
+    // its data in Contents/Resources/bundle, which is not a sibling of the
+    // executable, so resolve the app root from the executable when running
+    // inside one.
+    let bundle_dir = crate::build::bundle_source_dir(project_path);
     let is_bundled = bundle_dir.exists();
     let effective_path = if is_bundled { &bundle_dir } else { project_path };
     let runtime_config = poly::PolyConfig::load(if is_bundled { &bundle_dir } else { project_path });
@@ -251,8 +309,15 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
             }
         }
 
-        // Find a free port
-        let port = if dev_port > 0 { dev_port } else { find_free_port().unwrap_or(9473) };
+        // Bind the listener first so the port printed and used for URLs is the
+        // one actually held, even when the configured port is taken.
+        let (listener, port) = match bind_local_server(dev_port) {
+            Ok(bound) => bound,
+            Err(error) => {
+                eprintln!("{}error{}: Could not start the browser mode HTTP server: {}", RED, RESET, error);
+                return;
+            }
+        };
 
         println!();
         println!("  {}POLY{} {}  {}browser mode{}", CYAN, RESET, VERSION, DIM, RESET);
@@ -274,8 +339,13 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
         let packages_dir_clone = packages_dir.clone();
         let assets_dir_clone = assets_dir.clone();
         thread::spawn(move || {
-            let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
-                .expect("Failed to start HTTP server");
+            let server = match tiny_http::Server::from_listener(listener, None) {
+                Ok(server) => server,
+                Err(error) => {
+                    eprintln!("{}error{}: Could not start the browser mode HTTP server: {}", RED, RESET, error);
+                    return;
+                }
+            };
 
             for request in server.incoming_requests() {
                 let url = request.url().to_string();
@@ -529,11 +599,15 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
         (false, title.to_string(), false, false, Vec::new())
     };
 
-    // Find a free port or use configured port
-    let port = if dev_port > 0 {
-        dev_port
-    } else {
-        find_free_port().unwrap_or(9473)
+    // Bind the listener before anything uses the port, so the WebView URL, the
+    // Vite proxy target, and the printed URL all agree with the port actually
+    // held. A busy configured port falls back to an OS-assigned one.
+    let (listener, port) = match bind_local_server(dev_port) {
+        Ok(bound) => bound,
+        Err(error) => {
+            eprintln!("{}error{}: Could not start Poly's local server: {}", RED, RESET, error);
+            std::process::exit(1);
+        }
     };
 
     println!();
@@ -638,6 +712,10 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     let project_path_owned = project_path.to_path_buf();
     let assets_dir_server = effective_path.join("assets");
     let decorations_for_server = window_decorations;
+    let reload_interval_server = runtime_config.dev.reload_interval;
+    // The document Poly loads first gets the hot reload poller injected, matching
+    // what `poly dev` serves so `--native` windows actually reload.
+    let is_root_document = |url_path: &str| url_path.is_empty() || url_path == "index.html";
 
     // Keep CEF's high-frequency frame reads from blocking static files, app
     // API requests, and page navigation on the main HTTP accept loop.
@@ -649,9 +727,13 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     }).expect("Failed to start CEF frame response worker");
 
     thread::spawn(move || {
-        let server = tiny_http::Server::http(format!("127.0.0.1:{}", port))
-            .expect("Failed to start local server");
-
+        let server = match tiny_http::Server::from_listener(listener, None) {
+            Ok(server) => server,
+            Err(error) => {
+                eprintln!("{}error{}: Could not start Poly's local server: {}", RED, RESET, error);
+                return;
+            }
+        };
 
         for mut request in server.incoming_requests() {
             let url = request.url().to_string();
@@ -1025,7 +1107,6 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                 }
 
                 if file_path.exists() && file_path.is_file() {
-                    let content = fs::read(&file_path).unwrap_or_default();
                     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
                     let ct = match ext.as_str() {
                         "html" => "text/html; charset=utf-8",
@@ -1059,8 +1140,28 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
                         _ => "application/octet-stream",
                     };
 
-                    tiny_http::Response::from_data(content)
-                        .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
+                    if ext == "html" {
+                        // The document Poly opens must carry the hot reload poller, so read it as
+                        // text and inject the same client `poly dev` serves.
+                        match fs::read_to_string(&file_path) {
+                            Ok(mut html) => {
+                                if is_root_document(url_path) {
+                                    inject_reload_client(
+                                        &mut html,
+                                        reload_counter_server.load(Ordering::Relaxed),
+                                        reload_interval_server,
+                                    );
+                                }
+                                tiny_http::Response::from_data(html.into_bytes())
+                                    .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
+                            }
+                            Err(_) => tiny_http::Response::from_data(fs::read(&file_path).unwrap_or_default())
+                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap()),
+                        }
+                    } else {
+                        tiny_http::Response::from_data(fs::read(&file_path).unwrap_or_default())
+                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap())
+                    }
                 } else {
                     tiny_http::Response::from_string("Not Found").with_status_code(404)
                 }
@@ -1123,7 +1224,10 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
     #[cfg(feature = "native")]
     let mut vite_process = if use_vite_dev_server {
         let backend_url = format!("http://127.0.0.1:{port}");
-        let vite_cli = project_path.join("node_modules/vite/bin/vite.js");
+        // `project_path` is usually relative, and this command runs with
+        // `current_dir(project_path)`; resolve the CLI first or the path is doubled.
+        let vite_cli = std::path::absolute(project_path.join("node_modules/vite/bin/vite.js"))
+            .unwrap_or_else(|_| project_path.join("node_modules/vite/bin/vite.js"));
         let mut command = if vite_cli.is_file() {
             let mut command = std::process::Command::new("node");
             command.arg(vite_cli).args(["--host", "127.0.0.1", "--port"]);
@@ -1134,6 +1238,7 @@ pub(crate) fn run_native_app(project_path: &Path, release: bool, browser_flag: b
             command
         };
         command.arg(vite_port.to_string())
+            .arg("--strictPort")
             .current_dir(project_path)
             // The dev server never reads interactive input. Keep it from sharing
             // the foreground terminal's stdin with the Poly process.

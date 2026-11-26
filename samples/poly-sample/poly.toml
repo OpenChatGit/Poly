@@ -1,0 +1,22 @@
+[package]
+name = "Poly Sample"
+version = "0.1.0"
+
+[web]
+dir = "dist/web"
+
+[window]
+title = "Poly Sample"
+width = 1080
+height = 760
+resizable = true
+decorations = true
+icon_path = "assets/icon.png"
+
+[dev]
+port = 3000
+devtools = true
+
+[build]
+icon_path = "assets/icon.png"
+icon_background = "#0d141a"

@@ -13,6 +13,7 @@ const CYAN: &str = "\x1b[36m";
 const GREEN: &str = "\x1b[32m";
 #[allow(dead_code)]
 const RED: &str = "\x1b[31m";
+const YELLOW: &str = "\x1b[33m";
 const DIM: &str = "\x1b[2m";
 const BOLD: &str = "\x1b[1m";
 const RESET: &str = "\x1b[0m";
@@ -82,6 +83,8 @@ pub struct BuildConfig {
     pub release: bool,
     pub bundle: bool,
     pub installer: bool,
+    /// Requested installer format; `None` uses the platform default.
+    pub installer_format: Option<String>,
     pub sign: bool,
 }
 
@@ -95,6 +98,9 @@ pub struct SigningConfig {
     
     // macOS
     pub macos_identity: Option<String>,           // Developer ID Application: Name
+    /// `Developer ID Installer` identity, used by `productsign` for `.pkg`.
+    /// Distinct from `macos_identity`; productsign rejects an Application cert.
+    pub macos_installer_identity: Option<String>,
     pub macos_entitlements: Option<String>,       // Path to entitlements.plist
     pub macos_notarize_apple_id: Option<String>,
     pub macos_notarize_password: Option<String>,  // App-specific password
@@ -177,10 +183,16 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
         .len();
     executable_progress.finish_with_message(format!("{}✓{} Created {} ({:.1} MB)", GREEN, RESET, exe_name, size as f64 / 1_000_000.0));
     
-    // Step 3: Sign executable (optional)
-    if config.sign {
+    // Step 3: Sign the executable (optional).
+    //
+    // On macOS the signature must cover the assembled `.app`, because codesign
+    // seals Resources/ — signing the bare binary here and then adding resources
+    // would leave an invalid signature. macOS is signed in step 4 instead.
+    let signing_config = load_signing_config(&config.project_path);
+    let needs_app_bundle = config.platform == Platform::MacOS
+        || (config.platform == Platform::Current && Platform::current() == Platform::MacOS);
+    if config.sign && !needs_app_bundle {
         let signing_progress = build_progress("Signing executable...");
-        let signing_config = load_signing_config(&config.project_path);
         match sign_executable(&exe_path, &signing_config) {
             Ok(()) => {
                 signing_progress.finish_with_message(format!("{}✓{} Signed executable", GREEN, RESET));
@@ -192,10 +204,90 @@ pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
         }
     }
     
-    // Step 4: Create installer (optional)
+    // Step 4: Assemble the launchable app. On macOS an `.app` is the runnable
+    // artifact, so it is always produced; `--installer` then wraps it in a
+    // distributable disk image.
+    if needs_app_bundle {
+        if Platform::current() != Platform::MacOS {
+            return Err("macOS app bundles must be built on macOS.".to_string());
+        }
+        let app_progress = build_progress("Creating macOS app bundle...");
+        let app_path = match create_macos_app_bundle(
+            &dist_dir,
+            project_path,
+            &app_name,
+            &app_version,
+            Some(&dist_dir.join("bundle")),
+        ) {
+            Ok(app_path) => {
+                app_progress.finish_with_message(format!("{}✓{} Created {}", GREEN, RESET,
+                    app_path.file_name().unwrap_or_default().to_string_lossy()));
+                app_path
+            }
+            Err(e) => {
+                app_progress.abandon_with_message(format!("{}×{} App bundle creation failed", RED, RESET));
+                return Err(format!("Could not create app bundle: {}", e));
+            }
+        };
+
+        // Sign the finished bundle so Resources/ is covered by the seal. The
+        // linker signs the bare binary before Resources/ exists, so an unsigned
+        // build still needs re-signing ad-hoc to be valid. A Developer ID is used
+        // when configured; otherwise the bundle is ad-hoc signed, which needs no
+        // certificate and is what makes it launchable on Apple Silicon.
+        {
+            let sign_progress = build_progress("Signing app bundle...");
+            let result = match &signing_config.macos_identity {
+                Some(identity) if config.sign => {
+                    let result = sign_macos(&app_path, &signing_config);
+                    if result.is_ok() {
+                        println!("  {}>{} Identity: {}", DIM, RESET, identity);
+                    }
+                    result
+                }
+                _ => adhoc_sign_macos(&app_path),
+            };
+
+            match result {
+                Ok(()) => sign_progress.finish_with_message(format!(
+                    "{}✓{} Signed app bundle{}",
+                    GREEN,
+                    RESET,
+                    if config.sign && signing_config.macos_identity.is_some() {
+                        " (Developer ID)"
+                    } else {
+                        " (ad-hoc)"
+                    }
+                )),
+                Err(e) => {
+                    sign_progress.abandon_with_message(format!("{}×{} Signing failed", RED, RESET));
+                    return Err(format!("Could not sign {}: {}", app_path.display(), e));
+                }
+            }
+        }
+
+        if config.sign && signing_config.macos_identity.is_none() {
+            println!(
+                "  {}warning{}: --sign was requested but no macOS identity is configured; \
+                 the app was ad-hoc signed. Set POLY_MACOS_IDENTITY or [signing.macos] \
+                 identity to sign with a Developer ID.",
+                YELLOW, RESET
+            );
+        }
+    }
+
+    // Step 5: Create a distributable installer (optional)
     if config.installer {
         let installer_progress = build_progress("Creating installer...");
-        match create_installer(&dist_dir, &app_name, &app_version, config.platform) {
+        match create_installer(
+            &dist_dir,
+            project_path,
+            &app_name,
+            &app_version,
+            config.platform,
+            config.installer_format.as_deref(),
+            config.sign,
+        ) {
             Ok(installer_path) => {
                 installer_progress.finish_with_message(format!("{}✓{} Created installer: {}", GREEN, RESET,
                     installer_path.file_name().unwrap_or_default().to_string_lossy()));
@@ -519,17 +611,75 @@ fn find_poly_crate() -> Result<std::path::PathBuf, String> {
     Err("Could not find poly crate. Make sure you're in the Poly workspace.".to_string())
 }
 
-/// Create platform-specific installer
+/// Create the platform's distributable package.
+///
+/// Installs are a separate concern from building: the macOS `.app` is already a
+/// runnable artifact produced by the build, so `--installer` only wraps it in a
+/// distributable. On macOS that is a `.dmg` by default, or a `.pkg` when
+/// requested with `--installer-format pkg`.
 fn create_installer(
     dist_dir: &Path,
+    project_path: &Path,
     app_name: &str,
     app_version: &str,
-    _platform: Platform,
+    platform: Platform,
+    format: Option<&str>,
+    sign: bool,
 ) -> Result<std::path::PathBuf, String> {
+    if platform != Platform::Current && platform != Platform::current() {
+        return Err(
+            "Cross-platform installers must be built on the target platform.".to_string(),
+        );
+    }
+
     match Platform::current() {
-        Platform::Windows => create_windows_installer(dist_dir, app_name, app_version),
-        Platform::MacOS => create_macos_app_bundle(dist_dir, app_name, app_version),
-        Platform::Linux => create_linux_appimage(dist_dir, app_name, app_version),
+        Platform::Windows => {
+            if let Some(format) = format.filter(|format| !format.trim().is_empty()) {
+                return Err(format!(
+                    "Unsupported installer format '{format}' for Windows. Omit --installer-format to build the default installer."
+                ));
+            }
+            create_windows_installer(dist_dir, app_name, app_version)
+        }
+        Platform::MacOS => {
+            let format = InstallerFormat::parse(format, Platform::MacOS)?;
+            let app_bundle = dist_dir.parent().unwrap_or(dist_dir).join(format!("{}.app", app_name));
+            let package = match format {
+                InstallerFormat::Dmg => create_macos_dmg(dist_dir, app_name, app_version),
+                InstallerFormat::Pkg => {
+                    create_macos_pkg(dist_dir, app_name, app_version, &app_bundle)
+                }
+            }?;
+
+            // A `.pkg` is signed with productsign and an Installer certificate.
+            // Without one the package is left unsigned; the postinstall script
+            // still ad-hoc signs the installed app so it launches locally.
+            if sign && format == InstallerFormat::Pkg {
+                let signing_config = load_signing_config(project_path);
+                match &signing_config.macos_installer_identity {
+                    Some(identity) => {
+                        sign_macos_pkg(&package, &signing_config)?;
+                        println!("  {}>{} Package identity: {}", DIM, RESET, identity);
+                    }
+                    None => println!(
+                        "  {}warning{}: --sign was requested but no Developer ID Installer \
+                         identity is configured; the .pkg is unsigned. Set \
+                         POLY_MACOS_INSTALLER_IDENTITY or [signing.macos] installer_identity.",
+                        YELLOW, RESET
+                    ),
+                }
+            }
+
+            Ok(package)
+        }
+        Platform::Linux => {
+            if let Some(format) = format.filter(|format| !format.trim().is_empty()) {
+                return Err(format!(
+                    "Unsupported installer format '{format}' for Linux. Omit --installer-format to build the default package."
+                ));
+            }
+            create_linux_appimage(dist_dir, app_name, app_version)
+        }
         Platform::Current => unreachable!(),
     }
 }
@@ -578,6 +728,8 @@ pub fn load_signing_config(project_path: &Path) -> SigningConfig {
                 } else if in_macos_section {
                     if let Some(val) = extract_toml_value_line(line, "identity") {
                         config.macos_identity = Some(val);
+                    } else if let Some(val) = extract_toml_value_line(line, "installer_identity") {
+                        config.macos_installer_identity = Some(val);
                     } else if let Some(val) = extract_toml_value_line(line, "entitlements") {
                         config.macos_entitlements = Some(val);
                     } else if let Some(val) = extract_toml_value_line(line, "team_id") {
@@ -600,6 +752,9 @@ pub fn load_signing_config(project_path: &Path) -> SigningConfig {
     }
     if let Ok(val) = std::env::var("POLY_MACOS_IDENTITY") {
         config.macos_identity = Some(val);
+    }
+    if let Ok(val) = std::env::var("POLY_MACOS_INSTALLER_IDENTITY") {
+        config.macos_installer_identity = Some(val);
     }
     if let Ok(val) = std::env::var("POLY_MACOS_ENTITLEMENTS") {
         config.macos_entitlements = Some(val);
@@ -635,6 +790,31 @@ pub fn sign_executable(exe_path: &Path, signing_config: &SigningConfig) -> Resul
             Err("Linux executable signing is not implemented. Disable signing or provide a platform signing tool.".to_string())
         }
         Platform::Current => unreachable!(),
+    }
+}
+
+/// Apply an ad-hoc signature to a macOS app bundle.
+///
+/// Apple Silicon requires every Mach-O to carry at least an ad-hoc signature, and
+/// the signature must cover the assembled bundle. The binary is signed by the
+/// linker *before* `Resources/` is populated, so the bundle needs re-signing or
+/// `codesign --verify` reports the resources are unsealed. Ad-hoc signing needs
+/// no certificate and no Apple account.
+fn adhoc_sign_macos(app_path: &Path) -> Result<(), String> {
+    let output = Command::new("codesign")
+        .arg("--force")
+        .arg("--sign").arg("-")
+        .arg(app_path)
+        .output()
+        .map_err(|error| format!("Failed to run codesign: {error}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "codesign failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
     }
 }
 
@@ -709,30 +889,67 @@ fn find_signtool() -> Option<std::path::PathBuf> {
 }
 
 /// Sign macOS executable/app bundle using codesign
-fn sign_macos(exe_path: &Path, config: &SigningConfig) -> Result<(), String> {
+/// Sign a macOS app bundle with a Developer ID Application identity.
+///
+/// The bundle is signed as a whole so `Resources/` and `Info.plist` are sealed.
+/// `--deep` is intentionally avoided: Apple deprecated it, and the bundle's only
+/// nested code is the main executable.
+fn sign_macos(app_path: &Path, config: &SigningConfig) -> Result<(), String> {
     let identity = config.macos_identity.as_ref()
         .ok_or("No macOS signing identity configured. Set POLY_MACOS_IDENTITY or [signing.macos] identity in poly.toml")?;
-    
+
     let mut cmd = Command::new("codesign");
     cmd.arg("--force")
         .arg("--options").arg("runtime")  // Hardened runtime for notarization
+        .arg("--timestamp")
         .arg("--sign").arg(identity);
-    
+
     // Add entitlements if configured
     if let Some(ref entitlements) = config.macos_entitlements {
         cmd.arg("--entitlements").arg(entitlements);
     }
-    
-    cmd.arg(exe_path);
-    
+
+    cmd.arg(app_path);
+
     let output = cmd.output()
         .map_err(|e| format!("Failed to run codesign: {}", e))?;
-    
+
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!("codesign failed: {}", String::from_utf8_lossy(&output.stderr)))
+        Err(format!("codesign failed: {}", String::from_utf8_lossy(&output.stderr).trim()))
     }
+}
+
+/// Sign a `.pkg` with a `Developer ID Installer` identity.
+///
+/// `productsign` is the only way to sign a flat package, and it needs an
+/// Installer certificate — an Application certificate is rejected. Callers must
+/// only reach this when such an identity is configured.
+fn sign_macos_pkg(pkg_path: &Path, config: &SigningConfig) -> Result<(), String> {
+    let identity = config.macos_installer_identity.as_ref()
+        .ok_or("No macOS installer identity configured. Set POLY_MACOS_INSTALLER_IDENTITY or [signing.macos] installer_identity in poly.toml")?;
+
+    let signed_path = pkg_path.with_extension("signed.pkg");
+    let _ = fs::remove_file(&signed_path);
+
+    let output = Command::new("productsign")
+        .arg("--sign").arg(identity)
+        .arg(pkg_path)
+        .arg(&signed_path)
+        .output()
+        .map_err(|e| format!("Failed to run productsign: {e}"))?;
+
+    if !output.status.success() {
+        let _ = fs::remove_file(&signed_path);
+        return Err(format!(
+            "productsign failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    fs::rename(&signed_path, pkg_path)
+        .map_err(|e| format!("Could not replace the unsigned package: {e}"))
 }
 
 /// Notarize macOS app bundle with Apple
@@ -860,60 +1077,580 @@ fn add_dir_to_zip<W: Write + std::io::Seek>(
     Ok(())
 }
 
+/// Path to an app's `bundle/` data directory given the directory holding the
+/// executable.
+///
+/// A macOS `.app` launches `Contents/MacOS/<exe>`, whose data bundle lives two
+/// levels up in `Contents/Resources/bundle`. Every other layout keeps the
+/// bundle beside the executable.
+pub fn bundle_source_dir(exe_dir: &Path) -> std::path::PathBuf {
+    let macos_bundle = bundle_project_dir(exe_dir).map(|resources| resources.join("bundle"));
+    macos_bundle.unwrap_or_else(|| exe_dir.join("bundle"))
+}
+
+/// Directory that `run_native_app` should treat as the app root for a macOS
+/// `.app`, or `None` when the executable is not inside one.
+pub fn bundle_project_dir(exe_dir: &Path) -> Option<std::path::PathBuf> {
+    // `exe_dir` is Contents/MacOS, so its parent is Contents.
+    let contents = exe_dir.parent()?;
+    let resources = contents.join("Resources");
+    let is_app = contents.file_name()? == "Contents" && resources.join("bundle").is_dir();
+    is_app.then_some(resources)
+}
+
+/// Build a macOS `.icns` icon from a source image.
+///
+#[cfg(feature = "native")]
+/// The artwork is composited onto `background` (when given) and inset inside a
+/// rounded "squircle" the way macOS app icons are drawn, so a transparent logo
+/// still yields a solid tile instead of a floating cut-out. PNG payloads are
+/// written directly because that is the format `iconutil` produces and
+/// `NSImage` accepts.
+fn create_macos_icns(
+    source: &Path,
+    output: &Path,
+    background: Option<(u8, u8, u8, u8)>,
+) -> Result<(), String> {
+    let artwork = image::ImageReader::open(source)
+        .map_err(|error| format!("Could not open icon {}: {error}", source.display()))?
+        .decode()
+        .map_err(|error| format!("Could not decode icon {}: {error}", source.display()))?;
+
+    // Draw at the largest size the iconset needs, then downscale once per slot.
+    const CANVAS: u32 = 1024;
+    let base = compose_icon_tile(&artwork, CANVAS, background);
+
+    // (pixel size, element type) for the standard iconset:
+    // 16@1x 16@2x 32@1x 32@2x 128@1x 128@2x 256@1x 256@2x 512@1x 512@2x
+    const ICON_ELEMENTS: [(u32, &str); 10] = [
+        (16, "icp4"),
+        (32, "ic11"),
+        (32, "icp5"),
+        (64, "ic12"),
+        (128, "icp6"),
+        (256, "ic13"),
+        (256, "icp7"),
+        (512, "ic14"),
+        (512, "ic08"),
+        (1024, "ic09"),
+    ];
+
+    let mut payloads: Vec<(&str, Vec<u8>)> = Vec::new();
+    for (size, element) in ICON_ELEMENTS {
+        let resized = image::imageops::resize(
+            &base,
+            size,
+            size,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let mut png_bytes: Vec<u8> = Vec::new();
+        resized
+            .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+            .map_err(|error| format!("Could not encode the {size}px icon: {error}"))?;
+        payloads.push((element, png_bytes));
+    }
+
+    // An .icns file is: magic "icns", total length, then typed PNG chunks.
+    // Chunk order is not significant, so only the payloads are assembled here
+    // and the sizes are written as big-endian lengths.
+    let mut body: Vec<u8> = Vec::new();
+    for (element, png_bytes) in &payloads {
+        let chunk_len = (png_bytes.len() + 8) as u32;
+        body.extend_from_slice(element.as_bytes());
+        body.extend_from_slice(&chunk_len.to_be_bytes());
+        body.extend_from_slice(png_bytes);
+    }
+
+    let total_len = (body.len() + 8) as u32;
+    let mut icns: Vec<u8> = Vec::with_capacity(total_len as usize);
+    icns.extend_from_slice(b"icns");
+    icns.extend_from_slice(&total_len.to_be_bytes());
+    icns.extend_from_slice(&body);
+
+    fs::write(output, icns)
+        .map_err(|error| format!("Could not write {}: {error}", output.display()))
+}
+
+#[cfg(feature = "native")]
+/// Compose artwork into a square app-icon tile.
+///
+/// macOS icons are drawn on a rounded tile that occupies roughly 80% of the
+/// canvas. The artwork is fitted inside that tile on `background`, which lets a
+/// transparent or irregular logo sit on a solid, correctly proportioned icon.
+/// Fitting preserves the artwork's aspect ratio, so the motif is positioned
+/// from its own scaled dimensions to keep it centred on non-square images.
+fn compose_icon_tile(
+    artwork: &image::DynamicImage,
+    canvas: u32,
+    background: Option<(u8, u8, u8, u8)>,
+) -> image::RgbaImage {
+    use image::imageops::FilterType;
+    use image::Rgba;
+
+    let mut tile = image::RgbaImage::new(canvas, canvas);
+
+    // Solid tile: fill a rounded square with padding, like other macOS apps.
+    let inner_extent = match background {
+        Some((r, g, b, a)) => {
+            let inset = (canvas as f32 * 0.10).round() as u32;
+            let extent = canvas - inset * 2;
+            let radius = (extent as f32 * 0.225).round();
+
+            for y in 0..canvas {
+                for x in 0..canvas {
+                    let inside_bounds = x >= inset && x < inset + extent && y >= inset && y < inset + extent;
+                    if !inside_bounds {
+                        continue;
+                    }
+                    // Rounded corners: skip pixels outside the corner arc.
+                    let cx = x as f32 + 0.5;
+                    let cy = y as f32 + 0.5;
+                    let nearest_x = cx.clamp(inset as f32 + radius, (inset + extent) as f32 - radius);
+                    let nearest_y = cy.clamp(inset as f32 + radius, (inset + extent) as f32 - radius);
+                    let distance = ((cx - nearest_x).powi(2) + (cy - nearest_y).powi(2)).sqrt();
+                    if distance <= radius {
+                        tile.put_pixel(x, y, Rgba([r, g, b, a]));
+                    }
+                }
+            }
+            extent
+        }
+        None => canvas,
+    };
+
+    // Fit the artwork inside the tile, then centre it using the size it
+    // actually scaled to rather than the box that was requested.
+    let art_box = (inner_extent as f32 * if background.is_some() { 0.78 } else { 0.80 }).round() as u32;
+    let scaled = artwork.resize(art_box, art_box, FilterType::Lanczos3).to_rgba8();
+    let (scaled_w, scaled_h) = scaled.dimensions();
+    let offset_x = (canvas.saturating_sub(scaled_w)) / 2;
+    let offset_y = (canvas.saturating_sub(scaled_h)) / 2;
+    image::imageops::overlay(&mut tile, &scaled, offset_x as i64, offset_y as i64);
+
+    tile
+}
+
+/// Create the app's macOS icon and return its `.icns` path, if a source icon exists.
+///
+/// Without the `native` feature the `image` crate is unavailable, so no icon is
+/// generated and the app bundle falls back to the system default.
+#[cfg(feature = "native")]
+fn create_macos_app_icon(
+    project_path: &Path,
+    app_name: &str,
+    icon_source: Option<&str>,
+    icon_background: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    let source = icon_source
+        .map(|path| project_path.join(path))
+        .or_else(|| Some(project_path.join("assets/icon.png")))
+        .filter(|path| path.is_file());
+
+    let source = match source {
+        Some(path) => path,
+        None => {
+            eprintln!("  {}warning{}: No app icon found; the macOS app will use the default icon.", YELLOW, RESET);
+            return None;
+        }
+    };
+
+    let background = icon_background.and_then(|value| {
+        poly::config::parse_color(value).or_else(|| {
+            eprintln!(
+                "  {}warning{}: Could not parse [build] icon_background '{}'; using a transparent icon.",
+                YELLOW, RESET, value
+            );
+            None
+        })
+    });
+
+    let icns_path = std::env::temp_dir()
+        .join(format!("poly-{}-{}.icns", slugify(app_name), std::process::id()));
+    match create_macos_icns(&source, &icns_path, background) {
+        Ok(()) => Some(icns_path),
+        Err(error) => {
+            eprintln!("  {}warning{}: Could not build the macOS app icon: {}", YELLOW, RESET, error);
+            let _ = fs::remove_file(&icns_path);
+            None
+        }
+    }
+}
+
+/// Without the `native` feature the image decoder is unavailable, so the macOS
+/// bundle is built without a custom icon rather than failing the build.
+#[cfg(not(feature = "native"))]
+fn create_macos_app_icon(
+    _project_path: &Path,
+    _app_name: &str,
+    _icon_source: Option<&str>,
+    _icon_background: Option<&str>,
+) -> Option<std::path::PathBuf> {
+    eprintln!(
+        "  {}warning{}: App icons need the `native` feature; the macOS app will use the default icon.",
+        YELLOW, RESET
+    );
+    None
+}
+
+/// Lowercase, ASCII-only identifier fragment for paths and bundle identifiers.
+fn slugify(value: &str) -> String {
+    let slug: String = value
+        .to_lowercase()
+        .chars()
+        .map(|character| if character.is_ascii_alphanumeric() { character } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() { "app".to_string() } else { slug }
+}
+
 /// Create macOS .app bundle
 fn create_macos_app_bundle(
     dist_dir: &Path,
+    project_path: &Path,
     app_name: &str,
     app_version: &str,
+    bundle_dir: Option<&Path>,
 ) -> Result<std::path::PathBuf, String> {
     let app_bundle = dist_dir.parent().unwrap_or(dist_dir).join(format!("{}.app", app_name));
     let contents = app_bundle.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
-    
-    fs::create_dir_all(&macos).ok();
-    fs::create_dir_all(&resources).ok();
-    
+
+    fs::create_dir_all(&macos)
+        .map_err(|error| format!("Could not create {}: {error}", macos.display()))?;
+    fs::create_dir_all(&resources)
+        .map_err(|error| format!("Could not create {}: {error}", resources.display()))?;
+
     // Copy executable
     let exe_name = app_name.to_string();
     let src_exe = dist_dir.join(&exe_name);
-    if src_exe.exists() {
-        fs::copy(&src_exe, macos.join(&exe_name)).ok();
+    if !src_exe.exists() {
+        return Err(format!("Expected a built executable at {}.", src_exe.display()));
     }
-    
-    // Copy bundle to Resources
-    let bundle_dir = dist_dir.join("bundle");
-    if bundle_dir.exists() {
-        copy_dir_recursive(&bundle_dir, &resources.join("bundle")).ok();
+    fs::copy(&src_exe, macos.join(&exe_name))
+        .map_err(|error| format!("Could not copy {} into the app bundle: {error}", src_exe.display()))?;
+
+    // `fs::copy` preserves file contents but not the executable bit, and an app
+    // whose main binary is not executable will not launch.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = macos.join(&exe_name);
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("Could not mark {} as executable: {error}", executable.display()))?;
     }
-    
+
+    // Stage the app data at Contents/Resources/bundle, matching the location
+    // `bundle_source_dir` reads at runtime.
+    let staged_bundle = resources.join("bundle");
+    if staged_bundle.exists() {
+        fs::remove_dir_all(&staged_bundle)
+            .map_err(|error| format!("Could not replace {}: {error}", staged_bundle.display()))?;
+    }
+    if let Some(bundle_dir) = bundle_dir.filter(|dir| dir.is_dir()) {
+        copy_dir_recursive(bundle_dir, &staged_bundle)
+            .map_err(|error| format!("Could not copy the app data bundle: {error}"))?;
+    }
+
+    // macOS takes the Dock/Finder icon from CFBundleIconFile inside the bundle.
+    // `icon_path` supplies the artwork and `icon_background` supplies the tile
+    // colour behind it, so the two can differ.
+    let build_settings = fs::read_to_string(project_path.join("poly.toml"))
+        .map(|content| {
+            (
+                extract_toml_value(&content, "icon_path"),
+                extract_toml_value(&content, "icon_background"),
+            )
+        })
+        .unwrap_or((None, None));
+    let (icon_source, icon_background) = build_settings;
+    let icon_entry = create_macos_app_icon(
+        project_path,
+        app_name,
+        icon_source.as_deref(),
+        icon_background.as_deref(),
+    )
+        .and_then(|temporary| {
+            let target = resources.join("icon.icns");
+            match fs::copy(&temporary, &target) {
+                Ok(_) => {
+                    let _ = fs::remove_file(&temporary);
+                    Some("icon.icns".to_string())
+                }
+                Err(error) => {
+                    let _ = fs::remove_file(&temporary);
+                    eprintln!("  {}warning{}: Could not copy the app icon: {}", YELLOW, RESET, error);
+                    None
+                }
+            }
+        });
+
+    // A bundle identifier is reverse-DNS and may not contain spaces, so derive
+    // it from the app name rather than embedding the display text verbatim.
+    let bundle_id = format!("com.poly.{}", slugify(app_name));
+    let icon_plist = match &icon_entry {
+        Some(entry) => format!("\n    <key>CFBundleIconFile</key>\n    <string>{entry}</string>"),
+        None => String::new(),
+    };
+
     // Create Info.plist
     let info_plist = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>{}</string>
+    <string>{exe_name}</string>
     <key>CFBundleIdentifier</key>
-    <string>com.poly.{}</string>
+    <string>{bundle_id}</string>
     <key>CFBundleName</key>
-    <string>{}</string>
+    <string>{app_name}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{app_name}</string>
     <key>CFBundleVersion</key>
-    <string>{}</string>
+    <string>{app_version}</string>
     <key>CFBundleShortVersionString</key>
-    <string>{}</string>
+    <string>{app_version}</string>
     <key>CFBundlePackageType</key>
-    <string>APPL</string>
+    <string>APPL</string>{icon_plist}
     <key>LSMinimumSystemVersion</key>
     <string>10.15</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
-</plist>"#, app_name, app_name.to_lowercase(), app_name, app_version, app_version);
-    
-    fs::write(contents.join("Info.plist"), info_plist).ok();
-    
+</plist>"#);
+
+    fs::write(contents.join("Info.plist"), info_plist)
+        .map_err(|error| format!("Could not create the app's Info.plist: {error}"))?;
+
     Ok(app_bundle)
+}
+
+/// Packaging format requested for `--installer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallerFormat {
+    Dmg,
+    Pkg,
+}
+
+impl InstallerFormat {
+    /// Resolve a `--installer-format` value, or pick the platform default.
+    fn parse(value: Option<&str>, platform: Platform) -> Result<Self, String> {
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            return match platform {
+                Platform::MacOS => Ok(Self::Dmg),
+                _ => Ok(Self::Dmg),
+            };
+        };
+
+        match value.to_ascii_lowercase().as_str() {
+            "dmg" | "disk-image" | "diskimage" => Ok(Self::Dmg),
+            "pkg" | "installer-pkg" | "productbuild" => Ok(Self::Pkg),
+            "exe" | "appimage" | "tar.gz" | "tarball" => Err(format!(
+                "'{value}' is not a macOS installer format. Use 'dmg' or 'pkg'."
+            )),
+            other => Err(format!("Unknown installer format '{other}'. Use 'dmg' or 'pkg'.")),
+        }
+    }
+}
+
+/// Wrap the assembled `.app` in a `.dmg` disk image.
+///
+/// `hdiutil -srcfolder` copies the folder's *contents*, so the app is staged
+/// under a temporary directory to keep `X.app` at the root of the mounted
+/// volume. The image also gets an `/Applications` symlink so it supports the
+/// usual drag-to-install gesture.
+fn create_macos_dmg(
+    dist_dir: &Path,
+    app_name: &str,
+    app_version: &str,
+) -> Result<std::path::PathBuf, String> {
+    let app_bundle = dist_dir.parent().unwrap_or(dist_dir).join(format!("{}.app", app_name));
+    if !app_bundle.is_dir() {
+        return Err(format!(
+            "Expected the app bundle at {} before packaging. Build the app first.",
+            app_bundle.display()
+        ));
+    }
+
+    let dmg_name = format!("{}-{}-macos.dmg", slugify(app_name), app_version);
+    let dmg_path = dist_dir.parent().unwrap_or(dist_dir).join(&dmg_name);
+    let _ = fs::remove_file(&dmg_path);
+
+    // Stage the volume contents: the app plus an Applications shortcut.
+    let staging = std::env::temp_dir().join(format!(
+        "poly-dmg-{}-{}",
+        slugify(app_name),
+        std::process::id()
+    ));
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    fs::create_dir_all(&staging)
+        .map_err(|error| format!("Could not create the disk image staging folder: {error}"))?;
+
+    let staged_app = staging.join(format!("{}.app", app_name));
+    let staged = copy_dir_recursive(&app_bundle, &staged_app)
+        .map_err(|error| format!("Could not stage the app for the disk image: {error}"));
+    if let Err(error) = staged {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    let _ = std::os::unix::fs::symlink("/Applications", staging.join("Applications"));
+
+    let output = Command::new("hdiutil")
+        .arg("create")
+        .arg("-volname").arg(app_name)
+        .arg("-srcfolder").arg(&staging)
+        .arg("-ov")
+        .arg("-format").arg("UDZO")
+        .arg(&dmg_path)
+        .output();
+
+    let _ = fs::remove_dir_all(&staging);
+
+    let output = output.map_err(|error| format!("Could not run hdiutil: {error}"))?;
+    if output.status.success() {
+        Ok(dmg_path)
+    } else {
+        let _ = fs::remove_file(&dmg_path);
+        Err(format!("hdiutil failed: {}", String::from_utf8_lossy(&output.stderr).trim()))
+    }
+}
+
+/// Wrap the assembled `.app` in a `.pkg` installer package.
+///
+/// `pkgbuild` installs the app into `/Applications`. Signing is applied by the
+/// caller when `--sign` is passed, because a product signature needs the same
+/// identity used for the app itself.
+fn create_macos_pkg(
+    dist_dir: &Path,
+    app_name: &str,
+    app_version: &str,
+    app_bundle: &Path,
+) -> Result<std::path::PathBuf, String> {
+    if !app_bundle.is_dir() {
+        return Err(format!(
+            "Expected the app bundle at {} before packaging. Build the app first.",
+            app_bundle.display()
+        ));
+    }
+
+    let pkg_name = format!("{}-{}-macos.pkg", slugify(app_name), app_version);
+    let pkg_path = dist_dir.parent().unwrap_or(dist_dir).join(&pkg_name);
+    let _ = fs::remove_file(&pkg_path);
+
+    // pkgbuild requires a component root whose layout mirrors the install
+    // destination, so stage the app under Applications/ before building.
+    let staging = std::env::temp_dir().join(format!(
+        "poly-pkg-{}-{}",
+        slugify(app_name),
+        std::process::id()
+    ));
+    if staging.exists() {
+        let _ = fs::remove_dir_all(&staging);
+    }
+    let staged_app = staging.join("Applications").join(format!("{}.app", app_name));
+    if let Err(error) = copy_dir_recursive(app_bundle, &staged_app) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!("Could not stage the app for the installer: {error}"));
+    }
+
+    // `pkgbuild` only records what the archive contains; it cannot guarantee the
+    // main binary keeps its executable bit on the target, and an unsigned app
+    // copied to another Mac may need an ad-hoc signature to launch. A postinstall
+    // script repairs both on the machine the package is installed on.
+    let scripts_dir = staging.join("scripts");
+    if let Err(error) = write_pkg_postinstall(&scripts_dir, app_name) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    let output = Command::new("pkgbuild")
+        .arg("--root").arg(&staging)
+        .arg("--scripts").arg(&scripts_dir)
+        .arg("--identifier").arg(format!("com.poly.{}", slugify(app_name)))
+        .arg("--version").arg(app_version)
+        .arg("--install-location").arg("/")
+        .arg(&pkg_path)
+        .output();
+
+    let _ = fs::remove_dir_all(&staging);
+
+    let output = output.map_err(|error| format!("Could not run pkgbuild: {error}"))?;
+    if output.status.success() {
+        Ok(pkg_path)
+    } else {
+        let _ = fs::remove_file(&pkg_path);
+        Err(format!("pkgbuild failed: {}", String::from_utf8_lossy(&output.stderr).trim()))
+    }
+}
+
+/// Write the `.pkg` postinstall script that repairs the installed app.
+///
+/// `pkgbuild --scripts` needs a directory containing an executable `postinstall`.
+/// The script runs as root on the installing machine, so it can:
+///   1. restore the executable bit on the app's main binary, and
+///   2. ad-hoc sign the bundle when no Developer ID signature is present,
+///      which is what lets an unsigned build launch without being blocked.
+///
+/// It never overwrites an existing valid signature: `codesign --verify` runs
+/// first, and a signed app is left untouched so Developer ID signatures survive.
+fn write_pkg_postinstall(scripts_dir: &Path, app_name: &str) -> Result<(), String> {
+    fs::create_dir_all(scripts_dir)
+        .map_err(|error| format!("Could not create the installer scripts folder: {error}"))?;
+
+    // The bundle name is interpolated into a shell script, so keep it to a form
+    // that cannot break out of the quoting below.
+    let bundle_name = format!("{}.app", app_name).replace('"', "").replace('$', "").replace('`', "");
+    let executable_name = app_name.replace('"', "").replace('$', "").replace('`', "");
+
+    let script = format!(
+        r#"#!/bin/sh
+# Poly installer postinstall.
+# Repairs the installed app so it runs from this machine.
+set -u
+
+APP="/Applications/{bundle_name}"
+EXECUTABLE="$APP/Contents/MacOS/{executable_name}"
+
+if [ ! -d "$APP" ]; then
+  echo "poly: expected the app at $APP" >&2
+  exit 0
+fi
+
+# 1. The main binary must be executable.
+if [ -f "$EXECUTABLE" ]; then
+  chmod 755 "$EXECUTABLE" || echo "poly: could not mark $EXECUTABLE executable" >&2
+else
+  echo "poly: missing app executable at $EXECUTABLE" >&2
+fi
+
+# 2. Ad-hoc sign only when the bundle is not already validly signed.
+#    A Developer ID signed build passes --verify and is left as-is.
+if ! /usr/bin/codesign --verify "$APP" >/dev/null 2>&1; then
+  if ! /usr/bin/codesign --force --deep --sign - "$APP" >/dev/null 2>&1; then
+    echo "poly: ad-hoc signing failed; the app may be blocked by Gatekeeper" >&2
+  fi
+fi
+
+exit 0
+"#,
+        bundle_name = bundle_name,
+        executable_name = executable_name,
+    );
+
+    let postinstall = scripts_dir.join("postinstall");
+    fs::write(&postinstall, script)
+        .map_err(|error| format!("Could not write the installer postinstall script: {error}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&postinstall, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("Could not mark the postinstall script executable: {error}"))?;
+    }
+
+    Ok(())
 }
 
 /// Create Linux AppImage (simplified - creates tarball for now)

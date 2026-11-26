@@ -93,6 +93,10 @@ pub struct TrayConfig {
 pub struct BuildConfig {
     pub icon_size: u32,
     pub icon_path: Option<String>,
+    /// Background composited behind the app icon before platform packaging.
+    /// Kept separate from `icon_path` so a transparent logo asset can still
+    /// produce a solid, correctly-sized platform icon.
+    pub icon_background: Option<String>,
 }
 
 /// The `[browser]` section, with browser mode settings.
@@ -221,6 +225,7 @@ impl Default for BuildConfig {
         Self {
             icon_size: 64,
             icon_path: None,
+            icon_background: None,
         }
     }
 }
@@ -374,6 +379,9 @@ impl PolyConfig {
         match key {
             "icon_size" => self.build.icon_size = value.parse().unwrap_or(64),
             "icon" | "icon_path" => self.build.icon_path = Some(value.to_string()),
+            "icon_background" | "icon_background_color" => {
+                self.build.icon_background = Some(value.to_string())
+            }
             _ => {}
         }
     }
@@ -432,6 +440,11 @@ fn parse_key_value(line: &str) -> Option<(String, String)> {
 }
 
 /// Parse hex color string to RGBA
+/// Parse a hex colour (`#rrggbb` or `#rrggbbaa`) into RGBA components.
+pub fn parse_color(color: &str) -> Option<(u8, u8, u8, u8)> {
+    parse_hex_color(color)
+}
+
 fn parse_hex_color(color: &str) -> Option<(u8, u8, u8, u8)> {
     let color = color.trim_start_matches('#');
     

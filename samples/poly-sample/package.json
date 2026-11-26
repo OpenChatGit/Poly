@@ -1,0 +1,17 @@
+{
+  "name": "poly-sample",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.11",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

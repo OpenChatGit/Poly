@@ -3,17 +3,21 @@
 
 #[cfg(feature = "native")]
 use std::collections::HashMap;
+#[cfg(all(feature = "native", not(target_os = "macos")))]
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "native")]
-use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "native")]
 use once_cell::sync::Lazy;
 
+#[cfg(all(feature = "native", not(target_os = "macos")))]
+use std::sync::mpsc::channel;
 #[cfg(feature = "native")]
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::Sender;
 
 /// Window ID counter
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_os = "macos")))]
 static WINDOW_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Window position
@@ -247,52 +251,66 @@ pub static WINDOW_REGISTRY: Lazy<Arc<Mutex<HashMap<u64, WindowInfo>>>> = Lazy::n
 /// Create a new window
 #[cfg(feature = "native")]
 pub fn create_window(config: WindowConfig) -> Result<WindowHandle, String> {
-    use std::thread;
-    
-    let id = WINDOW_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let title = config.title.clone();
-    
-    // Create channel for commands
-    let (tx, rx) = channel::<WindowCommand>();
-    
-    // Create shared state
-    let state = Arc::new(Mutex::new(WindowState {
-        id,
-        title: title.clone(),
-        width: config.width,
-        height: config.height,
-        x: 0,
-        y: 0,
-        is_visible: config.visible,
-        is_minimized: false,
-        is_maximized: config.maximized,
-        is_fullscreen: config.fullscreen,
-        is_focused: config.focused,
-    }));
-    
-    // Register window
+    #[cfg(target_os = "macos")]
     {
-        let mut registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Lock error: {}", e))?;
-        registry.insert(id, WindowInfo { 
-            title, 
-            sender: tx,
-            state: Arc::clone(&state),
-        });
+        // tao requires the EventLoop, Window and WebView to be created on the main
+        // thread on macOS, so spawning a window in its own thread is not possible.
+        let _ = config;
+        return Err(
+            "Creating additional native windows is not supported on macOS yet; use the main application window."
+                .to_string(),
+        );
     }
-    
-    // Spawn window in new thread
-    thread::spawn(move || {
-        if let Err(e) = run_window(id, config, rx, state) {
-            eprintln!("Window {} error: {}", id, e);
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        use std::thread;
+
+        let id = WINDOW_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let title = config.title.clone();
+
+        // Create channel for commands
+        let (tx, rx) = channel::<WindowCommand>();
+
+        // Create shared state
+        let state = Arc::new(Mutex::new(WindowState {
+            id,
+            title: title.clone(),
+            width: config.width,
+            height: config.height,
+            x: 0,
+            y: 0,
+            is_visible: config.visible,
+            is_minimized: false,
+            is_maximized: config.maximized,
+            is_fullscreen: config.fullscreen,
+            is_focused: config.focused,
+        }));
+
+        // Register window
+        {
+            let mut registry = WINDOW_REGISTRY.lock().map_err(|e| format!("Lock error: {}", e))?;
+            registry.insert(id, WindowInfo {
+                title,
+                sender: tx,
+                state: Arc::clone(&state),
+            });
         }
-        
-        // Unregister on close
-        if let Ok(mut registry) = WINDOW_REGISTRY.lock() {
-            registry.remove(&id);
-        }
-    });
-    
-    Ok(WindowHandle { id })
+
+        // Spawn window in new thread
+        thread::spawn(move || {
+            if let Err(e) = run_window(id, config, rx, state) {
+                eprintln!("Window {} error: {}", id, e);
+            }
+
+            // Unregister on close
+            if let Ok(mut registry) = WINDOW_REGISTRY.lock() {
+                registry.remove(&id);
+            }
+        });
+
+        Ok(WindowHandle { id })
+    }
 }
 
 /// Close a window by ID
@@ -454,25 +472,45 @@ fn send_command(id: u64, cmd: WindowCommand) -> Result<(), String> {
 // Native Window Implementation
 // ============================================
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_os = "macos")))]
 fn run_window(
     id: u64, 
     config: WindowConfig, 
     rx: std::sync::mpsc::Receiver<WindowCommand>,
     state: Arc<Mutex<WindowState>>
 ) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    use tao::platform::windows::EventLoopBuilderExtWindows;
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    use tao::platform::unix::EventLoopBuilderExtUnix;
+
     use tao::{
         event::{Event, WindowEvent},
         event_loop::{ControlFlow, EventLoopBuilder},
         window::WindowBuilder,
         dpi::{LogicalSize, LogicalPosition, PhysicalPosition},
-        platform::windows::EventLoopBuilderExtWindows,
     };
     use wry::WebViewBuilder;
     
-    let event_loop = EventLoopBuilder::new()
-        .with_any_thread(true)
-        .build();
+    let mut event_loop_builder = EventLoopBuilder::new();
+    // Allow the EventLoop to be created off the main thread where the platform
+    // exposes such an extension; macOS has no such extension (see create_window).
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    event_loop_builder.with_any_thread(true);
+    let event_loop = event_loop_builder.build();
     
     let mut builder = WindowBuilder::new()
         .with_title(&config.title)
@@ -777,7 +815,7 @@ fn run_window(
     });
 }
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_os = "macos")))]
 fn handle_ipc_message(message: &str, window: &tao::window::Window, fullscreen_restore_maximized: &Mutex<bool>) {
     match message {
         "minimize" => window.set_minimized(true),
@@ -811,7 +849,7 @@ fn handle_ipc_message(message: &str, window: &tao::window::Window, fullscreen_re
     }
 }
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_os = "macos")))]
 fn get_native_shortcut_script() -> String {
     r#"
 window.addEventListener('keydown', function(event) {

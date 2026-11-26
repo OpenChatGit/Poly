@@ -14,7 +14,7 @@ Poly combines a Rust application runtime with web frontends. The CLI can create 
 Install the native CLI from this repository:
 
 ```sh
-cargo install --git https://github.com/OpenChatGit/Poly poly-framework --features native
+cargo install --git https://github.com/OpenChatGit/Poly poly-framework
 ```
 
 Create a starter project with a frontend framework:
@@ -82,7 +82,7 @@ Documentation may describe experimental or incomplete interfaces. Check each sec
 ```sh
 git clone https://github.com/OpenChatGit/Poly.git
 cd Poly
-cargo build --release -p poly-framework --features native
+cargo build --release -p poly-framework
 ```
 
 The resulting CLI executable is named `poly`.

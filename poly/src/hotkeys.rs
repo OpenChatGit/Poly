@@ -1,44 +1,57 @@
-//! Global hotkey registration for Poly (Windows only)
-//! hotkey_register(combo, callback_name) -> id
-//! hotkey_unregister(id)
-//! hotkey_poll() -> list of triggered callback names
+//! Global hotkey registration for Poly.
+//!
+//! Global hotkeys are implemented on **Windows only** today, using the Win32
+//! `RegisterHotKey`/`UnregisterHotKey` API plus a background message-loop thread.
+//!
+//! On other platforms the same public API is still available (when the `native`
+//! feature is enabled) so that host applications compile unchanged, but
+//! `register_hotkey` returns an `Err` stating that global hotkeys are only
+//! implemented on Windows, `unregister_hotkey` returns `Ok(())`, and
+//! `poll_hotkey_events` returns an empty `Vec`.
+//!
+//! API surface:
+//! - `register_hotkey(combo, callback_name) -> Result<i32, String>`
+//! - `unregister_hotkey(id) -> Result<(), String>`
+//! - `poll_hotkey_events() -> Vec<String>`
+//!
+//! When the `native` feature is disabled this module is intentionally empty.
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 use std::collections::HashMap;
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 use std::sync::{Arc, Mutex};
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 use once_cell::sync::Lazy;
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     RegisterHotKey, UnregisterHotKey,
     MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, HOT_KEY_MODIFIERS,
 };
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
 /// Maps hotkey id -> callback function name
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 static HOTKEY_MAP: Lazy<Arc<Mutex<HashMap<i32, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
 /// Pending hotkey events (callback names) to be polled
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 static HOTKEY_EVENTS: Lazy<Arc<Mutex<Vec<String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 static HOTKEY_THREAD_STARTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 static ID_CTR: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(1);
 
 /// Parse a combo string like "ctrl+shift+a" into (modifiers, vk_code)
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 fn parse_combo(combo: &str) -> Result<(HOT_KEY_MODIFIERS, u32), String> {
     let lower = combo.to_lowercase();
     let parts: Vec<&str> = lower.split('+').collect();
@@ -84,7 +97,7 @@ fn parse_combo(combo: &str) -> Result<(HOT_KEY_MODIFIERS, u32), String> {
 }
 
 /// Start the background message loop thread (once)
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 fn ensure_thread() {
     if HOTKEY_THREAD_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -109,7 +122,7 @@ fn ensure_thread() {
 }
 
 /// Register a global hotkey. Returns the hotkey id.
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 pub fn register_hotkey(combo: &str, callback: &str) -> Result<i32, String> {
     let (mods, vk) = parse_combo(combo)?;
     ensure_thread();
@@ -130,7 +143,7 @@ pub fn register_hotkey(combo: &str, callback: &str) -> Result<i32, String> {
 }
 
 /// Unregister a hotkey by id.
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 pub fn unregister_hotkey(id: i32) -> Result<(), String> {
     unsafe {
         UnregisterHotKey(HWND(std::ptr::null_mut()), id)
@@ -144,10 +157,35 @@ pub fn unregister_hotkey(id: i32) -> Result<(), String> {
 }
 
 /// Poll pending hotkey events registered by the host app.
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", target_os = "windows"))]
 pub fn poll_hotkey_events() -> Vec<String> {
     HOTKEY_EVENTS
         .lock()
         .map(|mut v| std::mem::take(&mut *v))
         .unwrap_or_default()
+}
+
+/// Register a global hotkey. Returns the hotkey id.
+///
+/// Global hotkeys are only implemented on Windows; this stub always fails.
+#[cfg(all(feature = "native", not(target_os = "windows")))]
+pub fn register_hotkey(_combo: &str, _callback: &str) -> Result<i32, String> {
+    Err("Global hotkeys are only implemented on Windows.".to_string())
+}
+
+/// Unregister a hotkey by id.
+///
+/// Global hotkeys are only implemented on Windows; this stub is a no-op.
+#[cfg(all(feature = "native", not(target_os = "windows")))]
+pub fn unregister_hotkey(_id: i32) -> Result<(), String> {
+    Ok(())
+}
+
+/// Poll pending hotkey events registered by the host app.
+///
+/// Global hotkeys are only implemented on Windows; this stub always returns
+/// an empty list.
+#[cfg(all(feature = "native", not(target_os = "windows")))]
+pub fn poll_hotkey_events() -> Vec<String> {
+    vec![]
 }

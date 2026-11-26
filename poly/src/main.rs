@@ -279,6 +279,10 @@ enum Commands {
         /// Create installer/package
         #[arg(long)]
         installer: bool,
+
+        /// Installer format for --installer (macos: dmg, pkg; windows: exe; linux: appimage)
+        #[arg(long, value_name = "FORMAT")]
+        installer_format: Option<String>,
         
         /// Sign the executable (requires certificate)
         #[arg(long)]
@@ -648,11 +652,11 @@ fn main() {
             }
         },
         Some(Commands::Run { path, release, native, browser, ui_height }) => run_app_result(&path, release, native, browser, ui_height),
-        Some(Commands::Build { path, target, release, installer, sign, ci }) => { 
+        Some(Commands::Build { path, target, release, installer, installer_format, sign, ci }) => { 
             if ci {
                 build::generate_ci_workflow(Path::new(&path))
             } else {
-                build_app(&path, &target, release, installer, sign)
+                build_app(&path, &target, release, installer, installer_format.as_deref(), sign)
             }
         },
         #[cfg(feature = "cef-build-util")]
@@ -685,10 +689,15 @@ fn main() {
             // Check if we're running as a bundled app (bundle folder or poly.toml next to exe)
             if let Ok(exe_path) = std::env::current_exe() {
                 if let Some(exe_dir) = exe_path.parent() {
-                    let bundle_dir = exe_dir.join("bundle");
+                    let bundle_dir = build::bundle_source_dir(exe_dir);
                     let poly_toml = exe_dir.join("poly.toml");
                     let bundle_poly_toml = bundle_dir.join("poly.toml");
-                    
+
+                    // A macOS `.app` keeps its data under Contents/Resources. Hand
+                    // `run_native_app` the directory that contains `bundle/` so it
+                    // resolves the same layout on every platform.
+                    let app_root = build::bundle_project_dir(exe_dir).unwrap_or_else(|| exe_dir.to_path_buf());
+
                     // If bundle exists, run as native app
                     if bundle_dir.exists() && (bundle_poly_toml.exists() || poly_toml.exists()) {
                         // Hide console window on Windows when running as bundled app
@@ -706,7 +715,7 @@ fn main() {
                         }
                         
                         // Run native app from bundle (default: no browser mode, ui_height 80)
-                        run_native_app(exe_dir, false, false, 80);
+                        run_native_app(&app_root, false, false, 80);
                         return;
                     }
                 }
