@@ -65,8 +65,6 @@ arboard = { version = "3.4", optional = true }
 notify-rust = { version = "4", optional = true }
 # SQLite database
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
-# Windows API for frameless windows
-windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_System_RestartManager", "Win32_UI_Input_KeyboardAndMouse"], optional = true }
 # Raw window handle for WebView
 raw-window-handle = { version = "0.6", optional = true }
 # Optional Chromium Embedded Framework runtime. Kept out of the default native
@@ -75,6 +73,14 @@ cef = { version = "156.2.0", optional = true, default-features = false }
 # Window shadows for frameless windows
 # Note: Disabled due to raw-window-handle version conflict with tao/wry
 # window-shadows = { version = "0.2", optional = true }
+
+# Unix syscalls (flock for single-instance locking)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Windows API for frameless windows
+windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_System_RestartManager", "Win32_UI_Input_KeyboardAndMouse"], optional = true }
 
 [features]
 default = []
