@@ -65,9 +65,13 @@ fn try_acquire_lock(app_id: &str) -> Result<bool, String> {
 fn try_acquire_lock(app_id: &str) -> Result<bool, String> {
     let lock_path = get_lock_path(app_id);
     
+    // `truncate` is deliberately kept off: opening a lock file that another
+    // instance already holds must not clobber it. The handle stays bound to
+    // `file` (so the fd is still open) until `flock` has been attempted below.
     let file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(false)
         .open(&lock_path)
         .map_err(|e| e.to_string())?;
     
@@ -75,13 +79,19 @@ fn try_acquire_lock(app_id: &str) -> Result<bool, String> {
     #[cfg(unix)]
     {
         use std::os::unix::io::AsRawFd;
+        
+        // `file` is still alive here, so `fd` refers to an open descriptor.
         let fd = file.as_raw_fd();
         let result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
         
         if result == 0 {
+            // Ownership moves into LOCK_FILE, keeping the fd (and the lock)
+            // alive for the rest of the process lifetime.
             unsafe { LOCK_FILE = Some(file); }
             Ok(true)
         } else {
+            // Dropping `file` closes the fd here. We never held the lock, so
+            // the other instance's lock is unaffected.
             Ok(false)
         }
     }
