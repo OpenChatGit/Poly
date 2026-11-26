@@ -83,7 +83,7 @@ libc = "0.2"
 windows = { version = "0.58", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_LibraryLoader", "Win32_System_Console", "Win32_System_Registry", "Win32_System_RestartManager", "Win32_UI_Input_KeyboardAndMouse"], optional = true }
 
 [features]
-default = []
+default = ["native"]
 experimental-virtual-drive = ["native"]
 native = ["wry", "tao", "image", "rfd", "semver", "zip", "self_update", "tray-icon", "muda", "sha2", "flate2", "tar", "arboard", "notify-rust", "windows", "raw-window-handle", "rusqlite", "regex", "adblock", "rayon"]
 # CEF is an explicit renderer backend so projects can opt into CEF distribution
