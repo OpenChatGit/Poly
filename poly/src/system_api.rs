@@ -381,6 +381,29 @@ pub(super) fn handle_system_api(fn_name: &str, args: &serde_json::Value) -> Stri
                 Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
             }
         }
+        "__poly_fs_delete" => {
+            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            if path.is_empty() {
+                return serde_json::json!({"error": "A path is required."}).to_string();
+            }
+            if let Err(error) = poly::permissions::checks::fs_write(path) {
+                return serde_json::json!({"error": error}).to_string();
+            }
+            let metadata = match std::fs::metadata(path) {
+                Ok(metadata) => metadata,
+                Err(e) => return serde_json::json!({"error": e.to_string()}).to_string(),
+            };
+            let result = if metadata.is_dir() {
+                // remove_dir refuses non-empty directories; recursive delete is intentionally not offered.
+                std::fs::remove_dir(path)
+            } else {
+                std::fs::remove_file(path)
+            };
+            match result {
+                Ok(_) => serde_json::json!({"result": true}).to_string(),
+                Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
+            }
+        }
         // Auto-Updater APIs
         "__poly_updater_check_github" => {
             let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("");

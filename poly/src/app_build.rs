@@ -1,6 +1,13 @@
 use super::*;
 
-pub(super) fn build_app(path: &str, target: &str, release: bool, installer: bool, sign: bool) -> Result<(), String> {
+pub(super) fn build_app(
+    path: &str,
+    target: &str,
+    release: bool,
+    installer: bool,
+    installer_format: Option<&str>,
+    sign: bool,
+) -> Result<(), String> {
     let project_path = Path::new(path);
 
     // Check if it's the old-style target (web, native, all)
@@ -33,6 +40,7 @@ pub(super) fn build_app(path: &str, target: &str, release: bool, installer: bool
         release,
         bundle: true,
         installer,
+        installer_format: installer_format.map(str::to_string),
         sign,
     };
 

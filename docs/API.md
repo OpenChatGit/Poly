@@ -25,12 +25,12 @@ Use `poly init --no-install` to create the project without running `npm install`
 
 | Capability | Enable with | Status / notes |
 |---|---|---|
-| Standard desktop framework | `--features native` | Default supported workflow; platform behavior still varies. |
-| NCOS Virtual Drive and native app install flow | `--features "native experimental-virtual-drive"` | Experimental; Windows is the first backend. See [Virtual Drive](#ncos-virtual-drive-layout). |
+| Standard desktop framework | enabled by default | `native` is a default feature, so a plain `cargo build` produces a working CLI. Disable with `--no-default-features`. |
+| NCOS Virtual Drive and native app install flow | `--features experimental-virtual-drive` | Experimental; Windows is the first backend. See [Virtual Drive](#ncos-virtual-drive-layout). |
 | CEF renderer | `--features cef` | Optional; the matching CEF runtime must be packaged. See [CEF setup](../poly/docs/CEF.md). |
 | `poly-ui` crate | separate workspace package | Incomplete prototype; layout and renderer work remains. |
 
-The usual local install command is `cargo install --path poly --features native`. Add experimental features only when you intend to use them. The package is named `poly-framework` on crates.io because `poly` is already registered there.
+The usual local install command is `cargo install --path poly`. The `native` feature is on by default, so it does not need to be named explicitly. Add experimental features only when you intend to use them. The package is named `poly-framework` on crates.io because `poly` is already registered there.
 
 ## API Availability
 
@@ -1527,6 +1527,29 @@ for (const entry of entries) {
 // 📄 todo.md
 ```
 
+### `poly.fs.delete(path)`
+
+Deletes a single file or an empty directory.
+
+Non-empty directories are rejected; there is no recursive delete.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Path to the file or empty directory to delete |
+
+**Returns:** `Promise<boolean>`
+
+Rejects if the path does not exist, so check with `poly.fs.exists` first.
+
+```javascript
+const path = 'notes.txt';
+
+if (await poly.fs.exists(path)) {
+  await poly.fs.delete(path);
+}
+```
+
 ### Practical Example: Save Settings
 
 ```javascript
@@ -2327,6 +2350,11 @@ Browser mode creates a dual-WebView window (UI + Content).
 |--------|------|---------|-------------|
 | `icon_size` | number | 64 | Icon size for window icon |
 | `icon_path` | string | - | Path to app icon (PNG/JPEG; use a multi-size ICO for Windows packaging) |
+| `icon_background` | string | - | Background colour composited behind `icon_path` for platform app icons (for example `"#0d141a"`). Accepts `#rrggbb` or `#rrggbbaa`. Set this when the artwork is a transparent logo that needs a solid tile. |
+
+On macOS the icon is composed into a rounded tile with standard padding, so a
+transparent logo still renders as a proper app icon. The tile colour comes from
+`icon_background` and is independent of the artwork in `icon_path`.
 
 ### [signing.windows] Section
 
@@ -2339,7 +2367,8 @@ Browser mode creates a dual-WebView window (UI + Content).
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `identity` | string | Signing identity |
+| `identity` | string | Developer ID Application identity used to sign the `.app` |
+| `installer_identity` | string | Developer ID Installer identity used by `productsign` for a `.pkg` |
 | `entitlements` | string | Path to entitlements.plist |
 | `team_id` | string | Team ID for notarization |
 
@@ -2375,8 +2404,12 @@ poly build --release --target linux demo-app
 # Build and sign
 poly build --release --sign demo-app
 
-# Create installer
+# Create a distributable installer (a .dmg on macOS, an installer on Windows)
 poly build --release --installer demo-app
+
+# Choose the macOS installer format (.dmg default, or .pkg)
+poly build --release --installer --installer-format pkg demo-app
+poly build --release --installer --installer-format dmg demo-app
 
 # Generate GitHub Actions workflow
 poly build --ci demo-app
@@ -2400,12 +2433,52 @@ Windows is Poly's current native target. macOS and Linux build targets exist, bu
 ```
 demo-app/
 └── dist/
-    └── windows/
-        ├── demo-app.exe    # Standalone executable
-        └── bundle/         # Bundled web assets
-            ├── web/
-            ├── assets/
-            └── poly.toml
+    ├── windows/
+    │   ├── demo-app.exe    # Standalone executable
+    │   └── bundle/         # Bundled web assets
+    │       ├── web/
+    │       ├── assets/
+    │       └── poly.toml
+    └── Demo App.app/       # macOS: launchable app bundle
+        └── Contents/
+            ├── MacOS/Demo App
+            ├── Info.plist
+            └── Resources/
+                ├── bundle/   # Bundled web assets
+                └── icon.icns
+```
+
+On macOS the `.app` is the runnable artifact and is produced by every build, so
+it works when double-clicked in Finder. `--installer` then adds a distributable
+beside it: `demo-app-1.0.0-macos.dmg` by default, or `demo-app-1.0.0-macos.pkg`
+with `--installer-format pkg`. The `.pkg` installs the app into `/Applications`;
+the `.dmg` opens with the app alongside an `/Applications` shortcut.
+
+The `.pkg` carries a `postinstall` script that runs on the machine it is
+installed on. It restores the executable bit on the app's main binary and
+ad-hoc signs the bundle when it is not already validly signed, so an unsigned
+build still launches after installation. A Developer ID signed app passes
+`codesign --verify` and is left untouched, so a real signature is never
+replaced.
+
+Every macOS build also ad-hoc signs the finished `.app`, because the linker
+signs the bare binary before `Resources/` exists and that signature becomes
+invalid once resources are added. Ad-hoc signing requires no certificate and no
+Apple developer account, and satisfies the Apple Silicon requirement that Mach-O
+binaries carry a signature. It does not make the app Gatekeeper-approved, so a
+downloaded copy may still prompt.
+
+`--sign` uses a Developer ID when one is configured, and falls back to ad-hoc
+signing with a warning when it is not. Configure identities with
+`[signing.macos] identity` / `installer_identity` or `POLY_MACOS_IDENTITY` /
+`POLY_MACOS_INSTALLER_IDENTITY`. A `.pkg` is only signed with `productsign` when
+an Installer identity is present; otherwise it stays unsigned.
+
+If a downloaded app is blocked by Gatekeeper, the user can clear the download
+quarantine flag instead of buying a certificate:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Demo App.app"
 ```
 
 ### No Console Window
@@ -2422,6 +2495,7 @@ Built apps automatically run as GUI applications without a console window. This 
 | `--target <platform>` | Target platform (windows/macos/linux/current) |
 | `--sign` | Sign executable (requires certificate) |
 | `--installer` | Create installer/package |
+| `--installer-format <format>` | Installer format for `--installer`; macOS accepts `dmg` (default) or `pkg` |
 | `--ci` | Generate GitHub Actions workflow |
 
 ### Cross-Platform Builds with GitHub Actions
