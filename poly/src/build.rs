@@ -116,6 +116,18 @@ pub struct BuildResult {
 
 /// Main build function
 pub fn build(config: &BuildConfig) -> Result<BuildResult, String> {
+    // Native runtime builds are supported only for the OS running Poly. Resolve
+    // `current` from the host and reject explicit foreign targets before doing
+    // frontend/plugin work, so e.g. a macOS runner never starts a Windows build.
+    let host_platform = Platform::current();
+    if config.platform != Platform::Current && config.platform != host_platform {
+        return Err(format!(
+            "Cannot build a {} app on {}. Run Poly on the target OS, or use `poly build --ci` to generate a per-OS GitHub Actions workflow.",
+            config.platform.name(),
+            host_platform.name(),
+        ));
+    }
+
     let project_path = &config.project_path;
     
     // Read project config
@@ -1495,6 +1507,9 @@ fn create_macos_dmg(
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
+    // Disk images are only created on macOS, where the Unix symlink API is
+    // available. Keep this macOS-only operation out of Windows builds.
+    #[cfg(unix)]
     let _ = std::os::unix::fs::symlink("/Applications", staging.join("Applications"));
 
     let output = Command::new("hdiutil")
