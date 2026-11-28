@@ -1,10 +1,18 @@
 name: Build
 
 on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
 
 jobs:
   # The `poly` crate is the CLI and runtime. It is the crate that broke on
@@ -101,3 +109,69 @@ jobs:
 
       - name: Build
         run: cargo build -p poly-ui --target ${{ matrix.target }}
+
+  # A new package version pushed to master creates a GitHub Release only after
+  # every platform build and test above has passed. Explicit v* tags work too.
+  release:
+    name: Create GitHub release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    needs: [build, build-poly-ui]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Read package version
+        id: package
+        shell: pwsh
+        run: |
+          $manifest = Get-Content poly/Cargo.toml -Raw
+          if ($manifest -notmatch '(?m)^version = "([^"]+)"') { throw 'Could not read poly/Cargo.toml package version.' }
+          $version = $Matches[1]
+          if ($env:GITHUB_REF.StartsWith('refs/tags/v') -and $env:GITHUB_REF_NAME -ne "v$version") { throw "Version tag $env:GITHUB_REF_NAME does not match poly/Cargo.toml version v$version." }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Skip release if this version already exists
+        id: release_check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          $response = Invoke-WebRequest -Uri $uri -Headers @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' } -SkipHttpErrorCheck
+          if ($response.StatusCode -eq 404) {
+            "should_release=true" >> $env:GITHUB_OUTPUT
+          } elseif ($response.StatusCode -eq 200) {
+            "should_release=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Release $tag already exists; skipping duplicate release."
+          } else {
+            throw "GitHub release lookup failed with HTTP $($response.StatusCode)."
+          }
+
+      - name: Verify and package crate
+        if: steps.release_check.outputs.should_release == 'true'
+        run: cargo package --package poly-framework
+
+      - name: Publish GitHub Release with Cargo package
+        if: steps.release_check.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Poly v${{ steps.package.outputs.version }}
+          body: |
+            Poly is an experimental, custom-built Rust framework and command-line tool for creating, developing, building, and running native desktop applications with HTML, CSS, and JavaScript frontends.
+
+            This release is far from production-ready. Features are incomplete, APIs may change, and native support currently targets Windows. See the repository README for setup instructions and current limitations.
+
+            The attached `.crate` file is the Cargo source package. Installing it provides the `poly` command.
+            This release was published automatically after all supported platform builds and tests passed.
+          files: target/package/poly-framework-*.crate
+          fail_on_unmatched_files: true

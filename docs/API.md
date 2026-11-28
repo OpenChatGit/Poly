@@ -119,6 +119,8 @@ poly init --preact
 
 Use `poly reinit` to refresh generated starter files in the current Poly project, with an optional framework such as `poly reinit --svelte`. It asks before changing files; pass `--yes` to skip the prompt. Custom project files and `node_modules` are preserved, while generated framework entries, the starter page, and managed framework dependencies are updated.
 
+Pull requests and pushes to `master` run the cross-platform CI workflow automatically. A version change in `poly/Cargo.toml` pushed to `master` creates a GitHub Release after every platform build and test succeeds; pushing a `v*` tag also triggers release creation.
+
 Each template uses `web/` as its Vite root and writes the production site to `dist/web/`. By default Poly runs `npm install`; pass `--no-install` to skip it. For a new folder, use `poly new my-app --react` (or another supported framework).
 
 For a plain HTML app, use `poly init` without a framework flag. Generated projects include `poly.toml`, `assets/icon.png`, a web entry page, and a centered starter screen with the Poly logo. The generated `icon_path` sets the same logo as the native window icon shown by the operating-system titlebar.

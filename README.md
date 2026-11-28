@@ -29,6 +29,8 @@ poly dev
 
 The templates use Vite and require Node.js and npm. `poly init` creates a project without selecting a frontend framework. Use `poly reinit [--react|--svelte|--vue|--preact]` to refresh generated starter files in an initialized project; custom files and installed `node_modules` are preserved. Add `--no-install` to skip installing npm dependencies during project creation.
 
+Pull requests and pushes to `master` automatically run the cross-platform build and checks. When a new Poly package version is pushed to `master`, CI creates its GitHub Release after all platform builds and tests pass. A `v*` tag can also trigger a release; existing versions are skipped to avoid duplicates. Bump `poly/Cargo.toml` before the next release.
+
 Useful project commands:
 
 ```sh
