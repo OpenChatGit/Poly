@@ -24,7 +24,7 @@ use dev_server::{
     run_dev_server,
 };
 use system_api::handle_system_api;
-use scaffold::{create_project, init_project, npm_command, selected_project_template};
+use scaffold::{create_project, init_project, selected_project_template};
 use polyview_proxy::{handle_polyview_proxy, handle_polyview_proxy_post};
 
 // ANSI color codes for terminal output
@@ -347,6 +347,27 @@ enum Commands {
         #[arg(long)]
         no_install: bool,
     },
+
+    /// Reset Poly-generated scaffold files and initialize the current directory again
+    Reinit {
+        /// Project template (app, react, svelte, vue, preact)
+        #[arg(default_value = "app")]
+        template: String,
+        #[arg(long, conflicts_with_all = ["svelte", "vue", "preact"])]
+        react: bool,
+        #[arg(long, conflicts_with_all = ["react", "vue", "preact"])]
+        svelte: bool,
+        #[arg(long, conflicts_with_all = ["react", "svelte", "preact"])]
+        vue: bool,
+        #[arg(long, conflicts_with_all = ["react", "svelte", "vue"])]
+        preact: bool,
+        /// Create files without running npm install
+        #[arg(long)]
+        no_install: bool,
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
     
     /// Check for updates
     Update,
@@ -436,7 +457,7 @@ fn generate_ai_info(format: &str) {
         "description": "Poly is an experimental Rust desktop framework for HTML, CSS, and JavaScript frontends.",
         "agent_guidance": [
             "Inspect poly.toml, package.json, the frontend entry point, and the installed Poly version before making assumptions.",
-            "Initialize an existing folder with `poly init`; create a new project with `poly new <name>`. Templates are app, react, svelte, vue, and preact.",
+            "Initialize an existing folder with `poly init`; refresh its generated scaffold with `poly reinit`; create a new project with `poly new <name>`. Templates are app, react, svelte, vue, and preact.",
             "Add JavaScript libraries with `poly add <package>` or npm. New projects use package.json, package-lock.json, Vite, and standard ES module imports. Do not add CDN scripts or runtime library injection.",
             "For a plain HTML project, the generated Vite entry is web/src/main.js. Framework templates use their generated source entry. Inspect existing Vite configuration before changing it.",
             "Use `poly dev` for frontend development, `poly dev --native` for a native window with live frontend updates, `poly build` to package, and `poly run --native` to launch the native app.",
@@ -446,6 +467,7 @@ fn generate_ai_info(format: &str) {
         ],
         "quick_start": {
             "initialize_current_folder": "poly init",
+            "refresh_current_scaffold": "poly reinit --svelte",
             "create_react_project": "poly new my-app --react",
             "add_library": "poly add lucide",
             "import_example": "import { exportedName } from 'package-name';",
@@ -476,6 +498,7 @@ fn generate_ai_info(format: &str) {
         },
         "cli_commands": [
             "poly init [--react|--svelte|--vue|--preact] [--no-install]",
+            "poly reinit [--react|--svelte|--vue|--preact] [--no-install] [--yes]",
             "poly new <name> [--template <app|react|svelte|vue|preact>] [--no-install]",
             "poly dev [path] [--native]",
             "poly run [path] [--native] [--release]",
@@ -668,6 +691,10 @@ fn main() {
         Some(Commands::Init { template, react, svelte, vue, preact, no_install }) => {
             selected_project_template(&template, react, svelte, vue, preact)
                 .and_then(|template| init_project(&template, no_install))
+        },
+        Some(Commands::Reinit { template, react, svelte, vue, preact, no_install, yes }) => {
+            selected_project_template(&template, react, svelte, vue, preact)
+                .and_then(|template| scaffold::reinit_project(&template, no_install, yes))
         },
         Some(Commands::Update) => { check_for_updates_interactive(); Ok(()) },
         Some(Commands::Add { package, version }) => packages::add_package(&package, version.as_deref()),

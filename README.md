@@ -1,6 +1,6 @@
 # Poly
 
-![Version](https://img.shields.io/badge/version-0.5.11-blue)
+![Version](https://img.shields.io/badge/version-0.5.15-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Status](https://img.shields.io/badge/status-experimental-orange)
 ![License](https://img.shields.io/badge/license-custom-informational)
@@ -22,11 +22,12 @@ Create a starter project with a frontend framework:
 ```sh
 poly init --react
 # Also available: --svelte, --vue, --preact
+poly reinit --svelte # Refresh generated starter files in an existing project
 cd <project-directory>
 poly dev
 ```
 
-The templates use Vite and require Node.js and npm. `poly init` creates a project without selecting a frontend framework. Add `--no-install` to skip installing npm dependencies during project creation.
+The templates use Vite and require Node.js and npm. `poly init` creates a project without selecting a frontend framework. Use `poly reinit [--react|--svelte|--vue|--preact]` to refresh generated starter files in an initialized project; custom files and installed `node_modules` are preserved. Add `--no-install` to skip installing npm dependencies during project creation.
 
 Useful project commands:
 

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Result<(), String> {
-    use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+    use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
     use std::thread;
     use std::net::TcpListener;
 
@@ -28,7 +28,7 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
         println!();
         println!("  {}POLY{} v{}  {}frontend dev server{}", CYAN, RESET, VERSION, DIM, RESET);
         println!("  {}>{} Starting the Vite frontend...{}", DIM, RESET, RESET);
-        let mut command = crate::scaffold::npm_command();
+        let mut command = crate::scaffold::npm_dev_command();
         command.args(["run", "dev"]);
         if open_browser { command.args(["--", "--open"]); }
         let status = command.current_dir(project_path).status()
@@ -43,6 +43,11 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
         return Err("No entry point found. Create web/index.html.".to_string());
     }
     let entry = entry.unwrap();
+
+    let shutdown_requested = Arc::new(AtomicBool::new(false));
+    let shutdown_signal = Arc::clone(&shutdown_requested);
+    ctrlc::set_handler(move || shutdown_signal.store(true, Ordering::SeqCst))
+        .map_err(|error| format!("Could not register Ctrl+C shutdown handler: {error}"))?;
 
     let (listener, port_was_busy) = match TcpListener::bind(("0.0.0.0", requested_port)) {
         Ok(listener) => (listener, false),
@@ -80,6 +85,7 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
     let project_path_http = project_path_owned.clone();
     let web_dir_http = web_dir_relative.clone();
     let entry_http = entry.clone();
+    let vite_port_http = vite_port;
     // HTTP server thread
     thread::spawn(move || {
         for mut request in server.incoming_requests() {
@@ -112,10 +118,21 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
 
             let response = match url.as_str() {
                 "/" | "/index.html" => {
-                    // Check for custom index.html in web folder
-                    let custom_index = project_path_http.join(&web_dir_http).join("index.html");
-                    if custom_index.exists() {
-                        let mut html = fs::read_to_string(&custom_index).unwrap_or_default();
+                    if let Some(frontend_port) = vite_port_http {
+                        // Framework projects use Vite's `web/` root while
+                        // `poly.toml` points at the production output in
+                        // `dist/web`. Send browser visits on Poly's backend
+                        // port to the live Vite page instead of the fallback
+                        // Poly dev editor.
+                        let frontend_url = format!("http://127.0.0.1:{frontend_port}/");
+                        tiny_http::Response::from_data(Vec::<u8>::new())
+                            .with_status_code(302)
+                            .with_header(tiny_http::Header::from_bytes(&b"Location"[..], frontend_url.as_bytes()).unwrap())
+                    } else {
+                        // Check for custom index.html in web folder
+                        let custom_index = project_path_http.join(&web_dir_http).join("index.html");
+                        if custom_index.exists() {
+                            let mut html = fs::read_to_string(&custom_index).unwrap_or_default();
 
                         // Keep hot reload in the development server. Poly's JavaScript API is now an
                         // imported frontend package instead of a global added by the runtime.
@@ -137,17 +154,18 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
   check();
 }})();
 </script>"#, initial_version = reload_counter_http.load(Ordering::Relaxed), reload_interval = reload_interval);
-                        if html.contains("</body>") {
-                            html = html.replace("</body>", &format!("{}</body>", reload_script));
+                            if html.contains("</body>") {
+                                html = html.replace("</body>", &format!("{}</body>", reload_script));
+                            } else {
+                                html.push_str(&reload_script);
+                            }
+                            tiny_http::Response::from_string(html)
+                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
                         } else {
-                            html.push_str(&reload_script);
+                            let html = generate_dev_html(&project_path_http, &entry_http, reload_counter_http.load(Ordering::Relaxed));
+                            tiny_http::Response::from_string(html)
+                                .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
                         }
-                        tiny_http::Response::from_string(html)
-                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
-                    } else {
-                        let html = generate_dev_html(&project_path_http, &entry_http, reload_counter_http.load(Ordering::Relaxed));
-                        tiny_http::Response::from_string(html)
-                            .with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
                     }
                 }
                 "/__poly_reload" => {
@@ -270,7 +288,7 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
         let backend = format!("http://127.0.0.1:{port}");
         let vite_port = vite_port.expect("Vite port is selected for Vite projects");
         let vite_port_arg = vite_port.to_string();
-        match npm_command()
+        match crate::scaffold::npm_dev_command()
             .args(["run", "dev", "--", "--host", "127.0.0.1", "--port", &vite_port_arg, "--strictPort"])
             .current_dir(project_path)
             .env("POLY_BACKEND_URL", &backend)
@@ -280,6 +298,11 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
                 let mut child = child;
                 let mut ready = false;
                 for _ in 0..80 {
+                    if shutdown_requested.load(Ordering::SeqCst) {
+                        stop_dev_process_tree(&mut child);
+                        println!("\n  {}Stopped Poly dev server.{}", DIM, RESET);
+                        return Ok(());
+                    }
                     if std::net::TcpStream::connect_timeout(
                         &format!("127.0.0.1:{vite_port}").parse().unwrap(),
                         Duration::from_millis(100),
@@ -331,6 +354,13 @@ pub(super) fn run_dev_server(path: &str, port: u16, open_browser: bool) -> Resul
 
     // Watch loop
     loop {
+        if shutdown_requested.load(Ordering::SeqCst) {
+            if let Some(mut child) = vite_process.take() {
+                stop_dev_process_tree(&mut child);
+            }
+            println!("\n  {}Stopped Poly dev server.{}", DIM, RESET);
+            return Ok(());
+        }
         if let Some(child) = vite_process.as_mut() {
             if let Ok(Some(status)) = child.try_wait() {
                 return Err(format!("Vite dev server stopped with {status}. See the Vite output above."));
@@ -539,6 +569,49 @@ fn should_reload(event: &Event) -> bool {
             .map(|ext| matches!(ext, "html" | "css" | "js"))
             .unwrap_or(false)
     })
+}
+
+#[cfg(windows)]
+fn stop_dev_process_tree(child: &mut std::process::Child) {
+    use std::os::windows::process::CommandExt;
+
+    let status = std::process::Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .status();
+    if !matches!(status, Ok(status) if status.success()) {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+fn stop_dev_process_tree(child: &mut std::process::Child) {
+    use std::time::Duration;
+
+    let process_group = -(child.id() as i32);
+    unsafe {
+        libc::kill(process_group, libc::SIGTERM);
+    }
+
+    // Give npm/Vite a short chance to shut down cleanly, then kill the whole
+    // process group so detached Node children cannot keep the terminal busy.
+    for _ in 0..20 {
+        if unsafe { libc::kill(process_group, 0) } != 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    unsafe {
+        libc::kill(process_group, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(any(windows, unix)))]
+fn stop_dev_process_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub(super) fn find_frontend_entry(project_path: &Path) -> Option<std::path::PathBuf> {

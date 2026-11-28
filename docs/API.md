@@ -1,6 +1,6 @@
 # Poly API & Developer Guide
 
-**Current release:** 0.5.11 · **Last reviewed:** 2026-11
+**Current release:** 0.5.15 · **Last reviewed:** 2026-11
 
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
@@ -116,6 +116,8 @@ poly init --svelte
 poly init --vue
 poly init --preact
 ```
+
+Use `poly reinit` to refresh generated starter files in the current Poly project, with an optional framework such as `poly reinit --svelte`. It asks before changing files; pass `--yes` to skip the prompt. Custom project files and `node_modules` are preserved, while generated framework entries, the starter page, and managed framework dependencies are updated.
 
 Each template uses `web/` as its Vite root and writes the production site to `dist/web/`. By default Poly runs `npm install`; pass `--no-install` to skip it. For a new folder, use `poly new my-app --react` (or another supported framework).
 
