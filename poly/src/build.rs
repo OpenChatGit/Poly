@@ -575,52 +575,54 @@ fn print_cargo_output(stdout: &[u8], stderr: &[u8]) {
 
 /// Find the poly crate directory
 fn find_poly_crate() -> Result<std::path::PathBuf, String> {
-    // Try relative to current exe
+    // A custom CARGO_TARGET_DIR, a nested app folder, or a symlinked Cargo
+    // binary changes the relative depth between the executable and the source
+    // workspace. Walk all ancestors instead of assuming target/{debug,release}
+    // is directly under the workspace root.
+    let mut search_roots = Vec::new();
+    // When Poly itself was built from source, Cargo embeds the manifest
+    // directory. This still works if the app being built lives elsewhere or
+    // Cargo writes binaries to a custom target directory.
+    if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        let source_crate = Path::new(manifest_dir);
+        if is_poly_crate(source_crate) {
+            return Ok(source_crate.to_path_buf());
+        }
+    }
     if let Ok(exe_path) = std::env::current_exe() {
-        // Check if we're in target/release or target/debug
-        if let Some(target_dir) = exe_path.parent() {
-            if let Some(parent) = target_dir.parent() {
-                // We might be in workspace/target/release
-                let poly_crate = parent.parent().map(|p| p.join("poly"));
-                if let Some(ref p) = poly_crate {
-                    if p.join("Cargo.toml").exists() {
-                        return Ok(p.clone());
-                    }
-                }
-                // Or workspace root
-                if let Some(workspace) = parent.parent() {
-                    let poly_crate = workspace.join("poly");
-                    if poly_crate.join("Cargo.toml").exists() {
-                        return Ok(poly_crate);
-                    }
-                }
+        if let Some(exe_dir) = exe_path.parent() {
+            search_roots.push(exe_dir.to_path_buf());
+        }
+    }
+    search_roots.push(
+        std::env::current_dir().map_err(|e| format!("Failed to get cwd: {e}"))?,
+    );
+
+    for root in search_roots {
+        for ancestor in root.ancestors() {
+            // Support running from the crate directory itself.
+            if is_poly_crate(ancestor) {
+                return Ok(ancestor.to_path_buf());
+            }
+
+            // Support running anywhere under the workspace root, including
+            // app subdirectories and custom Cargo target directories.
+            let poly_crate = ancestor.join("poly");
+            if is_poly_crate(&poly_crate) {
+                return Ok(poly_crate);
             }
         }
     }
-    
-    // Try current directory
-    let cwd = std::env::current_dir().map_err(|e| format!("Failed to get cwd: {}", e))?;
-    let poly_path = cwd.join("poly");
-    for candidate in [poly_path.join("poly"), poly_path] {
-        let manifest = candidate.join("Cargo.toml");
-        if manifest.is_file()
-            && fs::read_to_string(manifest)
-                .unwrap_or_default()
-                .contains("name = \"poly-framework\"")
-        {
-            return Ok(candidate);
-        }
-    }
-    
-    // Check if we're in the poly crate itself
-    if cwd.join("Cargo.toml").exists() {
-        let content = fs::read_to_string(cwd.join("Cargo.toml")).unwrap_or_default();
-        if content.contains("name = \"poly-framework\"") {
-            return Ok(cwd);
-        }
-    }
-    
-    Err("Could not find poly crate. Make sure you're in the Poly workspace.".to_string())
+
+    Err("Could not find the poly-framework crate. Searched the current directory and the Poly executable's parent directories. Run this command from inside the Poly source workspace, or make sure its `poly` crate folder is present.".to_string())
+}
+
+fn is_poly_crate(path: &Path) -> bool {
+    let manifest = path.join("Cargo.toml");
+    manifest.is_file()
+        && fs::read_to_string(manifest)
+            .map(|content| content.lines().any(|line| line.trim() == "name = \"poly-framework\""))
+            .unwrap_or(false)
 }
 
 /// Create the platform's distributable package.
