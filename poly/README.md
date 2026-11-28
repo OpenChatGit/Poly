@@ -1,11 +1,11 @@
 # Poly Framework
 
-Poly is an experimental, custom-built Rust framework and command-line tool for creating, developing, building, and running native desktop applications with HTML, CSS, and JavaScript frontends. It is far from production-ready. Features are incomplete, APIs may change, and native support currently targets Windows.
+Poly is an experimental, custom-built Rust framework and command-line tool for creating, developing, building, and running native desktop applications with HTML, CSS, and JavaScript frontends. It is far from production-ready. The default Wry runtime builds for Windows x64, Linux x64, and macOS x64/ARM64; feature coverage varies, and some subsystems remain Windows-only or experimental.
 
-The crate is named `poly-framework`; installing it provides the `poly` command:
+The crate is named `poly-framework`; installing the repository source provides the `poly` command:
 
 ```sh
-cargo install poly-framework --version 0.5.11
+cargo install --git https://github.com/OpenChatGit/Poly poly-framework
 poly --help
 ```
 
@@ -20,7 +20,7 @@ poly init --react
 # Also available: --svelte, --vue, --preact
 ```
 
-Templates require Node.js and npm. Use `poly dev`, `poly build`, and `poly run --native` inside the generated project.
+Templates require Node.js and npm. Use `poly dev`, `poly build`, and `poly run --native` inside the generated project. Starting with v0.5.16, prebuilt CLI archives for Windows x64, Linux x64, and Intel/Apple Silicon macOS are attached to [GitHub Releases](https://github.com/OpenChatGit/Poly/releases); Linux requires GTK/WebKitGTK runtime libraries, and macOS binaries are not signed or notarized.
 
 The [docs.rs reference](https://docs.rs/poly-framework/latest/poly/) combines the Rust API with the complete JavaScript API and developer guide, plus CEF setup notes. Read the [project README](https://github.com/OpenChatGit/Poly#readme) for setup and current limitations. Some interfaces are experimental.
 

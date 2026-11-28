@@ -202,10 +202,23 @@ fn find_platform_asset(assets: &[GitHubAsset]) -> Option<String> {
     
     for asset in assets {
         let name_lower = asset.name.to_lowercase();
-        for pattern in &platform_patterns {
-            if name_lower.contains(pattern) {
-                return Some(asset.browser_download_url.clone());
-            }
+        let extension = Path::new(&asset.name)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let installable = {
+            #[cfg(target_os = "windows")]
+            { matches!(extension.as_str(), "exe" | "msi") }
+            #[cfg(target_os = "macos")]
+            { extension == "dmg" }
+            #[cfg(target_os = "linux")]
+            { matches!(extension.as_str(), "appimage" | "deb" | "rpm") }
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+            { false }
+        };
+        if installable && platform_patterns.iter().any(|pattern| name_lower.contains(pattern)) {
+            return Some(asset.browser_download_url.clone());
         }
     }
     None

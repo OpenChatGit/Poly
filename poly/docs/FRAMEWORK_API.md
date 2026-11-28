@@ -5,7 +5,7 @@
 > [!WARNING]
 > **Work in progress:** this guide is not a complete or guaranteed up-to-date specification. Some APIs are platform-dependent, and a few features are unfinished or have known limitations. Verify behavior on the target platform before relying on it.
 >
-> The NCOS Virtual Drive is experimental and excluded from normal builds. Native app embedding is Windows-only today. WebView permission responses, ZIP self-updates, and Linux code signing are not implemented. Poly does not sandbox native executables or arbitrary installer side effects.
+> The default Wry runtime builds for Windows x64, Linux x64, and macOS x64/ARM64; native APIs and dependencies vary by OS. The NCOS Virtual Drive and native app embedding are Windows-only and experimental. WebView permission responses, ZIP self-updates, and Linux code signing are not implemented. Poly does not sandbox native executables or arbitrary installer side effects.
 
 ## Quick Start
 
@@ -1873,7 +1873,7 @@ console.log('Downloaded to:', path);
 
 Installs a downloaded update.
 
-Supported installer formats depend on the host OS. ZIP-based self-replacement is currently unsupported and returns an error; do not treat `download()` success as confirmation that an update can be installed. Linux signing is also not implemented.
+Supported installer formats depend on the host OS. ZIP and `.tar.gz` CLI release archives are for manual installation and cannot be applied by `poly.updater.install()`. ZIP-based self-replacement is unsupported; use a supported OS installer format instead. Linux signing is also not implemented.
 
 ```javascript
 await poly.updater.install(path);
@@ -2362,13 +2362,13 @@ poly build --ci demo-app
 
 ### Target Platforms
 
-Windows is Poly's current native target. macOS and Linux build targets exist, but their native API and packaging support is incomplete and is not at feature parity with Windows. Cross-platform target names do not guarantee every runtime feature works on that platform.
+The default Wry runtime and CLI are built and tested on Windows x64, Linux x64, and macOS x64/ARM64. OS-specific APIs, system dependencies, and packaging behavior vary; this does not imply feature parity. NCOS native app embedding remains Windows-only. Starting with v0.5.16, GitHub Releases provide prebuilt CLI archives for Windows x64, Linux x64, and both macOS architectures; Linux users need compatible GTK and WebKitGTK runtime libraries. macOS CLI binaries are not signed or notarized.
 
 | Target | Aliases | Description |
 |--------|---------|-------------|
 | `current` | - | Build for current OS (default) |
 | `windows` | `win`, `win64` | Windows x64 |
-| `macos` | `mac`, `darwin`, `osx` | macOS x64 |
+| `macos` | `mac`, `darwin`, `osx` | macOS x64 app target; CLI releases include x64 and ARM64 |
 | `linux` | - | Linux x64 |
 
 > **Note:** Cross-compilation (e.g., building Windows on macOS) requires building on the target platform or using GitHub Actions.

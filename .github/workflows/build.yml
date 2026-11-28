@@ -27,10 +27,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            asset: linux-x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            asset: windows-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
+            asset: macos-aarch64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            asset: macos-x86_64
 
     steps:
       - name: Check out source
@@ -68,6 +74,42 @@ jobs:
       - name: Smoke test the CLI
         run: cargo run -p poly-framework --target ${{ matrix.target }} -- --help
 
+      - name: Build release CLI
+        if: github.event_name != 'pull_request'
+        run: cargo build --release -p poly-framework --target ${{ matrix.target }}
+
+      - name: Smoke test release CLI and reinit command
+        if: github.event_name != 'pull_request'
+        run: cargo run --release -p poly-framework --target ${{ matrix.target }} -- reinit --help
+
+      - name: Package Windows CLI
+        if: github.event_name != 'pull_request' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/poly.exe" "dist/poly-${{ matrix.asset }}.exe"
+          Compress-Archive -Path "dist/poly-${{ matrix.asset }}.exe" -DestinationPath "dist/poly-${{ matrix.asset }}.zip"
+
+      - name: Package Linux CLI
+        if: github.event_name != 'pull_request' && runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          tar -czf "dist/poly-${{ matrix.asset }}.tar.gz" -C "target/${{ matrix.target }}/release" poly
+
+      - name: Package macOS CLI
+        if: github.event_name != 'pull_request' && runner.os == 'macOS'
+        run: |
+          mkdir -p dist
+          tar -czf "dist/poly-${{ matrix.asset }}.tar.gz" -C "target/${{ matrix.target }}/release" poly
+
+      - name: Upload CLI release asset
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: poly-cli-${{ matrix.asset }}
+          path: dist/poly-*
+          if-no-files-found: error
+
   # `poly-ui` is an incomplete prototype excluded from the default build, but it
   # is a workspace member, so it must keep compiling on every platform.
   build-poly-ui:
@@ -83,6 +125,8 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
 
     steps:
       - name: Check out source
@@ -122,6 +166,13 @@ jobs:
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v4
+
+      - name: Download platform CLI binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: poly-cli-*
+          path: release-assets
+          merge-multiple: true
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -169,9 +220,23 @@ jobs:
           body: |
             Poly is an experimental, custom-built Rust framework and command-line tool for creating, developing, building, and running native desktop applications with HTML, CSS, and JavaScript frontends.
 
-            This release is far from production-ready. Features are incomplete, APIs may change, and native support currently targets Windows. See the repository README for setup instructions and current limitations.
+            This release is far from production-ready. Features are incomplete and APIs may change. The default Wry CLI/runtime is built for Windows, Linux, and macOS; feature coverage and system requirements vary by OS. See the repository README for setup instructions and current limitations.
 
             The attached `.crate` file is the Cargo source package. Installing it provides the `poly` command.
-            This release was published automatically after all supported platform builds and tests passed.
-          files: target/package/poly-framework-*.crate
+            Platform CLI downloads:
+            - Windows x64: `poly-windows-x86_64.zip` and `poly-windows-x86_64.exe` (the raw executable is used by the Windows updater)
+            - Linux x64: `poly-linux-x86_64.tar.gz` (requires the system WebKitGTK/GTK runtime libraries)
+            - macOS Apple Silicon: `poly-macos-aarch64.tar.gz`
+            - macOS Intel: `poly-macos-x86_64.tar.gz`
+
+            macOS CLI binaries are not signed or notarized.
+
+            The source `.crate` and CLI binaries were built from the same commit after all supported platform builds and tests passed.
+          files: |
+            target/package/poly-framework-*.crate
+            release-assets/poly-windows-x86_64.exe
+            release-assets/poly-windows-x86_64.zip
+            release-assets/poly-linux-x86_64.tar.gz
+            release-assets/poly-macos-aarch64.tar.gz
+            release-assets/poly-macos-x86_64.tar.gz
           fail_on_unmatched_files: true
